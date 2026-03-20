@@ -1,0 +1,2098 @@
+
+from __future__ import annotations
+
+from pathlib import Path
+from datetime import date
+from io import BytesIO
+import re
+
+import numpy as np
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import streamlit as st
+
+
+st.set_page_config(
+    page_title="Records List Intelligence Dashboard",
+    page_icon="🧬",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+CUSTOM_HEADERS = [
+    "Distributor name",
+    "Instrument type",
+    "Installation date",
+    "Customer name",
+    "In Blood Bank",
+    "Address",
+    "ZipCode",
+    "City",
+    "Country",
+    "World Region",
+    "Commercial Region",
+    "Latitude",
+    "Longitude",
+    "Product Line",
+    "Serial number",
+    "Machine Configurations",
+    "Asset condition",
+    "PM plan",
+    "Number of tests per day",
+    "Operational status",
+    "Type of contract",
+    "Contract duration",
+    "Tag",
+    "Notes",
+    "PM last date",
+    "PM frequency",
+    "PM next date",
+    "PM performed On",
+    "CLIA - Adrenal function",
+    "CLIA - Autoimmunity",
+    "CLIA - Bone turnover",
+    "CLIA - Cardiac Markers",
+    "CLIA - Diabetes",
+    "CLIA - EBV",
+    "CLIA - Fertility",
+    "CLIA - Gastroenterology",
+    "CLIA - Growth",
+    "CLIA - Hematology",
+    "CLIA - Hepatitis and Retrovirus",
+    "CLIA - Hypertension",
+    "CLIA - Infectious diseases",
+    "CLIA - PTH",
+    "CLIA - Sepsis",
+    "CLIA - Thrombosis",
+    "CLIA - Thyroid",
+    "CLIA - Torch",
+    "CLIA - Tumor Markers",
+    "CLIA - Vitamin D",
+    "ELISA - Autoimmunity",
+    "ELISA - Hepatitis",
+    "ELISA - Infection Diseases",
+    "ELISA - Murex",
+    "MOLECULAR ASR",
+    "MOLECULAR DAD - Simplexa C Diff Direct kit",
+    "MOLECULAR DAD - Simplexa Flu A/B &RSV Direct kit",
+    "MOLECULAR DAD - Simplexa Group A Strep Direct kit",
+    "MOLECULAR DAD - Simplexa HSV1&2 Direct kit",
+    "MOLECULAR UD - Simplexa BKV kit",
+    "MOLECULAR UD - Simplexa Bordetella Universal Direct",
+    "MOLECULAR UD - Simplexa C Diff Universal Direct",
+    "MOLECULAR UD - Simplexa CMV kit",
+    "MOLECULAR UD - Simplexa Dengue kit",
+    "MOLECULAR UD - Simplexa EBV kit",
+    "MOLECULAR UD - Simplexa Flu A/B & RSV kit",
+    "MOLECULAR UD - Simplexa Influenza A N1N1 (2009) kit",
+    "Other - specify in note field",
+    "_blank",
+]
+
+ASSAY_COLS = CUSTOM_HEADERS[28:-1]
+
+PLOT_TEMPLATE = "plotly_dark"
+PLOT_BG = "rgba(0,0,0,0)"
+GRID = "rgba(255,255,255,0.10)"
+ACCENT = "#4df6ff"
+ACCENT_2 = "#b15cff"
+ACCENT_3 = "#00ff9d"
+WARNING = "#ffb454"
+DANGER = "#ff5d8f"
+TEXT = "#f7fbff"
+MUTED = "#a9b9d6"
+
+APP_CSS = """
+<style>
+:root {
+    --bg1: #040814;
+    --bg2: #090d1d;
+    --card: rgba(12,16,35,0.75);
+    --border: rgba(77,246,255,0.16);
+    --txt: #f7fbff;
+    --muted: #9db0d3;
+}
+.stApp {
+    background:
+        radial-gradient(circle at 12% 8%, rgba(77,246,255,0.10), transparent 22%),
+        radial-gradient(circle at 88% 0%, rgba(177,92,255,0.10), transparent 22%),
+        radial-gradient(circle at 82% 82%, rgba(0,255,157,0.07), transparent 18%),
+        linear-gradient(180deg, #040814 0%, #080c1a 45%, #050712 100%);
+    color: var(--txt);
+}
+.block-container {
+    padding-top: 1rem;
+    padding-bottom: 2rem;
+}
+section[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, rgba(8,12,28,0.97) 0%, rgba(10,14,30,0.97) 100%);
+    border-right: 1px solid rgba(255,255,255,0.06);
+}
+.hero {
+    padding: 1.35rem 1.55rem;
+    border-radius: 24px;
+    border: 1px solid rgba(77,246,255,0.16);
+    background: linear-gradient(135deg, rgba(15,24,50,0.85) 0%, rgba(8,12,28,0.92) 100%);
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.03), 0 20px 45px rgba(0,0,0,0.28);
+    margin-bottom: 1rem;
+}
+.hero h1 { margin: 0; font-size: 2.15rem; letter-spacing: 0.02em; }
+.hero p { margin: 0.45rem 0 0 0; color: var(--muted); }
+.badge-row { display: flex; flex-wrap: wrap; gap: 0.55rem; margin-top: 0.8rem; }
+.badge {
+    padding: 0.3rem 0.75rem; border-radius: 999px; font-size: 0.77rem;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
+}
+.metric-shell {
+    padding: 0.95rem 1rem; border-radius: 20px;
+    background: linear-gradient(180deg, rgba(16,21,42,0.84), rgba(9,13,27,0.86));
+    border: 1px solid rgba(255,255,255,0.08); min-height: 115px;
+}
+.metric-label { font-size: 0.82rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+.metric-value { font-size: 1.9rem; font-weight: 700; margin-top: 0.2rem; }
+.metric-sub { margin-top: 0.2rem; font-size: 0.85rem; color: #c3d0ea; }
+.stTabs [data-baseweb="tab-list"] { gap: 0.45rem; }
+.stTabs [data-baseweb="tab"] { border-radius: 12px; background: rgba(255,255,255,0.04); padding: 0.45rem 0.85rem; }
+.stTabs [aria-selected="true"] {
+    background: rgba(77,246,255,0.12) !important;
+    border: 1px solid rgba(77,246,255,0.30) !important;
+}
+[data-testid="stDataFrame"] {
+    border-radius: 18px; overflow: hidden; border: 1px solid rgba(255,255,255,0.08);
+}
+.small-note { color: var(--muted); font-size: 0.88rem; }
+</style>
+"""
+st.markdown(APP_CSS, unsafe_allow_html=True)
+
+
+def glow_layout(fig: go.Figure, height: int = 420, title_size: int = 18) -> go.Figure:
+    fig.update_layout(
+        template=PLOT_TEMPLATE,
+        height=height,
+        paper_bgcolor=PLOT_BG,
+        plot_bgcolor=PLOT_BG,
+        margin=dict(l=20, r=20, t=82, b=20),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        font=dict(color=TEXT),
+        title_font=dict(size=title_size),
+        hovermode="closest",
+        hoverlabel=dict(bgcolor="#0d1228", font=dict(color=TEXT)),
+    )
+    fig.update_xaxes(showgrid=True, gridcolor=GRID, zeroline=False, automargin=True)
+    fig.update_yaxes(showgrid=True, gridcolor=GRID, zeroline=False, automargin=True)
+    return fig
+
+
+def compute_mapbox_center_zoom(df: pd.DataFrame, lat_col: str = "Latitude", lon_col: str = "Longitude") -> tuple[dict, float]:
+    geo = df.dropna(subset=[lat_col, lon_col]).copy()
+    if geo.empty:
+        return {"lat": 0.0, "lon": 0.0}, 1.0
+
+    lats = pd.to_numeric(geo[lat_col], errors="coerce").dropna()
+    lons = pd.to_numeric(geo[lon_col], errors="coerce").dropna()
+    if lats.empty or lons.empty:
+        return {"lat": 0.0, "lon": 0.0}, 1.0
+
+    min_lat, max_lat = float(lats.min()), float(lats.max())
+    min_lon, max_lon = float(lons.min()), float(lons.max())
+    center = {"lat": (min_lat + max_lat) / 2, "lon": (min_lon + max_lon) / 2}
+
+    lat_span = max(max_lat - min_lat, 0.01)
+    lon_span = max(max_lon - min_lon, 0.01)
+    max_span = max(lat_span, lon_span)
+
+    if len(geo) == 1:
+        zoom = 9.5
+    elif max_span <= 0.05:
+        zoom = 9.0
+    elif max_span <= 0.12:
+        zoom = 8.2
+    elif max_span <= 0.25:
+        zoom = 7.2
+    elif max_span <= 0.5:
+        zoom = 6.3
+    elif max_span <= 1.0:
+        zoom = 5.5
+    elif max_span <= 2.0:
+        zoom = 4.7
+    elif max_span <= 4.0:
+        zoom = 4.0
+    elif max_span <= 8.0:
+        zoom = 3.2
+    elif max_span <= 16.0:
+        zoom = 2.6
+    elif max_span <= 35.0:
+        zoom = 2.0
+    elif max_span <= 70.0:
+        zoom = 1.45
+    else:
+        zoom = 1.0
+
+    return center, zoom
+
+
+def compute_geo_rotation_scale(df: pd.DataFrame, lat_col: str = "Latitude", lon_col: str = "Longitude") -> tuple[dict, float]:
+    geo = df.dropna(subset=[lat_col, lon_col]).copy()
+    if geo.empty:
+        return {"lat": 0.0, "lon": 0.0}, 1.08
+
+    lats = pd.to_numeric(geo[lat_col], errors="coerce").dropna()
+    lons = pd.to_numeric(geo[lon_col], errors="coerce").dropna()
+    if lats.empty or lons.empty:
+        return {"lat": 0.0, "lon": 0.0}, 1.08
+
+    min_lat, max_lat = float(lats.min()), float(lats.max())
+    min_lon, max_lon = float(lons.min()), float(lons.max())
+    center_lat = (min_lat + max_lat) / 2
+    center_lon = (min_lon + max_lon) / 2
+
+    lat_span = max(max_lat - min_lat, 0.3)
+    lon_span = max(max_lon - min_lon, 0.3)
+    cos_lat = max(np.cos(np.radians(center_lat)), 0.35)
+    effective_span = max(lat_span, lon_span * cos_lat)
+
+    if len(geo) == 1:
+        scale = 6.8
+    else:
+        scale = np.clip(95 / (effective_span + 8), 1.08, 7.2)
+
+    return {"lat": center_lat, "lon": center_lon}, float(scale)
+
+
+def dataframe_to_excel_bytes(sheet_map: dict[str, pd.DataFrame]) -> bytes:
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        for sheet_name, df in sheet_map.items():
+            safe_name = re.sub(r"[\\/*?:\[\]]", "_", str(sheet_name))[:31] or "Sheet1"
+            clean_df = df.copy()
+            clean_df.to_excel(writer, sheet_name=safe_name, index=False)
+            ws = writer.sheets[safe_name]
+            ws.freeze_panes = "A2"
+            for idx, col in enumerate(clean_df.columns, start=1):
+                max_len = len(str(col))
+                if not clean_df.empty:
+                    series = clean_df[col].astype(str).replace("<NA>", "").replace("nan", "")
+                    max_len = max(max_len, series.map(len).max())
+                ws.column_dimensions[ws.cell(row=1, column=idx).column_letter].width = min(max(max_len + 2, 12), 42)
+    output.seek(0)
+    return output.getvalue()
+
+
+def metric_card(label: str, value: str, subtitle: str = "") -> None:
+    st.markdown(
+        f"""
+        <div class="metric-shell">
+            <div class="metric-label">{label}</div>
+            <div class="metric-value">{value}</div>
+            <div class="metric-sub">{subtitle}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def safe_text(value, fallback: str = "N/A") -> str:
+    if pd.isna(value):
+        return fallback
+    text = str(value).strip()
+    return text if text else fallback
+
+
+def safe_number_text(value, fallback: str = "0") -> str:
+    if pd.isna(value):
+        return fallback
+    try:
+        val = float(value)
+    except Exception:
+        return fallback
+    return f"{int(val):,}" if float(val).is_integer() else f"{val:,.1f}"
+
+
+def normalize_part_number(value) -> str:
+    if pd.isna(value):
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    if text.startswith('="') and text.endswith('"'):
+        text = text[2:-1]
+    text = text.replace(".0", "").replace(" ", "").replace("\n", "").replace("\t", "")
+    return text.upper()
+
+
+def normalize_key_text(value) -> str:
+    if pd.isna(value):
+        return ""
+    return re.sub(r"[^a-z0-9]+", "", str(value).lower())
+
+
+def infer_distributor_from_filename(filename: str, distributor_options: list[str]) -> list[str]:
+    base = normalize_key_text(Path(filename).stem)
+    if not base:
+        return []
+
+    scored = []
+    for distributor in distributor_options:
+        norm = normalize_key_text(distributor)
+        if not norm:
+            continue
+        score = 0
+        if norm in base:
+            score = max(score, len(norm) + 100)
+        else:
+            raw_tokens = [t for t in re.split(r"[^a-z0-9]+", str(distributor).lower()) if len(t) >= 3]
+            token_hits = sum(1 for token in raw_tokens if token in base)
+            if token_hits:
+                score = token_hits * 10 + len(norm)
+        if score > 0:
+            scored.append((score, distributor))
+
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    return [name for _, name in scored[:5]]
+
+
+def os_upgrade_bucket(value) -> str:
+    text = safe_text(value, "No informado")
+    if text == "Windows 10":
+        return "Windows 10 / OK"
+    if text in {"Windows XP", "Windows Vista", "Windows 7", "Windows 2000"}:
+        return "Legacy / urgente migrar"
+    if text in {"Unknown", "No informado", "Not installed"}:
+        return "Revisar campo OS"
+    return "Otro OS / validar"
+
+
+def format_date_for_hover(value) -> str:
+    if pd.isna(value):
+        return "N/A"
+    try:
+        return pd.to_datetime(value).strftime("%Y-%m-%d")
+    except Exception:
+        return safe_text(value)
+
+
+def to_numeric_series(series: pd.Series) -> pd.Series:
+    cleaned = (
+        series.fillna("")
+        .astype(str)
+        .str.strip()
+        .str.replace(r"[^0-9,\.\-]", "", regex=True)
+        .str.replace(",", ".", regex=False)
+    )
+    return pd.to_numeric(cleaned, errors="coerce")
+
+
+def normalize_instrument_type(value) -> str:
+    text = safe_text(value, "")
+    if ":" in text:
+        text = text.split(":", 1)[1]
+    return text.strip() or safe_text(value)
+
+
+@st.cache_data(show_spinner=False)
+def load_records(file_bytes: bytes) -> pd.DataFrame:
+    content = file_bytes.decode("utf-8-sig", errors="replace").splitlines()
+    rows = [line.split(";") for line in content[1:] if line.strip()]
+    df = pd.DataFrame(rows, columns=CUSTOM_HEADERS)
+    if "_blank" in df.columns:
+        df = df.drop(columns=["_blank"])
+
+    for col in df.columns:
+        if df[col].dtype == object:
+            df[col] = df[col].astype(str).str.strip()
+            df[col] = df[col].replace({"": pd.NA, "None": pd.NA, "nan": pd.NA, "<NA>": pd.NA})
+
+    def unexcel(value):
+        if pd.isna(value):
+            return pd.NA
+        value = str(value).strip()
+        if value.startswith('="') and value.endswith('"'):
+            return value[2:-1]
+        return value
+
+    for col in ["Latitude", "Longitude", "Serial number"]:
+        df[col] = df[col].map(unexcel)
+
+    for col in ["Latitude", "Longitude", "Number of tests per day", "PM frequency", "Contract duration"]:
+        df[col] = to_numeric_series(df[col])
+
+    for col in ["Installation date", "PM last date", "PM next date"]:
+        df[col] = pd.to_datetime(df[col], dayfirst=True, errors="coerce")
+
+    df["Instrument family"] = df["Instrument type"].map(normalize_instrument_type)
+
+    today = pd.Timestamp(date.today())
+    df["Age (years)"] = ((today - df["Installation date"]).dt.days / 365.25).round(1)
+    df["Is in routine"] = df["Operational status"].fillna("").astype(str).str.upper().eq("IN ROUTINE")
+    df["Has geolocation"] = df["Latitude"].notna() & df["Longitude"].notna()
+
+    yes_map = {"yes", "y", "true", "1"}
+    assay_flags = {}
+    for col in ASSAY_COLS:
+        normalized = df[col].fillna("No").astype(str).str.strip()
+        df[col] = normalized
+        assay_flags[f"FLAG::{col}"] = normalized.str.lower().isin(yes_map)
+    if assay_flags:
+        assay_flags_df = pd.DataFrame(assay_flags)
+        df = pd.concat([df, assay_flags_df], axis=1)
+        df["Enabled assay count"] = assay_flags_df.sum(axis=1)
+    else:
+        df["Enabled assay count"] = 0
+
+    base_cols = [c for c in CUSTOM_HEADERS if c != "_blank"]
+    df["Data completeness %"] = (df[base_cols].notna().sum(axis=1) / len(base_cols) * 100).round(1)
+    return df
+
+
+@st.cache_data(show_spinner=False)
+def parse_machine_configuration(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+    parsed_rows = []
+    key_set = set()
+    for raw in df["Machine Configurations"].fillna(""):
+        row_dict = {}
+        text = str(raw).strip()
+        if text:
+            for part in [p.strip() for p in text.split("|") if p.strip()]:
+                if ":" in part:
+                    key, value = part.split(":", 1)
+                    key = key.strip()
+                    value = value.strip()
+                    if value:
+                        row_dict[key] = value
+                        key_set.add(key)
+        parsed_rows.append(row_dict)
+    config_cols = sorted(key_set)
+    if config_cols:
+        cfg_df = pd.DataFrame([{key: row.get(key, pd.NA) for key in config_cols} for row in parsed_rows])
+    else:
+        cfg_df = pd.DataFrame(index=df.index)
+    cfg_df = cfg_df.add_prefix("CFG::")
+    return pd.concat([df.reset_index(drop=True), cfg_df.reset_index(drop=True)], axis=1), config_cols
+
+
+@st.cache_data(show_spinner=False)
+def add_operating_system_columns(df: pd.DataFrame, config_cols: list[str]) -> pd.DataFrame:
+    os_candidates = ["CFG::Operative System", "CFG::ETI-Max 3000 Operative System", "CFG::LQS PC OS"]
+    existing = [col for col in os_candidates if col in df.columns]
+
+    def normalize_os(value):
+        if pd.isna(value):
+            return pd.NA
+        text = str(value).strip()
+        if not text:
+            return pd.NA
+        low = text.lower()
+        if "don't know" in low or "dont know" in low or low == "unknown":
+            return "Unknown"
+        if "not installed" in low:
+            return "Not installed"
+        if "win10" in low or "windows 10" in low:
+            return "Windows 10"
+        if "vista" in low:
+            return "Windows Vista"
+        if "windows 7" in low or low == "win7":
+            return "Windows 7"
+        if "windows xp" in low or low == "xp":
+            return "Windows XP"
+        if "windows 2000" in low:
+            return "Windows 2000"
+        return text
+
+    if existing:
+        os_raw = pd.Series(pd.NA, index=df.index, dtype="object")
+        for col in existing:
+            os_raw = os_raw.fillna(df[col])
+        df["Operating System Raw"] = os_raw
+        df["Operating System"] = os_raw.map(normalize_os)
+    else:
+        df["Operating System Raw"] = pd.NA
+        df["Operating System"] = pd.NA
+
+    cfg_prefix_cols = [f"CFG::{c}" for c in config_cols if f"CFG::{c}" in df.columns]
+    df["Machine config fields populated"] = df[cfg_prefix_cols].notna().sum(axis=1) if cfg_prefix_cols else 0
+    return df
+
+
+@st.cache_data(show_spinner=False)
+def to_csv_download(df: pd.DataFrame) -> bytes:
+    return df.to_csv(index=False).encode("utf-8-sig")
+
+
+def load_table_file(file_bytes: bytes, filename: str) -> pd.DataFrame:
+    name = filename.lower()
+    if name.endswith(".csv"):
+        return pd.read_csv(BytesIO(file_bytes))
+    return pd.read_excel(BytesIO(file_bytes))
+
+
+def detect_stock_columns(df: pd.DataFrame) -> tuple[str | None, str | None, str | None]:
+    normalized = {col: re.sub(r"[^a-z0-9]+", " ", str(col).lower()).strip() for col in df.columns}
+    part_col = qty_col = desc_col = None
+    for col, norm in normalized.items():
+        if part_col is None and ("part number" in norm or norm == "part no" or "product code" in norm or "material" in norm):
+            part_col = col
+        if qty_col is None and ("quantity" in norm or norm == "qty" or "stock" in norm or "cantidad" in norm):
+            qty_col = col
+        if desc_col is None and ("description" in norm or "descripcion" in norm or "product description" in norm):
+            desc_col = col
+    if part_col is None and len(df.columns) >= 1:
+        part_col = df.columns[0]
+    if qty_col is None and len(df.columns) >= 2:
+        qty_col = df.columns[1]
+    if desc_col is None and len(df.columns) >= 3:
+        desc_col = df.columns[2]
+    return part_col, qty_col, desc_col
+
+
+
+@st.cache_data(show_spinner=False)
+def load_spare_master_legacy(file_bytes: bytes) -> dict[str, pd.DataFrame]:
+    book = pd.ExcelFile(BytesIO(file_bytes))
+    mapping = {"LXL Carstock": "LXL", "LXS Carstock": "LXS", "MDX Carstock": "MDX", "EMX Carstock": "EMX"}
+    output = {}
+    for sheet, family in mapping.items():
+        if sheet not in book.sheet_names:
+            continue
+        df = pd.read_excel(book, sheet_name=sheet)
+
+        part_col = next((c for c in df.columns if "PART NUMBER" in str(c).upper()), None)
+        desc_col = next((c for c in df.columns if "DESCRIPTION" in str(c).upper()), None)
+        qty_col = next((c for c in df.columns if "QUANTITY" in str(c).upper()), None)
+        if not part_col or not qty_col:
+            continue
+
+        slim = pd.DataFrame(
+            {
+                "Required Distributor": "",
+                "Required Family": family,
+                "Required Part Number": df[part_col],
+                "Required Description": df[desc_col] if desc_col else pd.NA,
+                "Required Qty": to_numeric_series(df[qty_col]),
+            }
+        )
+        slim["Part Key"] = slim["Required Part Number"].map(normalize_part_number)
+        slim = slim[slim["Part Key"] != ""].copy()
+        slim["Required Description"] = slim["Required Description"].fillna("").astype(str).str.strip()
+        slim["Required Qty"] = pd.to_numeric(slim["Required Qty"], errors="coerce").fillna(0.0)
+        slim = slim.groupby(["Part Key", "Required Family"], as_index=False).agg(
+            {
+                "Required Distributor": "first",
+                "Required Part Number": "first",
+                "Required Description": "first",
+                "Required Qty": "sum",
+            }
+        )
+        output[family] = slim.sort_values(["Required Qty", "Required Part Number"], ascending=[False, True]).reset_index(drop=True)
+    return output
+
+
+def detect_carstock_master_columns(df: pd.DataFrame) -> tuple[str | None, str | None, str | None, str | None, str | None]:
+    normalized = {col: re.sub(r"[^a-z0-9]+", " ", str(col).lower()).strip() for col in df.columns}
+    distributor_col = family_col = part_col = qty_col = desc_col = None
+
+    for col, norm in normalized.items():
+        if distributor_col is None and (
+            "distributor" in norm
+            or norm in {"dealer", "dealer name", "dist", "distributor name"}
+        ):
+            distributor_col = col
+
+        if family_col is None and (
+            "family" in norm
+            or "platform" in norm
+            or "carstock family" in norm
+            or "instrument family" in norm
+            or "family code" in norm
+            or norm in {"instrument type", "instrument", "system"}
+        ):
+            family_col = col
+
+        if part_col is None and (
+            "part number" in norm
+            or "latest part number" in norm
+            or "part no" in norm
+            or "pn" == norm
+            or "material" in norm
+            or "code" == norm
+            or "product code" in norm
+        ):
+            part_col = col
+
+        if qty_col is None and (
+            "required qty" in norm
+            or "required quantity" in norm
+            or "carstock qty" in norm
+            or "car stock qty" in norm
+            or "quantity" in norm
+            or norm in {"qty", "cantidad"}
+        ):
+            qty_col = col
+
+        if desc_col is None and (
+            "description" in norm
+            or "descripcion" in norm
+            or "product description" in norm
+            or "spare part description" in norm
+        ):
+            desc_col = col
+
+    return distributor_col, family_col, part_col, qty_col, desc_col
+
+
+def normalize_family_code(value) -> str:
+    text = normalize_key_text(value)
+    if not text:
+        return ""
+    if "mdx" in text:
+        return "MDX"
+    if "emx" in text:
+        return "EMX"
+    if "xs" in text or "liaisonxs" in text:
+        return "LXS"
+    if "xl" in text or "las" in text or "liaisonxl" in text:
+        return "LXL"
+    return ""
+
+
+def infer_families_from_instruments(instruments: list[str]) -> list[str]:
+    families = []
+    for inst in instruments:
+        fam = normalize_family_code(inst)
+        if fam:
+            families.append(fam)
+    return sorted(set(families))
+
+
+def build_master_slim(
+    df: pd.DataFrame,
+    distributor_col: str | None,
+    family_col: str | None,
+    part_col: str,
+    qty_col: str,
+    desc_col: str | None,
+    fallback_distributor: str = "",
+    fallback_family: str = "",
+) -> pd.DataFrame:
+    slim = pd.DataFrame(
+        {
+            "Required Distributor": df[distributor_col] if distributor_col and distributor_col in df.columns else fallback_distributor,
+            "Required Family": df[family_col] if family_col and family_col in df.columns else fallback_family,
+            "Required Part Number": df[part_col],
+            "Required Description": df[desc_col] if desc_col and desc_col in df.columns else "",
+            "Required Qty": to_numeric_series(df[qty_col]),
+        }
+    )
+    slim["Required Distributor"] = slim["Required Distributor"].fillna("").astype(str).str.strip()
+    slim["Required Family"] = slim["Required Family"].map(normalize_family_code)
+    if fallback_family:
+        slim["Required Family"] = slim["Required Family"].replace("", fallback_family)
+    slim["Required Description"] = slim["Required Description"].fillna("").astype(str).str.strip()
+    slim["Required Qty"] = pd.to_numeric(slim["Required Qty"], errors="coerce").fillna(0.0)
+    slim["Part Key"] = slim["Required Part Number"].map(normalize_part_number)
+    slim["Distributor Key"] = slim["Required Distributor"].map(normalize_key_text)
+    slim = slim[(slim["Part Key"] != "") & (slim["Required Qty"] > 0)].copy()
+    slim = slim.groupby(["Distributor Key", "Required Distributor", "Required Family", "Part Key"], as_index=False).agg(
+        {
+            "Required Part Number": "first",
+            "Required Description": "first",
+            "Required Qty": "sum",
+        }
+    )
+    return slim
+
+
+def detect_price_reference_columns(df: pd.DataFrame) -> tuple[str | None, str | None, str | None, str | None]:
+    normalized = {col: re.sub(r"[^a-z0-9]+", " ", str(col).lower()).strip() for col in df.columns}
+    part_col = desc_col = option2_col = currency_col = None
+    for col, norm in normalized.items():
+        if part_col is None and (
+            "part number" in norm or "latest part number" in norm or norm in {"part no", "pn"} or "material" in norm
+        ):
+            part_col = col
+        if desc_col is None and ("description" in norm or "descripcion" in norm or "product description" in norm):
+            desc_col = col
+        if option2_col is None and ("option 2" in norm or "opt2" in norm):
+            option2_col = col
+        if currency_col is None and "currency" in norm:
+            currency_col = col
+    return part_col, desc_col, option2_col, currency_col
+
+
+def build_price_reference(df: pd.DataFrame, part_col: str, option2_col: str, desc_col: str | None, currency_col: str | None) -> pd.DataFrame:
+    price_df = pd.DataFrame(
+        {
+            "Price Part Number": df[part_col],
+            "Price Description": df[desc_col] if desc_col and desc_col in df.columns else "",
+            "Option 2 Unit Price": to_numeric_series(df[option2_col]),
+            "Currency": df[currency_col] if currency_col and currency_col in df.columns else "EUR",
+        }
+    )
+    price_df["Part Key"] = price_df["Price Part Number"].map(normalize_part_number)
+    price_df["Price Description"] = price_df["Price Description"].fillna("").astype(str).str.strip()
+    price_df["Currency"] = price_df["Currency"].fillna("EUR").astype(str).str.strip().replace("", "EUR")
+    price_df["Option 2 Unit Price"] = pd.to_numeric(price_df["Option 2 Unit Price"], errors="coerce")
+    price_df = price_df[(price_df["Part Key"] != "") & price_df["Option 2 Unit Price"].notna() & (price_df["Option 2 Unit Price"] > 0)].copy()
+    if price_df.empty:
+        return pd.DataFrame(columns=["Part Key", "Option 2 Unit Price", "Currency", "Price Description"])
+    price_df = price_df.groupby("Part Key", as_index=False).agg(
+        {
+            "Option 2 Unit Price": "first",
+            "Currency": "first",
+            "Price Description": "first",
+        }
+    )
+    return price_df
+
+
+@st.cache_data(show_spinner=False)
+def load_carstock_master_bundle(file_bytes: bytes, filename: str) -> dict[str, object]:
+    path = Path(filename)
+    ext = path.suffix.lower()
+
+    legacy_families = {}
+    consolidated_frames = []
+    price_frames = []
+
+    if ext in {".xlsx", ".xls"}:
+        try:
+            book = pd.ExcelFile(BytesIO(file_bytes))
+        except Exception:
+            book = None
+
+        if book is not None:
+            sheet_names = set(book.sheet_names)
+            if any(sheet in sheet_names for sheet in {"LXL Carstock", "LXS Carstock", "MDX Carstock", "EMX Carstock"}):
+                legacy_families = load_spare_master_legacy(file_bytes)
+
+            for sheet in book.sheet_names:
+                try:
+                    df = pd.read_excel(book, sheet_name=sheet)
+                except Exception:
+                    continue
+                if df is None or df.empty:
+                    continue
+
+                price_part_col, price_desc_col, option2_col, currency_col = detect_price_reference_columns(df)
+                if price_part_col and option2_col:
+                    price_ref = build_price_reference(df, price_part_col, option2_col, price_desc_col, currency_col)
+                    if not price_ref.empty:
+                        price_frames.append(price_ref)
+
+                distributor_col, family_col, part_col, qty_col, desc_col = detect_carstock_master_columns(df)
+                if not part_col or not qty_col:
+                    continue
+
+                fallback_family = normalize_family_code(sheet)
+                slim = build_master_slim(
+                    df,
+                    distributor_col=distributor_col,
+                    family_col=family_col,
+                    part_col=part_col,
+                    qty_col=qty_col,
+                    desc_col=desc_col,
+                    fallback_family=fallback_family,
+                )
+                if not slim.empty:
+                    consolidated_frames.append(slim)
+
+    else:
+        df = load_table_file(file_bytes, filename)
+        if df is not None and not df.empty:
+            price_part_col, price_desc_col, option2_col, currency_col = detect_price_reference_columns(df)
+            if price_part_col and option2_col:
+                price_ref = build_price_reference(df, price_part_col, option2_col, price_desc_col, currency_col)
+                if not price_ref.empty:
+                    price_frames.append(price_ref)
+            distributor_col, family_col, part_col, qty_col, desc_col = detect_carstock_master_columns(df)
+            if part_col and qty_col:
+                consolidated_frames.append(
+                    build_master_slim(
+                        df,
+                        distributor_col=distributor_col,
+                        family_col=family_col,
+                        part_col=part_col,
+                        qty_col=qty_col,
+                        desc_col=desc_col,
+                    )
+                )
+
+    if consolidated_frames:
+        consolidated = pd.concat(consolidated_frames, ignore_index=True)
+        consolidated["Required Distributor"] = consolidated["Required Distributor"].fillna("").astype(str).str.strip()
+        consolidated["Required Family"] = consolidated["Required Family"].fillna("").astype(str).str.strip()
+        consolidated["Distributor Key"] = consolidated["Required Distributor"].map(normalize_key_text)
+        consolidated = consolidated.groupby(
+            ["Distributor Key", "Required Distributor", "Required Family", "Part Key"], as_index=False
+        ).agg(
+            {
+                "Required Part Number": "first",
+                "Required Description": "first",
+                "Required Qty": "sum",
+            }
+        )
+    else:
+        consolidated = pd.DataFrame(
+            columns=[
+                "Distributor Key",
+                "Required Distributor",
+                "Required Family",
+                "Part Key",
+                "Required Part Number",
+                "Required Description",
+                "Required Qty",
+            ]
+        )
+
+    if price_frames:
+        price_reference = pd.concat(price_frames, ignore_index=True)
+        price_reference = price_reference.groupby("Part Key", as_index=False).agg(
+            {
+                "Option 2 Unit Price": "first",
+                "Currency": "first",
+                "Price Description": "first",
+            }
+        )
+    else:
+        price_reference = pd.DataFrame(columns=["Part Key", "Option 2 Unit Price", "Currency", "Price Description"])
+
+    distributor_options = sorted([d for d in consolidated["Required Distributor"].dropna().astype(str).unique().tolist() if d.strip()])
+    family_options = sorted([f for f in consolidated["Required Family"].dropna().astype(str).unique().tolist() if f.strip()])
+
+    return {
+        "legacy_families": legacy_families,
+        "consolidated": consolidated,
+        "price_reference": price_reference,
+        "master_distributors": distributor_options,
+        "master_families": family_options,
+    }
+
+
+def build_required_master_from_scope(
+    master_bundle: dict[str, object],
+    assigned_distributor: str,
+    selected_families: list[str],
+) -> tuple[pd.DataFrame, str]:
+    consolidated = master_bundle.get("consolidated", pd.DataFrame())
+    legacy_families = master_bundle.get("legacy_families", {})
+
+    if consolidated is not None and not consolidated.empty:
+        scoped = consolidated.copy()
+        if assigned_distributor and assigned_distributor != "<sin asignar>" and scoped["Distributor Key"].astype(str).str.len().gt(0).any():
+            scoped = scoped[scoped["Distributor Key"].eq(normalize_key_text(assigned_distributor))]
+        if selected_families:
+            scoped = scoped[scoped["Required Family"].isin(selected_families)]
+
+        scoped = scoped.groupby("Part Key", as_index=False).agg(
+            {
+                "Required Part Number": "first",
+                "Required Description": "first",
+                "Required Qty": "sum",
+            }
+        )
+        return scoped.sort_values(["Required Qty", "Required Part Number"], ascending=[False, True]).reset_index(drop=True), "consolidated"
+
+    selected_families = [f for f in selected_families if f in legacy_families]
+    if not selected_families:
+        return pd.DataFrame(columns=["Part Key", "Required Part Number", "Required Description", "Required Qty"]), "legacy"
+
+    scoped = pd.concat([legacy_families[f] for f in selected_families], ignore_index=True)
+    scoped = scoped.groupby("Part Key", as_index=False).agg(
+        {
+            "Required Part Number": "first",
+            "Required Description": "first",
+            "Required Qty": "sum",
+        }
+    )
+    return scoped.sort_values(["Required Qty", "Required Part Number"], ascending=[False, True]).reset_index(drop=True), "legacy"
+
+
+def prepare_uploaded_stock(stock_df: pd.DataFrame, part_col: str, qty_col: str, desc_col: str | None) -> pd.DataFrame:
+    work = stock_df.copy()
+    work["Uploaded Part Number"] = work[part_col]
+    work["Uploaded Qty"] = to_numeric_series(work[qty_col]).fillna(0.0)
+    if desc_col is not None and desc_col in work.columns:
+        work["Uploaded Description"] = work[desc_col]
+    else:
+        work["Uploaded Description"] = ""
+    work["Uploaded Description"] = work["Uploaded Description"].fillna("").astype(str).str.strip()
+    work["Part Key"] = work["Uploaded Part Number"].map(normalize_part_number)
+    work = work[work["Part Key"] != ""].copy()
+    stock_slim = work.groupby("Part Key", as_index=False).agg(
+        {"Uploaded Part Number": "first", "Uploaded Description": "first", "Uploaded Qty": "sum"}
+    )
+    stock_slim["Uploaded Qty"] = pd.to_numeric(stock_slim["Uploaded Qty"], errors="coerce").fillna(0.0)
+    return stock_slim.sort_values(["Uploaded Qty", "Uploaded Part Number"], ascending=[False, True]).reset_index(drop=True)
+
+
+def compare_stock(
+    master_df: pd.DataFrame,
+    stock_df: pd.DataFrame,
+    part_col: str,
+    qty_col: str,
+    desc_col: str | None,
+    price_reference: pd.DataFrame | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    stock_slim = prepare_uploaded_stock(stock_df, part_col, qty_col, desc_col)
+
+    merged = master_df.copy().merge(stock_slim, on="Part Key", how="left")
+    merged["Required Qty"] = pd.to_numeric(merged["Required Qty"], errors="coerce").fillna(0.0)
+    merged["Uploaded Qty"] = pd.to_numeric(merged["Uploaded Qty"], errors="coerce").fillna(0.0)
+    merged["Uploaded Part Number"] = merged["Uploaded Part Number"].fillna("")
+    merged["Uploaded Description"] = merged["Uploaded Description"].fillna("")
+    merged["Qty Gap"] = (merged["Required Qty"] - merged["Uploaded Qty"]).clip(lower=0.0)
+    denominator = merged["Required Qty"].replace(0, np.nan).astype(float)
+    merged["Coverage %"] = ((merged["Uploaded Qty"].astype(float) / denominator) * 100).round(1).fillna(0.0)
+
+    low_mask = (merged["Uploaded Qty"] > 0) & (merged["Uploaded Qty"] < merged["Required Qty"])
+    merged["Status"] = np.where(
+        merged["Qty Gap"] <= 0,
+        "OK",
+        np.where(low_mask, "LOW", "Missing"),
+    )
+
+    if price_reference is not None and not price_reference.empty:
+        merged = merged.merge(price_reference, on="Part Key", how="left")
+    else:
+        merged["Option 2 Unit Price"] = np.nan
+        merged["Currency"] = "EUR"
+        merged["Price Description"] = ""
+
+    merged["Option 2 Unit Price"] = pd.to_numeric(merged["Option 2 Unit Price"], errors="coerce")
+    merged["Currency"] = merged["Currency"].fillna("EUR").astype(str).str.strip().replace("", "EUR")
+    merged["Purchase Qty Option 2"] = merged["Qty Gap"]
+    merged["Option 2 Estimated Cost"] = (merged["Purchase Qty Option 2"] * merged["Option 2 Unit Price"]).round(2)
+
+    extra_df = stock_slim[~stock_slim["Part Key"].isin(master_df["Part Key"])].copy()
+    if not extra_df.empty:
+        extra_df["Status"] = "Extra / no requerido"
+
+    merged = merged.sort_values(["Status", "Qty Gap", "Required Qty"], ascending=[True, False, False]).reset_index(drop=True)
+    extra_df = extra_df.sort_values(["Uploaded Qty", "Uploaded Part Number"], ascending=[False, True]).reset_index(drop=True)
+    return merged, extra_df, stock_slim
+
+def active_config_fields(df: pd.DataFrame, config_keys: list[str]) -> list[str]:
+    active = []
+    for key in config_keys:
+        col = f"CFG::{key}"
+        if col in df.columns and df[col].notna().any():
+            active.append(key)
+    return active
+
+
+st.markdown(
+    """
+    <div class="hero">
+        <h1>Records List Intelligence Dashboard</h1>
+        <p>Dashboard futurista y ejecutivo para explorar la base instalada, machine configuration, sistema operativo y brechas de carstock desde un único entorno.</p>
+        <div class="badge-row">
+            <span class="badge">Python + Streamlit</span>
+            <span class="badge">Base instalada</span>
+            <span class="badge">Machine configuration</span>
+            <span class="badge">Operating system analytics</span>
+            <span class="badge">Spare parts gap analysis</span>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.sidebar.title("⚙️ Filtros")
+uploaded_file = st.sidebar.file_uploader("Sube el archivo Records List (.csv)", type=["csv"])
+
+base_dir = Path(__file__).resolve().parent
+sample_candidates = sorted(base_dir.glob("Records_List_Report*.csv"))
+default_master_candidates = sorted(base_dir.glob("New TP Spare*.xlsx"))
+
+if uploaded_file is not None:
+    raw_df = load_records(uploaded_file.getvalue())
+    source_label = uploaded_file.name
+elif sample_candidates:
+    sample_path = sample_candidates[0]
+    raw_df = load_records(sample_path.read_bytes())
+    source_label = sample_path.name
+else:
+    st.info("Sube el CSV para activar el dashboard.")
+    st.stop()
+
+raw_df, CONFIG_KEYS = parse_machine_configuration(raw_df)
+raw_df = add_operating_system_columns(raw_df, CONFIG_KEYS)
+st.sidebar.caption(f"Fuente activa: {source_label}")
+
+region_options = sorted(raw_df["Commercial Region"].dropna().unique().tolist())
+selected_regions = st.sidebar.multiselect("Región comercial", options=region_options, default=[], placeholder="Selecciona una o varias regiones")
+
+country_base = raw_df.copy()
+if selected_regions:
+    country_base = country_base[country_base["Commercial Region"].isin(selected_regions)]
+country_options = sorted(country_base["Country"].dropna().unique().tolist())
+selected_countries = st.sidebar.multiselect("País", options=country_options, default=[], placeholder="Selecciona uno o varios países")
+
+dist_base = raw_df.copy()
+if selected_regions:
+    dist_base = dist_base[dist_base["Commercial Region"].isin(selected_regions)]
+if selected_countries:
+    dist_base = dist_base[dist_base["Country"].isin(selected_countries)]
+distributor_options = sorted(dist_base["Distributor name"].dropna().unique().tolist())
+selected_distributors = st.sidebar.multiselect("Nombre de distribuidor", options=distributor_options, default=[], placeholder="Selecciona uno o varios distribuidores")
+
+instrument_base = raw_df.copy()
+if selected_regions:
+    instrument_base = instrument_base[instrument_base["Commercial Region"].isin(selected_regions)]
+if selected_countries:
+    instrument_base = instrument_base[instrument_base["Country"].isin(selected_countries)]
+if selected_distributors:
+    instrument_base = instrument_base[instrument_base["Distributor name"].isin(selected_distributors)]
+instrument_options = sorted(instrument_base["Instrument type"].dropna().unique().tolist())
+selected_instruments = st.sidebar.multiselect("Tipo de instrumento", options=instrument_options, default=[], placeholder="Selecciona uno o varios instrumentos")
+
+filtered = raw_df.copy()
+if selected_regions:
+    filtered = filtered[filtered["Commercial Region"].isin(selected_regions)]
+if selected_countries:
+    filtered = filtered[filtered["Country"].isin(selected_countries)]
+if selected_distributors:
+    filtered = filtered[filtered["Distributor name"].isin(selected_distributors)]
+if selected_instruments:
+    filtered = filtered[filtered["Instrument type"].isin(selected_instruments)]
+
+if filtered.empty:
+    st.warning("No hay datos para la combinación de filtros actual.")
+    st.stop()
+
+total_assets = len(filtered)
+country_count = int(filtered["Country"].nunique(dropna=True))
+distributor_count = int(filtered["Distributor name"].nunique(dropna=True))
+instrument_count = int(filtered["Instrument type"].nunique(dropna=True))
+in_routine = int(filtered["Is in routine"].sum())
+
+m1, m2, m3, m4, m5 = st.columns(5)
+with m1:
+    metric_card("Activos filtrados", f"{total_assets:,}", "Base instalada visible")
+with m2:
+    metric_card("Países", f"{country_count}", "Cobertura geográfica filtrada")
+with m3:
+    metric_card("Distribuidores", f"{distributor_count}", "Distribuidores en la vista")
+with m4:
+    metric_card("Instrumentos", f"{instrument_count}", "Tipos de instrumento visibles")
+with m5:
+    metric_card("En rutina", f"{in_routine:,}", f"{(in_routine / total_assets * 100):.1f}% del filtro" if total_assets else "0.0% del filtro")
+
+base_tab, machine_tab, os_tab, process_tab, stock_tab, detail_tab = st.tabs(
+    ["Base instalada", "Machine configuration", "Sistema operativo", "Procesamiento / PM", "Stock / Carstock gap", "Detalle por equipo"]
+)
+
+with base_tab:
+    st.subheader("Base instalada")
+    st.caption("Mapa y analítica de base instalada con enfoque en cobertura geográfica, antigüedad de instalación y estado de despliegue.")
+    geo_df = filtered.dropna(subset=["Latitude", "Longitude"]).copy()
+    if geo_df.empty:
+        st.info("No hay coordenadas válidas para mostrar en el mapa.")
+    else:
+        fig_geo = px.scatter_geo(
+            geo_df,
+            lat="Latitude",
+            lon="Longitude",
+            hover_name="Customer name",
+            hover_data={
+                "Serial number": True,
+                "Instrument type": True,
+                "Country": True,
+                "Distributor name": True,
+                "Operational status": True,
+                "Commercial Region": True,
+                "Latitude": False,
+                "Longitude": False,
+            },
+            height=620,
+            projection="mollweide",
+        )
+        fig_geo.update_traces(
+            marker=dict(size=3, color=ACCENT, opacity=0.98),
+            hovertemplate=(
+                "<b>%{hovertext}</b><br>"
+                "Serie: %{customdata[0]}<br>"
+                "Instrumento: %{customdata[1]}<br>"
+                "País: %{customdata[2]}<br>"
+                "Distribuidor: %{customdata[3]}<br>"
+                "Estado: %{customdata[4]}<br>"
+                "Región comercial: %{customdata[5]}<extra></extra>"
+            ),
+        )
+        fig_geo.update_geos(
+            fitbounds="locations",
+            projection_type="mollweide",
+            showframe=False,
+            bgcolor="rgba(0,0,0,0)",
+            showocean=True,
+            oceancolor="rgba(7,14,28,0.94)",
+            showland=True,
+            landcolor="rgba(16,26,42,0.95)",
+            showcountries=True,
+            countrycolor="rgba(255,255,255,0.08)",
+            showcoastlines=True,
+            coastlinecolor="rgba(77,246,255,0.25)",
+            showlakes=True,
+            lakecolor="rgba(7,14,28,0.94)",
+            lataxis_showgrid=True,
+            lonaxis_showgrid=True,
+            lataxis_gridcolor="rgba(255,255,255,0.10)",
+            lonaxis_gridcolor="rgba(255,255,255,0.10)",
+            lataxis_dtick=15,
+            lonaxis_dtick=30,
+        )
+        fig_geo.update_layout(
+            paper_bgcolor=PLOT_BG,
+            plot_bgcolor=PLOT_BG,
+            margin=dict(l=10, r=10, t=10, b=10),
+            font=dict(color=TEXT),
+            geo=dict(domain=dict(x=[0.02, 0.98], y=[0.11, 0.89])),
+        )
+        st.plotly_chart(fig_geo, use_container_width=True)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        type_df = filtered["Instrument type"].fillna("Unknown").value_counts().reset_index()
+        type_df.columns = ["Instrument type", "Count"]
+        fig_type = px.bar(type_df, x="Count", y="Instrument type", orientation="h", title="Base instalada por tipo de instrumento", text="Count")
+        fig_type.update_traces(marker_color=ACCENT, textposition="outside", hovertemplate="Instrumento: %{y}<br>Activos: %{x}<extra></extra>")
+        fig_type.update_layout(yaxis=dict(categoryorder="total ascending"))
+        st.plotly_chart(glow_layout(fig_type, 470), use_container_width=True)
+
+    with c2:
+        install_df = filtered.dropna(subset=["Installation date"]).copy()
+        if install_df.empty:
+            st.info("No hay fechas de instalación válidas para el filtro actual.")
+        else:
+            install_df["Installation year"] = install_df["Installation date"].dt.year.astype(int)
+            yearly = install_df.groupby("Installation year", dropna=False).size().reset_index(name="Count").sort_values("Installation year")
+            fig_year = px.bar(yearly, x="Installation year", y="Count", title="Instalaciones por año", text="Count")
+            fig_year.update_traces(marker_color=ACCENT_2, textposition="outside", hovertemplate="Año: %{x}<br>Instalaciones: %{y}<extra></extra>")
+            st.plotly_chart(glow_layout(fig_year, 470), use_container_width=True)
+
+    c3, c4 = st.columns(2)
+    with c3:
+        status_series = filtered["Operational status"].fillna("No informado").astype(str)
+        status_class = pd.Series("Installed / Active", index=filtered.index)
+        status_class = status_class.mask(status_series.str.contains("ready", case=False, na=False), "Ready to install")
+        status_class = status_class.mask(status_series.str.contains("transit|customs|shipping", case=False, na=False), "Transit / Customs")
+        status_class = status_class.mask(status_series.str.contains("warehouse|stock", case=False, na=False), "Warehouse")
+        pipeline_df = filtered.copy()
+        pipeline_df["Installation stage"] = status_class
+        pipeline_summary = pipeline_df.groupby(["Instrument type", "Installation stage"], dropna=False).size().reset_index(name="Count")
+        fig_ready = px.bar(pipeline_summary, x="Instrument type", y="Count", color="Installation stage", title="Sistemas instalados vs listos / pipeline")
+        fig_ready.update_traces(hovertemplate="Instrumento: %{x}<br>Etapa: %{fullData.name}<br>Cantidad: %{y}<extra></extra>")
+        fig_ready.update_xaxes(tickangle=-28)
+        st.plotly_chart(glow_layout(fig_ready, 470), use_container_width=True)
+
+    with c4:
+        city_df = (
+            filtered.assign(CityLabel=filtered["City"].fillna("No informado") + " | " + filtered["Country"].fillna("No country"))
+            .groupby("CityLabel", dropna=False)
+            .size()
+            .reset_index(name="Count")
+            .sort_values("Count", ascending=False)
+            .head(15)
+        )
+        fig_city = px.bar(city_df, x="Count", y="CityLabel", orientation="h", title="Análisis por ciudad", text="Count")
+        fig_city.update_traces(marker_color=ACCENT_3, textposition="outside", hovertemplate="Ciudad / País: %{y}<br>Activos: %{x}<extra></extra>")
+        fig_city.update_layout(yaxis=dict(categoryorder="total ascending"))
+        st.plotly_chart(glow_layout(fig_city, 470), use_container_width=True)
+
+    st.markdown("### Tabla general filtrada")
+    visible_columns = [
+        "Commercial Region",
+        "Country",
+        "Distributor name",
+        "Customer name",
+        "Instrument type",
+        "Serial number",
+        "Operational status",
+        "Asset condition",
+        "Installation date",
+        "Number of tests per day",
+        "Operating System",
+        "Machine Configurations",
+    ]
+    st.dataframe(filtered[visible_columns].copy(), use_container_width=True, hide_index=True)
+
+with machine_tab:
+    st.subheader("Machine configuration")
+    applicable_fields = active_config_fields(filtered, CONFIG_KEYS)
+    cfg_cols_prefixed = [f"CFG::{col}" for col in applicable_fields]
+
+    if not cfg_cols_prefixed:
+        st.info("No se detectaron campos aplicables dentro de Machine Configurations para el filtro actual.")
+    else:
+        assets_with_cfg = int(filtered["Machine Configurations"].notna().sum())
+        avg_cfg_fields = filtered["Machine config fields populated"].mean()
+        unique_cfg_fields = len(applicable_fields)
+
+        mc1, mc2, mc3 = st.columns(3)
+        with mc1:
+            metric_card("Equipos con config", f"{assets_with_cfg:,}", "Con información en Machine Configurations")
+        with mc2:
+            metric_card("Campos aplicables", f"{unique_cfg_fields}", "Solo ítems presentes en el filtro actual")
+        with mc3:
+            metric_card("Promedio de campos", f"{avg_cfg_fields:.1f}", "Campos poblados por equipo")
+
+        coverage_df = pd.DataFrame(
+            [{"Config field": col.replace("CFG::", ""), "Populated assets": int(filtered[col].notna().sum())} for col in cfg_cols_prefixed]
+        )
+        coverage_df = coverage_df[coverage_df["Populated assets"] > 0].sort_values("Populated assets", ascending=False)
+
+        fig_cfg_fill = px.bar(
+            coverage_df,
+            x="Populated assets",
+            y="Config field",
+            orientation="h",
+            title="Cobertura por campo aplicable",
+            text="Populated assets",
+        )
+        fig_cfg_fill.update_traces(
+            marker_color=ACCENT,
+            textposition="outside",
+            hovertemplate="Campo: %{y}<br>Equipos con dato: %{x}<extra></extra>",
+        )
+        fig_cfg_fill.update_layout(yaxis=dict(categoryorder="total ascending"))
+        st.plotly_chart(glow_layout(fig_cfg_fill, 520), use_container_width=True)
+
+        selected_cfg_field = st.selectbox("Ítem de machine configuration para analizar", applicable_fields, key="cfg_field_selector")
+        selected_cfg_col = f"CFG::{selected_cfg_field}"
+
+        item_df = filtered[filtered[selected_cfg_col].notna()].copy()
+        item_df["Config Value"] = item_df[selected_cfg_col].astype(str)
+        item_df["Installation date text"] = item_df["Installation date"].map(format_date_for_hover)
+        item_df = item_df.sort_values(["Config Value", "Distributor name", "Customer name", "Serial number"]).reset_index(drop=True)
+        item_df["Point ID"] = np.arange(1, len(item_df) + 1)
+
+        g1, g2 = st.columns(2)
+        with g1:
+            value_dist = item_df["Config Value"].value_counts().reset_index()
+            value_dist.columns = ["Value", "Count"]
+            value_dist = value_dist.head(20)
+            fig_cfg_value = px.bar(
+                value_dist,
+                x="Count",
+                y="Value",
+                orientation="h",
+                title=f"Distribución de valores | {selected_cfg_field}",
+                text="Count",
+            )
+            fig_cfg_value.update_traces(
+                marker_color=ACCENT_2,
+                textposition="outside",
+                hovertemplate="Valor: %{y}<br>Equipos: %{x}<extra></extra>",
+            )
+            fig_cfg_value.update_layout(yaxis=dict(categoryorder="total ascending"))
+            st.plotly_chart(glow_layout(fig_cfg_value, 480), use_container_width=True)
+
+        with g2:
+            fig_cfg_points = px.scatter(
+                item_df,
+                x="Config Value",
+                y="Point ID",
+                color="Config Value",
+                title=f"Detalle por equipo | {selected_cfg_field}",
+                custom_data=[
+                    "Serial number",
+                    "Instrument type",
+                    "Distributor name",
+                    "Customer name",
+                    "Country",
+                    "City",
+                    "Commercial Region",
+                    "Operational status",
+                    "Operating System",
+                    "Installation date text",
+                ],
+            )
+            fig_cfg_points.update_traces(
+                marker=dict(size=8, opacity=0.9),
+                hovertemplate=(
+                    "Valor: %{x}<br>"
+                    "Serie: %{customdata[0]}<br>"
+                    "Instrumento: %{customdata[1]}<br>"
+                    "Distribuidor: %{customdata[2]}<br>"
+                    "Cliente: %{customdata[3]}<br>"
+                    "País: %{customdata[4]}<br>"
+                    "Ciudad: %{customdata[5]}<br>"
+                    "Región: %{customdata[6]}<br>"
+                    "Estado: %{customdata[7]}<br>"
+                    "OS: %{customdata[8]}<br>"
+                    "Instalación: %{customdata[9]}<extra></extra>"
+                ),
+                showlegend=False,
+            )
+            fig_cfg_points.update_yaxes(visible=False, showticklabels=False, title="")
+            fig_cfg_points.update_xaxes(title=selected_cfg_field)
+            st.plotly_chart(glow_layout(fig_cfg_points, 480), use_container_width=True)
+
+        st.markdown("### Tabla ampliada de machine configuration")
+        table_cols = [
+            "Commercial Region",
+            "Country",
+            "Distributor name",
+            "Customer name",
+            "Instrument type",
+            "Serial number",
+            selected_cfg_col,
+            "Operating System",
+            "Operational status",
+        ]
+        machine_table = item_df[table_cols].rename(columns={selected_cfg_col: selected_cfg_field})
+        st.dataframe(machine_table, use_container_width=True, hide_index=True)
+
+with os_tab:
+    st.subheader("Sistema operativo")
+    st.caption("Vista diseñada para identificar instrumentos con sistemas operativos legacy y priorizar migraciones urgentes a Windows 10.")
+    os_df = filtered.copy()
+    os_df["Operating System"] = os_df["Operating System"].fillna("No informado")
+    os_df["OS Upgrade Bucket"] = os_df["Operating System"].map(os_upgrade_bucket)
+    os_df["Installation date display"] = os_df["Installation date"].map(format_date_for_hover)
+
+    systems_with_os = int(filtered["Operating System"].notna().sum())
+    unique_os = int(filtered["Operating System"].nunique(dropna=True))
+    unknown_os = int(os_df["Operating System"].isin(["Unknown", "No informado"]).sum())
+    urgent_mask = os_df["Operating System"].isin(["Windows XP", "Windows Vista", "Windows 7", "Windows 2000"])
+    urgent_count = int(urgent_mask.sum())
+
+    o1, o2, o3, o4 = st.columns(4)
+    with o1:
+        metric_card("Equipos con OS", f"{systems_with_os:,}", "OS identificado desde machine configuration")
+    with o2:
+        metric_card("OS únicos", f"{unique_os}", "Variedad de sistemas operativos")
+    with o3:
+        metric_card("Legacy / urgentes", f"{urgent_count:,}", "XP, Vista, Win7 o Win2000")
+    with o4:
+        metric_card("Sin definir / unknown", f"{unknown_os:,}", "Requiere depuración del dato")
+
+    s1, s2 = st.columns(2)
+    with s1:
+        os_summary = os_df.groupby("Operating System", dropna=False).size().reset_index(name="Count").sort_values("Count", ascending=False)
+        fig_os = px.bar(os_summary, x="Operating System", y="Count", title="Distribución detallada de sistemas operativos", text="Count")
+        fig_os.update_traces(
+            marker_color=ACCENT,
+            textposition="outside",
+            hovertemplate="Sistema operativo: %{x}<br>Equipos: %{y}<extra></extra>",
+        )
+        fig_os.update_xaxes(tickangle=-28)
+        st.plotly_chart(glow_layout(fig_os, 500, title_size=16), use_container_width=True)
+
+    with s2:
+        os_points = os_df[[
+            "Serial number",
+            "Instrument type",
+            "Operating System",
+            "OS Upgrade Bucket",
+            "Distributor name",
+            "Customer name",
+            "Country",
+            "Commercial Region",
+            "Operational status",
+            "Installation date display",
+        ]].copy()
+        fig_os_type = px.scatter(
+            os_points,
+            x="Operating System",
+            y="Serial number",
+            color="OS Upgrade Bucket",
+            title="Qué seriales tienen cada sistema operativo",
+            custom_data=[
+                "Instrument type",
+                "Distributor name",
+                "Customer name",
+                "Country",
+                "Commercial Region",
+                "Operational status",
+                "Installation date display",
+                "OS Upgrade Bucket",
+            ],
+            category_orders={"Operating System": os_summary["Operating System"].tolist()},
+            color_discrete_map={
+                "Windows 10 / OK": ACCENT_3,
+                "Legacy / urgente migrar": DANGER,
+                "Otro OS / validar": WARNING,
+                "Revisar campo OS": ACCENT_2,
+            },
+        )
+        fig_os_type.update_traces(
+            marker=dict(size=11, opacity=0.88),
+            hovertemplate=(
+                "Serial: %{y}<br>"
+                "OS: %{x}<br>"
+                "Instrumento: %{customdata[0]}<br>"
+                "Distribuidor: %{customdata[1]}<br>"
+                "Cliente: %{customdata[2]}<br>"
+                "País: %{customdata[3]}<br>"
+                "Región: %{customdata[4]}<br>"
+                "Estado operativo: %{customdata[5]}<br>"
+                "Instalación: %{customdata[6]}<br>"
+                "Prioridad: %{customdata[7]}<extra></extra>"
+            ),
+        )
+        fig_os_type.update_layout(legend_title_text="Prioridad upgrade")
+        fig_os_type.update_xaxes(tickangle=-28)
+        st.plotly_chart(glow_layout(fig_os_type, 620, title_size=16), use_container_width=True)
+
+    s3, s4 = st.columns(2)
+    with s3:
+        urgent_points = os_df[urgent_mask][[
+            "Serial number",
+            "Instrument type",
+            "Operating System",
+            "Distributor name",
+            "Customer name",
+            "Country",
+            "Commercial Region",
+            "Operational status",
+            "Installation date display",
+        ]].copy()
+        if urgent_points.empty:
+            st.success("No se detectan instrumentos con Windows legacy dentro del filtro actual.")
+        else:
+            urgent_points = urgent_points.sort_values(["Country", "Instrument type", "Serial number"])
+            fig_urgent = px.scatter(
+                urgent_points,
+                x="Country",
+                y="Serial number",
+                color="Instrument type",
+                title="Seriales que requieren actualización urgente a Windows 10",
+                custom_data=[
+                    "Operating System",
+                    "Instrument type",
+                    "Distributor name",
+                    "Customer name",
+                    "Commercial Region",
+                    "Operational status",
+                    "Installation date display",
+                ],
+            )
+            fig_urgent.update_traces(
+                marker=dict(size=12, opacity=0.92),
+                hovertemplate=(
+                    "Serial: %{y}<br>"
+                    "País: %{x}<br>"
+                    "OS actual: %{customdata[0]}<br>"
+                    "Instrumento: %{customdata[1]}<br>"
+                    "Distribuidor: %{customdata[2]}<br>"
+                    "Cliente: %{customdata[3]}<br>"
+                    "Región: %{customdata[4]}<br>"
+                    "Estado operativo: %{customdata[5]}<br>"
+                    "Instalación: %{customdata[6]}<extra></extra>"
+                ),
+            )
+            fig_urgent.update_layout(legend_title_text="Instrumento")
+            fig_urgent.update_xaxes(tickangle=-18)
+            st.plotly_chart(glow_layout(fig_urgent, 620, title_size=16), use_container_width=True)
+
+    with s4:
+        bucket_df = os_df.groupby("OS Upgrade Bucket", dropna=False).size().reset_index(name="Count")
+        order = ["Windows 10 / OK", "Legacy / urgente migrar", "Otro OS / validar", "Revisar campo OS"]
+        bucket_df["order"] = bucket_df["OS Upgrade Bucket"].map({k: i for i, k in enumerate(order)}).fillna(999)
+        bucket_df = bucket_df.sort_values(["order", "Count"], ascending=[True, False])
+        fig_bucket = px.bar(bucket_df, x="OS Upgrade Bucket", y="Count", title="Priorización de acción para upgrade", text="Count")
+        fig_bucket.update_traces(marker_color=ACCENT_2, textposition="outside", hovertemplate="Acción: %{x}<br>Equipos: %{y}<extra></extra>")
+        fig_bucket.update_xaxes(tickangle=-18)
+        st.plotly_chart(glow_layout(fig_bucket, 520, title_size=16), use_container_width=True)
+
+    st.markdown("### Tabla priorizada para migración a Windows 10")
+    urgent_table = os_df[urgent_mask][[
+        "Commercial Region", "Country", "Distributor name", "Customer name", "Instrument type", "Serial number", "Operating System", "Operational status", "Installation date display"
+    ]].copy()
+    if urgent_table.empty:
+        st.info("No hay equipos en categoría urgente para el filtro actual.")
+    else:
+        urgent_table = urgent_table.rename(columns={"Installation date display": "Installation date"})
+        st.dataframe(urgent_table, use_container_width=True, hide_index=True)
+
+    st.markdown("### Tabla de soporte OS")
+    os_table = filtered[[
+        "Commercial Region",
+        "Country",
+        "Distributor name",
+        "Customer name",
+        "Instrument type",
+        "Serial number",
+        "Operating System",
+        "Machine Configurations",
+    ]].copy()
+    st.dataframe(os_table, use_container_width=True, hide_index=True)
+
+with process_tab:
+    st.subheader("Procesamiento, product line y PM planner")
+    st.caption("Nueva pestaña para revisar volumen de procesamiento por serie, líneas de producto activas y planeación de mantenimiento preventivo.")
+
+    proc_df = filtered.copy()
+    proc_df["Number of tests per day"] = pd.to_numeric(proc_df["Number of tests per day"], errors="coerce")
+    proc_df["PM next date display"] = proc_df["PM next date"].map(format_date_for_hover)
+    proc_df["PM last date display"] = proc_df["PM last date"].map(format_date_for_hover)
+    proc_df["Tests/day display"] = proc_df["Number of tests per day"].map(lambda x: safe_number_text(x, "0"))
+
+    p1, p2, p3, p4 = st.columns(4)
+    tests_valid = proc_df["Number of tests per day"].dropna()
+    pm_ready = int(proc_df["PM plan"].notna().sum())
+    upcoming_pm = int(proc_df["PM next date"].between(pd.Timestamp.today().normalize(), pd.Timestamp.today().normalize() + pd.Timedelta(days=90), inclusive="both").sum()) if proc_df["PM next date"].notna().any() else 0
+    product_lines_count = int(proc_df["Product Line"].fillna("").astype(str).str.strip().replace("", pd.NA).dropna().nunique())
+    with p1:
+        metric_card("Tests/día promedio", safe_number_text(tests_valid.mean() if not tests_valid.empty else pd.NA, "0"), "Promedio del filtro")
+    with p2:
+        metric_card("Tests/día máximos", safe_number_text(tests_valid.max() if not tests_valid.empty else pd.NA, "0"), "Serie con mayor procesamiento")
+    with p3:
+        metric_card("Product lines", f"{product_lines_count}", "Líneas de producto detectadas")
+    with p4:
+        metric_card("PM próximos 90 días", f"{upcoming_pm:,}", f"{pm_ready:,} equipos con PM plan")
+
+    g1, g2 = st.columns(2)
+    with g1:
+        tests_df = proc_df.dropna(subset=["Number of tests per day", "Serial number"]).copy()
+        if tests_df.empty:
+            st.info("No hay datos válidos en Number of tests per day para el filtro actual.")
+        else:
+            tests_df = tests_df.sort_values(["Number of tests per day", "Serial number"], ascending=[False, True]).reset_index(drop=True)
+            fig_tests = px.scatter(
+                tests_df,
+                x="Serial number",
+                y="Number of tests per day",
+                color="Instrument type",
+                title="Number of tests/day por cada serie",
+                custom_data=["Customer name", "Distributor name", "Country", "Commercial Region", "Product Line", "Operational status"],
+            )
+            fig_tests.update_traces(
+                marker=dict(size=10, opacity=0.9),
+                hovertemplate=(
+                    "Serie: %{x}<br>"
+                    "Tests/día: %{y}<br>"
+                    "Instrumento: %{fullData.name}<br>"
+                    "Cliente: %{customdata[0]}<br>"
+                    "Distribuidor: %{customdata[1]}<br>"
+                    "País: %{customdata[2]}<br>"
+                    "Región: %{customdata[3]}<br>"
+                    "Product line: %{customdata[4]}<br>"
+                    "Estado: %{customdata[5]}<extra></extra>"
+                )
+            )
+            fig_tests.update_xaxes(tickangle=-60)
+            st.plotly_chart(glow_layout(fig_tests, 520), use_container_width=True)
+
+    with g2:
+        product_series = proc_df["Product Line"].fillna("").astype(str).str.strip()
+        product_rows = []
+        for value in product_series:
+            if not value:
+                continue
+            parts = [p.strip() for p in re.split(r"[\|;,/]", value) if p.strip()]
+            if not parts:
+                parts = [value]
+            product_rows.extend(parts)
+        if not product_rows:
+            st.info("No hay datos válidos en Product Line para el filtro actual.")
+        else:
+            product_line_df = pd.Series(product_rows, name="Product line").value_counts().reset_index()
+            product_line_df.columns = ["Product line", "Count"]
+            product_line_df = product_line_df.head(20)
+            fig_product = px.bar(
+                product_line_df,
+                x="Count",
+                y="Product line",
+                orientation="h",
+                title="Product line performed on the analyzer",
+                text="Count",
+            )
+            fig_product.update_traces(
+                marker_color=ACCENT_2,
+                textposition="outside",
+                hovertemplate="Product line: %{y}<br>Equipos / apariciones: %{x}<extra></extra>",
+            )
+            fig_product.update_layout(yaxis=dict(categoryorder="total ascending"))
+            st.plotly_chart(glow_layout(fig_product, 520), use_container_width=True)
+
+    g3, g4 = st.columns(2)
+    with g3:
+        pm_plan_df = proc_df.copy()
+        pm_plan_df["PM Plan label"] = pm_plan_df["PM plan"].fillna("No informado").astype(str)
+        pm_summary = pm_plan_df.groupby("PM Plan label", dropna=False).size().reset_index(name="Count").sort_values("Count", ascending=False)
+        fig_pm_plan = px.bar(
+            pm_summary,
+            x="PM Plan label",
+            y="Count",
+            title="PM planner | distribución de PM plan",
+            text="Count",
+        )
+        fig_pm_plan.update_traces(
+            marker_color=ACCENT_3,
+            textposition="outside",
+            hovertemplate="PM plan: %{x}<br>Equipos: %{y}<extra></extra>",
+        )
+        fig_pm_plan.update_xaxes(tickangle=-28)
+        st.plotly_chart(glow_layout(fig_pm_plan, 500), use_container_width=True)
+
+    with g4:
+        pm_timeline = proc_df.dropna(subset=["PM next date", "Serial number"]).copy()
+        if pm_timeline.empty:
+            st.info("No hay fechas válidas en PM next date para el filtro actual.")
+        else:
+            today = pd.Timestamp.today().normalize()
+            pm_timeline["PM planner status"] = np.where(
+                pm_timeline["PM next date"] < today,
+                "Overdue",
+                np.where(pm_timeline["PM next date"] <= today + pd.Timedelta(days=90), "Next 90 days", "Planned later"),
+            )
+            fig_pm_timeline = px.scatter(
+                pm_timeline.sort_values("PM next date"),
+                x="PM next date",
+                y="Serial number",
+                color="PM planner status",
+                title="PM planner | calendario por serie",
+                custom_data=["Instrument type", "Customer name", "Distributor name", "Country", "PM plan", "PM frequency", "PM performed On", "PM last date display", "PM next date display"],
+                color_discrete_map={"Overdue": DANGER, "Next 90 days": WARNING, "Planned later": ACCENT},
+            )
+            fig_pm_timeline.update_traces(
+                marker=dict(size=11, opacity=0.9),
+                hovertemplate=(
+                    "Serie: %{y}<br>"
+                    "PM next date: %{customdata[8]}<br>"
+                    "Instrumento: %{customdata[0]}<br>"
+                    "Cliente: %{customdata[1]}<br>"
+                    "Distribuidor: %{customdata[2]}<br>"
+                    "País: %{customdata[3]}<br>"
+                    "PM plan: %{customdata[4]}<br>"
+                    "PM frequency: %{customdata[5]}<br>"
+                    "PM performed on: %{customdata[6]}<br>"
+                    "PM last date: %{customdata[7]}<br>"
+                    "Estado planner: %{fullData.name}<extra></extra>"
+                )
+            )
+            st.plotly_chart(glow_layout(fig_pm_timeline, 500), use_container_width=True)
+
+    st.markdown("### Tabla de soporte para procesamiento / PM")
+    process_table_cols = [
+        "Commercial Region",
+        "Country",
+        "Distributor name",
+        "Customer name",
+        "Instrument type",
+        "Serial number",
+        "Number of tests per day",
+        "Product Line",
+        "PM plan",
+        "PM frequency",
+        "PM performed On",
+        "PM last date",
+        "PM next date",
+    ]
+    st.dataframe(proc_df[process_table_cols].copy(), use_container_width=True, hide_index=True)
+
+with stock_tab:
+    st.subheader("Gap analysis de stock vs carstock requerido")
+    st.caption(
+        "Sube el maestro de referencia y luego el archivo trimestral del distribuidor. El dashboard intentará identificar automáticamente el distribuidor a partir del nombre del archivo y hará el análisis de brecha sin guardar histórico."
+    )
+
+    default_master_bytes = default_master_candidates[0].read_bytes() if default_master_candidates else None
+    default_master_name = default_master_candidates[0].name if default_master_candidates else "No cargado"
+
+    master_upload = st.file_uploader(
+        "Archivo maestro de carstock (consolidado o New TP Spare)",
+        type=["xlsx", "xls", "csv"],
+        key="master_spare_upload",
+    )
+    stock_upload = st.file_uploader(
+        "Archivo de stock reportado por el distribuidor",
+        type=["xlsx", "xls", "csv"],
+        key="distributor_stock_upload",
+    )
+
+    if master_upload is not None:
+        master_bytes = master_upload.getvalue()
+        master_name = master_upload.name
+    elif default_master_bytes is not None:
+        master_bytes = default_master_bytes
+        master_name = default_master_name
+    else:
+        master_bytes = None
+        master_name = None
+
+    if master_bytes is None:
+        st.info("Sube el archivo maestro de carstock para activar esta pestaña.")
+    else:
+        master_bundle = load_carstock_master_bundle(master_bytes, master_name)
+        has_consolidated = not master_bundle["consolidated"].empty
+        has_legacy = bool(master_bundle["legacy_families"])
+
+        if not has_consolidated and not has_legacy:
+            st.warning("No se pudo interpretar el archivo maestro. Debe contener al menos part number y quantity.")
+        else:
+            st.markdown(f"**Archivo maestro activo:** {master_name}")
+            st.markdown(
+                "<div class='small-note'>Lógica activa: detección automática del distribuidor desde el nombre del archivo, inferencia de familias según su base instalada y comparación inmediata contra el carstock requerido.</div>",
+                unsafe_allow_html=True,
+            )
+
+            if stock_upload is None:
+                st.info("Sube ahora el archivo trimestral del distribuidor. Ejemplo recomendado: `ANNAR_stock_Q1_2026.xlsx`.")
+            else:
+                stock_df_raw = load_table_file(stock_upload.getvalue(), stock_upload.name)
+                if stock_df_raw is None or stock_df_raw.empty:
+                    st.warning("El archivo subido no contiene datos legibles.")
+                else:
+                    part_col_guess, qty_col_guess, desc_col_guess = detect_stock_columns(stock_df_raw)
+                    master_distributors = sorted(set(raw_df["Distributor name"].dropna().tolist()) | set(master_bundle["master_distributors"]))
+                    inferred_matches = infer_distributor_from_filename(stock_upload.name, master_distributors)
+                    detected_distributor = inferred_matches[0] if inferred_matches else None
+
+                    if not detected_distributor:
+                        st.error("No pude identificar el distribuidor desde el nombre del archivo.")
+                        st.caption("Renombra el archivo con un formato claro, por ejemplo: `ANNAR_stock_Q1_2026.xlsx`, `Bio-Nuclear_stock_marzo.xlsx` o `Simed Ecuador_carstock.xlsx`.")
+                    else:
+                        distributor_scope = raw_df[raw_df["Distributor name"].eq(detected_distributor)].copy()
+                        distributor_inst = distributor_scope["Instrument type"].dropna().unique().tolist()
+                        family_from_base = infer_families_from_instruments(distributor_inst)
+
+                        if has_consolidated:
+                            consolidated = master_bundle["consolidated"].copy()
+                            dist_key = normalize_key_text(detected_distributor)
+                            dist_specific = consolidated[consolidated["Distributor Key"].eq(dist_key)].copy()
+                            if not dist_specific.empty:
+                                dist_families = sorted([f for f in dist_specific["Required Family"].dropna().unique().tolist() if f])
+                            else:
+                                dist_families = []
+                            available_families = master_bundle["master_families"] or sorted(consolidated["Required Family"].dropna().unique().tolist())
+                        else:
+                            dist_specific = pd.DataFrame()
+                            dist_families = []
+                            available_families = list(master_bundle["legacy_families"].keys())
+
+                        auto_families = [fam for fam in family_from_base if fam in available_families]
+                        if dist_families:
+                            auto_families = [fam for fam in dist_families if fam in available_families] or auto_families
+                        if not auto_families:
+                            auto_families = available_families[:1]
+
+                        s1, s2, s3 = st.columns(3)
+                        with s1:
+                            metric_card("Distribuidor detectado", detected_distributor, "Tomado del nombre del archivo")
+                        with s2:
+                            metric_card("Familias inferidas", ", ".join(auto_families) if auto_families else "N/A", "Según base instalada")
+                        with s3:
+                            metric_card("Instrumentos del distribuidor", f"{len(distributor_inst):,}", "Tipos detectados en la base")
+
+                        info_lines = []
+                        if distributor_inst:
+                            info_lines.append("Instrumentos en base: " + ", ".join(sorted(distributor_inst)))
+                        if inferred_matches and len(inferred_matches) > 1:
+                            info_lines.append("Coincidencias secundarias detectadas en el nombre: " + ", ".join(inferred_matches[1:4]))
+                        if info_lines:
+                            st.caption(" | ".join(info_lines))
+
+                        with st.expander("Ajustes avanzados de lectura del archivo", expanded=False):
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                part_col = st.selectbox(
+                                    "Columna de part number",
+                                    options=stock_df_raw.columns.tolist(),
+                                    index=stock_df_raw.columns.tolist().index(part_col_guess) if part_col_guess in stock_df_raw.columns else 0,
+                                )
+                            with col2:
+                                qty_col = st.selectbox(
+                                    "Columna de cantidad",
+                                    options=stock_df_raw.columns.tolist(),
+                                    index=stock_df_raw.columns.tolist().index(qty_col_guess) if qty_col_guess in stock_df_raw.columns else min(1, len(stock_df_raw.columns) - 1),
+                                )
+                            with col3:
+                                desc_options = ["<sin descripción>"] + stock_df_raw.columns.tolist()
+                                default_desc_index = desc_options.index(desc_col_guess) if desc_col_guess in stock_df_raw.columns else 0
+                                desc_selection = st.selectbox("Columna de descripción", options=desc_options, index=default_desc_index)
+                                desc_col = None if desc_selection == "<sin descripción>" else desc_selection
+
+                            selected_families_stock = st.multiselect(
+                                "Familias a comparar",
+                                options=available_families,
+                                default=auto_families,
+                                key="stock_family_selector_auto",
+                                placeholder="Familias detectadas automáticamente",
+                            )
+
+                        if 'part_col' not in locals():
+                            part_col = part_col_guess
+                            qty_col = qty_col_guess
+                            desc_col = desc_col_guess
+                            selected_families_stock = auto_families
+
+                        if not selected_families_stock:
+                            st.warning("No hay familias seleccionadas para comparar. Ajusta el maestro o la selección avanzada.")
+                        else:
+                            master_df, master_mode = build_required_master_from_scope(
+                                master_bundle=master_bundle,
+                                assigned_distributor=detected_distributor,
+                                selected_families=selected_families_stock,
+                            )
+
+                            if master_df.empty and detected_distributor:
+                                master_df, master_mode = build_required_master_from_scope(
+                                    master_bundle=master_bundle,
+                                    assigned_distributor="<sin asignar>",
+                                    selected_families=selected_families_stock,
+                                )
+
+                            if master_df.empty:
+                                st.warning("No encontré carstock requerido para este distribuidor con las familias inferidas. Revisa el maestro o el nombre del archivo.")
+                            else:
+                                comparison, extra_df, stock_slim = compare_stock(
+                                    master_df,
+                                    stock_df_raw,
+                                    part_col,
+                                    qty_col,
+                                    desc_col,
+                                    price_reference=master_bundle.get("price_reference", pd.DataFrame()),
+                                )
+                                missing_skus = int((comparison["Status"] == "Missing").sum())
+                                low_skus = int((comparison["Status"] == "LOW").sum())
+                                covered_skus = int((comparison["Status"] == "OK").sum())
+                                total_gap = float(comparison["Qty Gap"].sum())
+                                coverage = (covered_skus / len(comparison) * 100) if len(comparison) else 0
+                                extra_skus = int(len(extra_df))
+                                option2_cost = float(pd.to_numeric(comparison["Option 2 Estimated Cost"], errors="coerce").fillna(0).sum())
+                                option2_currency = next((c for c in comparison["Currency"].dropna().astype(str).tolist() if c.strip()), "EUR")
+
+                                sm1, sm2, sm3, sm4, sm5, sm6, sm7 = st.columns(7)
+                                with sm1:
+                                    metric_card("SKUs requeridos", f"{len(comparison):,}", "Carstock esperado")
+                                with sm2:
+                                    metric_card("SKUs OK", f"{covered_skus:,}", f"{coverage:.1f}% del carstock")
+                                with sm3:
+                                    metric_card("SKUs LOW", f"{low_skus:,}", "Tienen stock pero insuficiente")
+                                with sm4:
+                                    metric_card("SKUs Missing", f"{missing_skus:,}", "Sin stock reportado")
+                                with sm5:
+                                    metric_card("Gap total qty", safe_number_text(total_gap, "0"), "Cantidad faltante acumulada")
+                                with sm6:
+                                    metric_card("Compra opción 2", f"{option2_currency} {option2_cost:,.2f}", "Costo estimado para cubrir gap")
+                                with sm7:
+                                    metric_card("Extras", f"{extra_skus:,}", "No incluidos en el maestro")
+
+                                st.caption(
+                                    f"Alcance automático: {detected_distributor} | Familias: {', '.join(selected_families_stock)} | Maestro: {'Consolidado' if master_mode == 'consolidated' else 'Estándar por familia'}"
+                                )
+
+                                g1, g2 = st.columns(2)
+                                with g1:
+                                    status_df = comparison["Status"].value_counts().reset_index()
+                                    status_df.columns = ["Status", "Count"]
+                                    color_map = {"OK": ACCENT_3, "LOW": WARNING, "Missing": DANGER}
+                                    fig_status = px.pie(status_df, names="Status", values="Count", title="Cobertura del carstock", hole=0.52)
+                                    fig_status.update_traces(
+                                        marker=dict(colors=[color_map.get(s, ACCENT) for s in status_df["Status"]]),
+                                        hovertemplate="Estado: %{label}<br>SKUs: %{value}<br>%{percent}<extra></extra>",
+                                    )
+                                    fig_status.update_layout(template=PLOT_TEMPLATE, paper_bgcolor=PLOT_BG, plot_bgcolor=PLOT_BG, font=dict(color=TEXT), height=430)
+                                    st.plotly_chart(fig_status, use_container_width=True)
+
+                                with g2:
+                                    gap_df = comparison[comparison["Qty Gap"] > 0].sort_values(["Qty Gap", "Required Part Number"], ascending=[False, True]).head(15)
+                                    if gap_df.empty:
+                                        st.success("No se detectan faltantes para el distribuidor identificado.")
+                                    else:
+                                        fig_gap = px.bar(
+                                            gap_df,
+                                            x="Qty Gap",
+                                            y="Required Part Number",
+                                            orientation="h",
+                                            title="Top faltantes por cantidad",
+                                            custom_data=["Required Description", "Uploaded Qty", "Required Qty", "Coverage %", "Status", "Option 2 Unit Price", "Option 2 Estimated Cost", "Currency"],
+                                            text="Qty Gap",
+                                        )
+                                        fig_gap.update_traces(
+                                            marker_color=DANGER,
+                                            textposition="outside",
+                                            hovertemplate=(
+                                                "Part number: %{y}<br>"
+                                                "Descripción: %{customdata[0]}<br>"
+                                                "Qty reportada: %{customdata[1]}<br>"
+                                                "Qty requerida: %{customdata[2]}<br>"
+                                                "Cobertura: %{customdata[3]}%<br>"
+                                                "Estado: %{customdata[4]}<br>"
+                                                "Precio opción 2: %{customdata[7]} %{customdata[5]:,.2f}<br>"
+                                                "Costo compra opción 2: %{customdata[7]} %{customdata[6]:,.2f}<br>"
+                                                "Gap: %{x}<extra></extra>"
+                                            ),
+                                        )
+                                        fig_gap.update_layout(yaxis=dict(categoryorder="total ascending"))
+                                        st.plotly_chart(glow_layout(fig_gap, 430), use_container_width=True)
+
+                                st.markdown("### Tabla de brechas")
+                                show_cols = ["Required Part Number", "Required Description", "Required Qty", "Uploaded Qty", "Qty Gap", "Coverage %", "Option 2 Unit Price", "Option 2 Estimated Cost", "Currency", "Status"]
+                                st.dataframe(comparison[show_cols], use_container_width=True, hide_index=True)
+
+                                purchase_df = comparison[comparison["Qty Gap"] > 0][[
+                                    "Required Part Number",
+                                    "Required Description",
+                                    "Qty Gap",
+                                    "Option 2 Unit Price",
+                                    "Option 2 Estimated Cost",
+                                    "Currency",
+                                    "Status",
+                                ]].sort_values(["Option 2 Estimated Cost", "Qty Gap"], ascending=[False, False])
+                                if not purchase_df.empty:
+                                    st.markdown("### Compra sugerida para cerrar el gap (opción 2)")
+                                    st.dataframe(purchase_df, use_container_width=True, hide_index=True)
+
+                                if not extra_df.empty:
+                                    st.markdown("### Partes reportadas que no están en el carstock requerido")
+                                    st.dataframe(
+                                        extra_df[["Uploaded Part Number", "Uploaded Description", "Uploaded Qty", "Status"]],
+                                        use_container_width=True,
+                                        hide_index=True,
+                                    )
+
+                                export_df = comparison[show_cols].copy()
+                                if not extra_df.empty:
+                                    extras_export = extra_df.rename(
+                                        columns={
+                                            "Uploaded Part Number": "Required Part Number",
+                                            "Uploaded Description": "Required Description",
+                                            "Uploaded Qty": "Uploaded Qty",
+                                        }
+                                    )
+                                    extras_export["Required Qty"] = 0
+                                    extras_export["Qty Gap"] = 0
+                                    extras_export["Coverage %"] = 0
+                                    extras_export["Option 2 Unit Price"] = pd.NA
+                                    extras_export["Option 2 Estimated Cost"] = pd.NA
+                                    extras_export["Currency"] = "EUR"
+                                    export_df = pd.concat(
+                                        [
+                                            export_df,
+                                            extras_export[["Required Part Number", "Required Description", "Required Qty", "Uploaded Qty", "Qty Gap", "Coverage %", "Option 2 Unit Price", "Option 2 Estimated Cost", "Currency", "Status"]],
+                                        ],
+                                        ignore_index=True,
+                                    )
+
+                                export_df = export_df.sort_values(["Status", "Qty Gap", "Required Part Number"], ascending=[True, False, True], na_position="last").reset_index(drop=True)
+                                purchase_export = purchase_df.reset_index(drop=True) if not purchase_df.empty else pd.DataFrame(columns=["Required Part Number", "Required Description", "Qty Gap", "Option 2 Unit Price", "Option 2 Estimated Cost", "Currency", "Status"])
+                                if not extra_df.empty:
+                                    extras_export_final = extra_df[["Uploaded Part Number", "Uploaded Description", "Uploaded Qty", "Status"]].copy()
+                                    extras_export_final["__sort_uploaded_part_number"] = extras_export_final["Uploaded Part Number"].astype("string").fillna("")
+                                    extras_export_final = extras_export_final.sort_values(["__sort_uploaded_part_number"], ascending=[True], na_position="last").drop(columns=["__sort_uploaded_part_number"]).reset_index(drop=True)
+                                else:
+                                    extras_export_final = pd.DataFrame(columns=["Uploaded Part Number", "Uploaded Description", "Uploaded Qty", "Status"])
+
+                                excel_bytes = dataframe_to_excel_bytes({
+                                    "Gap analysis": export_df,
+                                    "Purchase option 2": purchase_export,
+                                    "Extras not required": extras_export_final,
+                                })
+
+                                st.download_button(
+                                    "Descargar análisis de faltantes",
+                                    data=excel_bytes,
+                                    file_name=f"carstock_gap_{normalize_key_text(detected_distributor) or 'distribuidor'}_{'_'.join(selected_families_stock) or 'familia'}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                )
+
+                                with st.expander("Guía para el archivo maestro consolidado"):
+                                    st.markdown(
+                                        """
+                                        Formato recomendado para el archivo maestro único:
+                                        - `Distributor name`
+                                        - `Instrument family` o `Platform` (`LXL`, `LXS`, `MDX`, `EMX`)
+                                        - `Part Number`
+                                        - `Description`
+                                        - `Required Qty`
+
+                                        El archivo puede estar en una sola hoja o varias hojas. El dashboard intentará reconocer sinónimos de estas columnas automáticamente.
+                                        """
+                                    )
+
+with detail_tab:
+
+
+    st.subheader("Detalle por equipo")
+    detail_df = filtered.copy()
+    detail_df["selector"] = (
+        detail_df["Serial number"].fillna("SIN SERIAL").astype(str)
+        + " | "
+        + detail_df["Customer name"].fillna("SIN CLIENTE").astype(str)
+        + " | "
+        + detail_df["Country"].fillna("SIN PAÍS").astype(str)
+    )
+    serial_search = st.text_input(
+        "Buscar por serial",
+        value="",
+        placeholder="Escribe aquí un serial para encontrar el equipo",
+        key="detail_serial_search",
+    ).strip()
+    if serial_search:
+        detail_options = detail_df[
+            detail_df["Serial number"].astype(str).str.contains(serial_search, case=False, na=False)
+        ]["selector"].tolist()
+        if not detail_options:
+            st.warning("No encontré equipos con ese serial dentro del filtro actual.")
+            detail_options = detail_df["selector"].tolist()
+    else:
+        detail_options = detail_df["selector"].tolist()
+    selected = st.selectbox("Selecciona un equipo", options=detail_options)
+    row = detail_df.loc[detail_df["selector"] == selected].iloc[0]
+
+    d1, d2, d3, d4 = st.columns(4)
+    with d1:
+        metric_card("Serial", safe_text(row.get("Serial number")), safe_text(row.get("Instrument type"), ""))
+    with d2:
+        metric_card("Estado operativo", safe_text(row.get("Operational status")), safe_text(row.get("Asset condition"), ""))
+    with d3:
+        metric_card("Operating System", safe_text(row.get("Operating System")), safe_text(row.get("Country"), ""))
+    with d4:
+        metric_card("Tests / día", safe_number_text(row.get("Number of tests per day")), safe_text(row.get("Distributor name"), ""))
+
+    detail_columns = [
+        "Commercial Region",
+        "Country",
+        "Distributor name",
+        "Customer name",
+        "City",
+        "Address",
+        "Instrument type",
+        "Product Line",
+        "Installation date",
+        "Operational status",
+        "Type of contract",
+        "Operating System",
+    ]
+    detail_values = []
+    for c in detail_columns:
+        value = row.get(c)
+        if "date" in c.lower():
+            detail_values.append(format_date_for_hover(value))
+        else:
+            detail_values.append(safe_text(value, "N/A"))
+
+    st.dataframe(pd.DataFrame({"Campo": detail_columns, "Valor": detail_values}), use_container_width=True, hide_index=True)
+
+    applicable_row_fields = []
+    for key in active_config_fields(detail_df.loc[[row.name]], CONFIG_KEYS):
+        col = f"CFG::{key}"
+        applicable_row_fields.append({"Campo": key, "Valor": safe_text(row.get(col), "N/A")})
+
+    if applicable_row_fields:
+        st.markdown("### Machine configuration del equipo")
+        st.dataframe(pd.DataFrame(applicable_row_fields), use_container_width=True, hide_index=True)
+
+    with st.expander("Machine configurations completas"):
+        st.code(safe_text(row.get("Machine Configurations"), "No disponible"))
+
+st.markdown("---")
+foot_l, foot_r = st.columns((0.75, 0.25))
+with foot_l:
+    st.markdown(
+        '<div class="small-note">Filtros activos: región comercial, país, distribuidor y tipo de instrumento. Base instalada incluye análisis por ciudad. Sistema operativo prioriza la detección de equipos legacy que deben migrar a Windows 10. En stock, el dashboard intenta identificar automáticamente el distribuidor a partir del título del archivo cargado.</div>',
+        unsafe_allow_html=True,
+    )
+with foot_r:
+    st.download_button(
+        "Descargar vista filtrada",
+        data=to_csv_download(filtered.drop(columns=[c for c in filtered.columns if c.startswith("FLAG::")], errors="ignore")),
+        file_name="records_list_filtered.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
