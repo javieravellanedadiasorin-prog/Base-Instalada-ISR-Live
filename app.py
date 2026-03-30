@@ -234,34 +234,6 @@ def compute_mapbox_center_zoom(df: pd.DataFrame, lat_col: str = "Latitude", lon_
     return center, zoom
 
 
-def compute_geo_rotation_scale(df: pd.DataFrame, lat_col: str = "Latitude", lon_col: str = "Longitude") -> tuple[dict, float]:
-    geo = df.dropna(subset=[lat_col, lon_col]).copy()
-    if geo.empty:
-        return {"lat": 0.0, "lon": 0.0}, 1.08
-
-    lats = pd.to_numeric(geo[lat_col], errors="coerce").dropna()
-    lons = pd.to_numeric(geo[lon_col], errors="coerce").dropna()
-    if lats.empty or lons.empty:
-        return {"lat": 0.0, "lon": 0.0}, 1.08
-
-    min_lat, max_lat = float(lats.min()), float(lats.max())
-    min_lon, max_lon = float(lons.min()), float(lons.max())
-    center_lat = (min_lat + max_lat) / 2
-    center_lon = (min_lon + max_lon) / 2
-
-    lat_span = max(max_lat - min_lat, 0.3)
-    lon_span = max(max_lon - min_lon, 0.3)
-    cos_lat = max(np.cos(np.radians(center_lat)), 0.35)
-    effective_span = max(lat_span, lon_span * cos_lat)
-
-    if len(geo) == 1:
-        scale = 6.8
-    else:
-        scale = np.clip(95 / (effective_span + 8), 1.08, 7.2)
-
-    return {"lat": center_lat, "lon": center_lon}, float(scale)
-
-
 def dataframe_to_excel_bytes(sheet_map: dict[str, pd.DataFrame]) -> bytes:
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -1161,63 +1133,72 @@ def active_config_fields(df: pd.DataFrame, config_keys: list[str]) -> list[str]:
     return active
 
 
-def build_distributor_instrument_hover_chart(df: pd.DataFrame) -> go.Figure:
-    if df.empty:
-        fig = go.Figure()
-        fig.update_layout(title="Instrumentos por distribuidor")
-        return glow_layout(fig, 520)
+def build_distributor_status_chart(df: pd.DataFrame, selected_model: str) -> go.Figure:
+    fig = go.Figure()
+
+    if df.empty or not selected_model:
+        fig.update_layout(title="Estado por distribuidor")
+        return glow_layout(fig, 620, 17)
 
     work = df.copy()
-    for col in ["Distributor name", "Instrument type", "Operational status"]:
-        if col not in work.columns:
-            work[col] = pd.NA
-
-    work["Distributor name"] = work["Distributor name"].fillna("No informado").astype(str)
     work["Instrument type"] = work["Instrument type"].fillna("No informado").astype(str)
+    work["Distributor name"] = work["Distributor name"].fillna("No informado").astype(str)
     work["Operational status"] = work["Operational status"].fillna("No informado").astype(str).str.strip()
     work["Status for chart"] = np.where(work["Operational status"].eq(""), "No informado", work["Operational status"])
 
-    grouped = (
-        work.groupby(["Distributor name", "Instrument type", "Status for chart"], dropna=False)
+    model_df = work[work["Instrument type"] == selected_model].copy()
+    if model_df.empty:
+        fig.update_layout(title=f"Estado por distribuidor | {selected_model}")
+        return glow_layout(fig, 620, 17)
+
+    summary = (
+        model_df.groupby(["Distributor name", "Status for chart"], dropna=False)
         .size()
         .reset_index(name="Count")
     )
 
-    totals = grouped.groupby("Distributor name", as_index=False)["Count"].sum().sort_values("Count", ascending=False)
-    distributor_order = totals["Distributor name"].tolist()
-    grouped["Distributor name"] = pd.Categorical(grouped["Distributor name"], categories=distributor_order, ordered=True)
-    grouped = grouped.sort_values(["Distributor name", "Instrument type", "Status for chart"])
+    distributor_order = (
+        summary.groupby("Distributor name", as_index=False)["Count"]
+        .sum()
+        .sort_values("Count", ascending=False)["Distributor name"]
+        .tolist()
+    )
+    status_order = (
+        summary.groupby("Status for chart", as_index=False)["Count"]
+        .sum()
+        .sort_values("Count", ascending=False)["Status for chart"]
+        .tolist()
+    )
 
-    # Hasta 8 patrones distintos; si hay más estados, se reutilizan.
-    pattern_cycle = ["", "/", "\\", "x", "-", "|", "+", "."]
-    unique_statuses = grouped["Status for chart"].astype(str).dropna().unique().tolist()
-    pattern_map = {status: pattern_cycle[i % len(pattern_cycle)] for i, status in enumerate(unique_statuses)}
+    color_sequence = px.colors.qualitative.Set2 + px.colors.qualitative.Bold + px.colors.qualitative.Safe
+    color_map = {status: color_sequence[i % len(color_sequence)] for i, status in enumerate(status_order)}
 
     fig = px.bar(
-        grouped,
-        x="Distributor name",
-        y="Count",
-        color="Instrument type",
-        pattern_shape="Status for chart",
+        summary,
+        y="Distributor name",
+        x="Count",
+        color="Status for chart",
+        orientation="h",
         barmode="stack",
-        title="Instrumentos que tiene cada distribuidor",
-        custom_data=["Instrument type", "Status for chart", "Count"],
-        pattern_shape_map=pattern_map,
+        title=f"Estado por distribuidor | {selected_model}",
+        custom_data=["Status for chart", "Count"],
+        color_discrete_map=color_map,
+        category_orders={"Distributor name": distributor_order, "Status for chart": status_order},
     )
 
     fig.update_traces(
         hovertemplate=(
-            "<b>Modelo de equipo:</b> %{customdata[0]}<br>"
-            "<b>Estado:</b> %{customdata[1]}<br>"
-            "<b>Cantidad:</b> %{customdata[2]}<extra></extra>"
+            "<b>Distribuidor:</b> %{y}<br>"
+            "<b>Modelo:</b> " + selected_model + "<br>"
+            "<b>Estado:</b> %{customdata[0]}<br>"
+            "<b>Cantidad:</b> %{customdata[1]}<extra></extra>"
         )
     )
 
     fig.update_layout(
-        xaxis_title="Distribuidor",
-        yaxis_title="Cantidad de instrumentos",
-        legend_title="Tipo de instrumento",
-        xaxis=dict(tickangle=-35),
+        xaxis_title="Cantidad de instrumentos",
+        yaxis_title="Distribuidor",
+        legend_title="Estado operativo",
     )
     return glow_layout(fig, 620, 17)
 
@@ -1436,12 +1417,21 @@ with base_tab:
         fig_city.update_layout(yaxis=dict(categoryorder="total ascending"))
         st.plotly_chart(glow_layout(fig_city, 470), use_container_width=True)
 
-    st.markdown("### Instrumentos por distribuidor")
-    st.markdown(
-        '<div class="small-note">La misma gráfica ahora muestra <b>todos los estados</b>. El color diferencia el modelo y el patrón diferencia el estado operativo.</div>',
-        unsafe_allow_html=True,
-    )
-    st.plotly_chart(build_distributor_instrument_hover_chart(filtered), use_container_width=True)
+    st.markdown("### Vista corporativa por distribuidor")
+    model_options = sorted(filtered["Instrument type"].dropna().astype(str).unique().tolist())
+    if model_options:
+        default_model = model_options[0]
+        selected_model_for_status = st.selectbox(
+            "Selecciona el modelo de equipo",
+            options=model_options,
+            index=0,
+            key="corporate_distributor_model_selector",
+        )
+        st.markdown(
+            '<div class="small-note">Visual principal corporativo: un modelo a la vez, todos los distribuidores, estados apilados horizontalmente.</div>',
+            unsafe_allow_html=True,
+        )
+        st.plotly_chart(build_distributor_status_chart(filtered, selected_model_for_status), use_container_width=True)
 
     st.markdown("### Tabla general filtrada")
     visible_columns = [
