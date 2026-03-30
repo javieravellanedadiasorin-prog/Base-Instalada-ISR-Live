@@ -1168,15 +1168,17 @@ def build_distributor_instrument_hover_chart(df: pd.DataFrame) -> go.Figure:
         return glow_layout(fig, 520)
 
     work = df.copy()
-    for col in ["Distributor name", "Instrument type"]:
+    for col in ["Distributor name", "Instrument type", "Operational status"]:
         if col not in work.columns:
             work[col] = pd.NA
 
     work["Distributor name"] = work["Distributor name"].fillna("No informado").astype(str)
     work["Instrument type"] = work["Instrument type"].fillna("No informado").astype(str)
+    work["Operational status"] = work["Operational status"].fillna("No informado").astype(str).str.strip()
+    work["Status for chart"] = np.where(work["Operational status"].eq(""), "No informado", work["Operational status"])
 
     grouped = (
-        work.groupby(["Distributor name", "Instrument type"], dropna=False)
+        work.groupby(["Distributor name", "Instrument type", "Status for chart"], dropna=False)
         .size()
         .reset_index(name="Count")
     )
@@ -1184,22 +1186,30 @@ def build_distributor_instrument_hover_chart(df: pd.DataFrame) -> go.Figure:
     totals = grouped.groupby("Distributor name", as_index=False)["Count"].sum().sort_values("Count", ascending=False)
     distributor_order = totals["Distributor name"].tolist()
     grouped["Distributor name"] = pd.Categorical(grouped["Distributor name"], categories=distributor_order, ordered=True)
-    grouped = grouped.sort_values(["Distributor name", "Instrument type"])
+    grouped = grouped.sort_values(["Distributor name", "Instrument type", "Status for chart"])
+
+    # Hasta 8 patrones distintos; si hay más estados, se reutilizan.
+    pattern_cycle = ["", "/", "\\", "x", "-", "|", "+", "."]
+    unique_statuses = grouped["Status for chart"].astype(str).dropna().unique().tolist()
+    pattern_map = {status: pattern_cycle[i % len(pattern_cycle)] for i, status in enumerate(unique_statuses)}
 
     fig = px.bar(
         grouped,
         x="Distributor name",
         y="Count",
         color="Instrument type",
+        pattern_shape="Status for chart",
         barmode="stack",
         title="Instrumentos que tiene cada distribuidor",
-        custom_data=["Instrument type", "Count"],
+        custom_data=["Instrument type", "Status for chart", "Count"],
+        pattern_shape_map=pattern_map,
     )
 
     fig.update_traces(
         hovertemplate=(
             "<b>Modelo de equipo:</b> %{customdata[0]}<br>"
-            "<b>Cantidad:</b> %{customdata[1]}<extra></extra>"
+            "<b>Estado:</b> %{customdata[1]}<br>"
+            "<b>Cantidad:</b> %{customdata[2]}<extra></extra>"
         )
     )
 
@@ -1209,7 +1219,7 @@ def build_distributor_instrument_hover_chart(df: pd.DataFrame) -> go.Figure:
         legend_title="Tipo de instrumento",
         xaxis=dict(tickangle=-35),
     )
-    return glow_layout(fig, 600, 17)
+    return glow_layout(fig, 620, 17)
 
 
 st.markdown(
@@ -1428,7 +1438,7 @@ with base_tab:
 
     st.markdown("### Instrumentos por distribuidor")
     st.markdown(
-        '<div class="small-note">Al pasar el mouse solo verás el modelo de equipo y la cantidad.</div>',
+        '<div class="small-note">La misma gráfica ahora muestra <b>todos los estados</b>. El color diferencia el modelo y el patrón diferencia el estado operativo.</div>',
         unsafe_allow_html=True,
     )
     st.plotly_chart(build_distributor_instrument_hover_chart(filtered), use_container_width=True)
