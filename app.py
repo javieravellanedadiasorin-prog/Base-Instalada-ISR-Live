@@ -405,7 +405,6 @@ def read_table_any(uploaded_file) -> pd.DataFrame:
     raw = uploaded_file.getvalue()
 
     if name.endswith(".csv"):
-        # intenta delimitador ; primero porque tu records original viene así
         attempts = [
             {"sep": ";", "encoding": "utf-8-sig"},
             {"sep": ";", "encoding": "latin1"},
@@ -449,31 +448,6 @@ def read_table_any(uploaded_file) -> pd.DataFrame:
         return pd.read_excel(book, sheet_name=preferred)
 
     raise ValueError(f"Formato no soportado: {uploaded_file.name}")
-
-
-def adapt_uploaded_records_to_standard(df: pd.DataFrame) -> pd.DataFrame:
-    # Si ya viene con encabezados correctos, úsalo así.
-    # Si viene sin encabezados o con un número similar de columnas, fuerza CUSTOM_HEADERS.
-    out = df.copy()
-
-    if "_blank" in out.columns:
-        out = out.drop(columns=["_blank"])
-
-    exact_matches = sum(1 for c in CUSTOM_HEADERS if c in out.columns)
-    if exact_matches >= 20:
-        return out
-
-    if out.shape[1] == len(CUSTOM_HEADERS):
-        out.columns = CUSTOM_HEADERS
-        if "_blank" in out.columns:
-            out = out.drop(columns=["_blank"])
-        return out
-
-    if out.shape[1] == len(CUSTOM_HEADERS) - 1:
-        out.columns = [c for c in CUSTOM_HEADERS if c != "_blank"]
-        return out
-
-    return out
 
 
 @st.cache_data(show_spinner=False)
@@ -531,6 +505,29 @@ def load_records(file_bytes: bytes) -> pd.DataFrame:
     return df
 
 
+def adapt_uploaded_records_to_standard(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy()
+
+    if "_blank" in out.columns:
+        out = out.drop(columns=["_blank"])
+
+    exact_matches = sum(1 for c in CUSTOM_HEADERS if c in out.columns)
+    if exact_matches >= 20:
+        return out
+
+    if out.shape[1] == len(CUSTOM_HEADERS):
+        out.columns = CUSTOM_HEADERS
+        if "_blank" in out.columns:
+            out = out.drop(columns=["_blank"])
+        return out
+
+    if out.shape[1] == len(CUSTOM_HEADERS) - 1:
+        out.columns = [c for c in CUSTOM_HEADERS if c != "_blank"]
+        return out
+
+    return out
+
+
 def parse_uploaded_records(uploaded_file) -> pd.DataFrame:
     name = uploaded_file.name.lower()
     raw = uploaded_file.getvalue()
@@ -541,7 +538,6 @@ def parse_uploaded_records(uploaded_file) -> pd.DataFrame:
     table = read_table_any(uploaded_file)
     table = adapt_uploaded_records_to_standard(table)
 
-    # Si ya tiene estructura comparable, normaliza y deriva campos como en load_records
     df = table.copy()
 
     if "_blank" in df.columns:
@@ -1172,31 +1168,17 @@ def build_distributor_instrument_hover_chart(df: pd.DataFrame) -> go.Figure:
         return glow_layout(fig, 520)
 
     work = df.copy()
-    for col in ["Distributor name", "Instrument type", "Serial number", "Customer name", "City", "Operational status", "Machine Configurations", "Country"]:
+    for col in ["Distributor name", "Instrument type"]:
         if col not in work.columns:
             work[col] = pd.NA
 
     work["Distributor name"] = work["Distributor name"].fillna("No informado").astype(str)
     work["Instrument type"] = work["Instrument type"].fillna("No informado").astype(str)
-    work["Serial number"] = work["Serial number"].fillna("No serial").astype(str)
-    work["Customer name"] = work["Customer name"].fillna("No customer").astype(str)
-    work["City"] = work["City"].fillna("No city").astype(str)
-    work["Country"] = work["Country"].fillna("No country").astype(str)
-    work["Operational status"] = work["Operational status"].fillna("No status").astype(str)
-    work["Machine Configurations"] = work["Machine Configurations"].fillna("No machine configuration").astype(str)
 
     grouped = (
         work.groupby(["Distributor name", "Instrument type"], dropna=False)
-        .agg(
-            Count=("Serial number", "count"),
-            Serials=("Serial number", lambda s: "<br>".join(sorted(set(s.tolist()))[:25])),
-            Customers=("Customer name", lambda s: "<br>".join(sorted(set(s.tolist()))[:15])),
-            Cities=("City", lambda s: "<br>".join(sorted(set(s.tolist()))[:15])),
-            Countries=("Country", lambda s: "<br>".join(sorted(set(s.tolist()))[:15])),
-            Statuses=("Operational status", lambda s: "<br>".join(sorted(set(s.tolist()))[:15])),
-            Configs=("Machine Configurations", lambda s: "<br>".join(sorted(set(s.tolist()))[:10])),
-        )
-        .reset_index()
+        .size()
+        .reset_index(name="Count")
     )
 
     totals = grouped.groupby("Distributor name", as_index=False)["Count"].sum().sort_values("Count", ascending=False)
@@ -1211,31 +1193,16 @@ def build_distributor_instrument_hover_chart(df: pd.DataFrame) -> go.Figure:
         color="Instrument type",
         barmode="stack",
         title="Instrumentos que tiene cada distribuidor",
-        custom_data=[
-            "Instrument type",
-            "Count",
-            "Serials",
-            "Customers",
-            "Cities",
-            "Countries",
-            "Statuses",
-            "Configs",
-        ],
+        custom_data=["Instrument type", "Count"],
     )
 
     fig.update_traces(
         hovertemplate=(
-            "<b>Distributor:</b> %{x}<br>"
-            "<b>Instrument type:</b> %{customdata[0]}<br>"
-            "<b>Total instruments:</b> %{customdata[1]}<br><br>"
-            "<b>Serial numbers:</b><br>%{customdata[2]}<br><br>"
-            "<b>Customers:</b><br>%{customdata[3]}<br><br>"
-            "<b>Cities:</b><br>%{customdata[4]}<br><br>"
-            "<b>Countries:</b><br>%{customdata[5]}<br><br>"
-            "<b>Status:</b><br>%{customdata[6]}<br><br>"
-            "<b>Machine Configurations:</b><br>%{customdata[7]}<extra></extra>"
+            "<b>Modelo de equipo:</b> %{customdata[0]}<br>"
+            "<b>Cantidad:</b> %{customdata[1]}<extra></extra>"
         )
     )
+
     fig.update_layout(
         xaxis_title="Distribuidor",
         yaxis_title="Cantidad de instrumentos",
@@ -1461,7 +1428,7 @@ with base_tab:
 
     st.markdown("### Instrumentos por distribuidor")
     st.markdown(
-        '<div class="small-note">En una sola gráfica puedes ver todos los distribuidores. Al pasar el mouse sobre cada bloque verás seriales, clientes, ciudades, países, status y machine configurations.</div>',
+        '<div class="small-note">Al pasar el mouse solo verás el modelo de equipo y la cantidad.</div>',
         unsafe_allow_html=True,
     )
     st.plotly_chart(build_distributor_instrument_hover_chart(filtered), use_container_width=True)
