@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 from datetime import date
-from io import BytesIO
+from io import BytesIO, StringIO
 import re
+import hashlib
+import csv
 
 import numpy as np
 import pandas as pd
@@ -390,6 +392,90 @@ def normalize_instrument_type(value) -> str:
     return text.strip() or safe_text(value)
 
 
+def get_uploaded_file_signature(uploaded_file) -> str:
+    if uploaded_file is None:
+        return ""
+    content = uploaded_file.getvalue()
+    raw = f"{uploaded_file.name}|{len(content)}|".encode("utf-8") + content
+    return hashlib.md5(raw).hexdigest()
+
+
+def read_table_any(uploaded_file) -> pd.DataFrame:
+    name = uploaded_file.name.lower()
+    raw = uploaded_file.getvalue()
+
+    if name.endswith(".csv"):
+        # intenta delimitador ; primero porque tu records original viene así
+        attempts = [
+            {"sep": ";", "encoding": "utf-8-sig"},
+            {"sep": ";", "encoding": "latin1"},
+            {"sep": ",", "encoding": "utf-8-sig"},
+            {"sep": ",", "encoding": "latin1"},
+            {"sep": None, "encoding": "utf-8-sig"},
+            {"sep": None, "encoding": "latin1"},
+        ]
+        for att in attempts:
+            try:
+                text = raw.decode(att["encoding"], errors="replace")
+                df = pd.read_csv(StringIO(text), sep=att["sep"], engine="python", on_bad_lines="skip")
+                if df.shape[1] >= 3:
+                    return df
+            except Exception:
+                continue
+        raise ValueError(f"No fue posible leer el CSV: {uploaded_file.name}")
+
+    if name.endswith(".xlsx") or name.endswith(".xls"):
+        book = pd.ExcelFile(BytesIO(raw))
+        preferred = None
+        best_score = -1
+        for sheet in book.sheet_names:
+            s = str(sheet).lower()
+            score = 0
+            if "datos" in s:
+                score += 25
+            if "combined" in s:
+                score += 20
+            if "consolidated" in s:
+                score += 20
+            if "records" in s:
+                score += 18
+            if "data" in s:
+                score += 15
+            if score > best_score:
+                best_score = score
+                preferred = sheet
+        if preferred is None:
+            preferred = book.sheet_names[0]
+        return pd.read_excel(book, sheet_name=preferred)
+
+    raise ValueError(f"Formato no soportado: {uploaded_file.name}")
+
+
+def adapt_uploaded_records_to_standard(df: pd.DataFrame) -> pd.DataFrame:
+    # Si ya viene con encabezados correctos, úsalo así.
+    # Si viene sin encabezados o con un número similar de columnas, fuerza CUSTOM_HEADERS.
+    out = df.copy()
+
+    if "_blank" in out.columns:
+        out = out.drop(columns=["_blank"])
+
+    exact_matches = sum(1 for c in CUSTOM_HEADERS if c in out.columns)
+    if exact_matches >= 20:
+        return out
+
+    if out.shape[1] == len(CUSTOM_HEADERS):
+        out.columns = CUSTOM_HEADERS
+        if "_blank" in out.columns:
+            out = out.drop(columns=["_blank"])
+        return out
+
+    if out.shape[1] == len(CUSTOM_HEADERS) - 1:
+        out.columns = [c for c in CUSTOM_HEADERS if c != "_blank"]
+        return out
+
+    return out
+
+
 @st.cache_data(show_spinner=False)
 def load_records(file_bytes: bytes) -> pd.DataFrame:
     content = file_bytes.decode("utf-8-sig", errors="replace").splitlines()
@@ -443,6 +529,105 @@ def load_records(file_bytes: bytes) -> pd.DataFrame:
     base_cols = [c for c in CUSTOM_HEADERS if c != "_blank"]
     df["Data completeness %"] = (df[base_cols].notna().sum(axis=1) / len(base_cols) * 100).round(1)
     return df
+
+
+def parse_uploaded_records(uploaded_file) -> pd.DataFrame:
+    name = uploaded_file.name.lower()
+    raw = uploaded_file.getvalue()
+
+    if name.endswith(".csv"):
+        return load_records(raw)
+
+    table = read_table_any(uploaded_file)
+    table = adapt_uploaded_records_to_standard(table)
+
+    # Si ya tiene estructura comparable, normaliza y deriva campos como en load_records
+    df = table.copy()
+
+    if "_blank" in df.columns:
+        df = df.drop(columns=["_blank"])
+
+    for col in df.columns:
+        if df[col].dtype == object:
+            df[col] = df[col].astype(str).str.strip()
+            df[col] = df[col].replace({"": pd.NA, "None": pd.NA, "nan": pd.NA, "<NA>": pd.NA})
+
+    for missing in [c for c in CUSTOM_HEADERS if c != "_blank" and c not in df.columns]:
+        df[missing] = pd.NA
+
+    def unexcel(value):
+        if pd.isna(value):
+            return pd.NA
+        value = str(value).strip()
+        if value.startswith('="') and value.endswith('"'):
+            return value[2:-1]
+        return value
+
+    for col in ["Latitude", "Longitude", "Serial number"]:
+        if col in df.columns:
+            df[col] = df[col].map(unexcel)
+
+    for col in ["Latitude", "Longitude", "Number of tests per day", "PM frequency", "Contract duration"]:
+        if col in df.columns:
+            df[col] = to_numeric_series(df[col])
+
+    for col in ["Installation date", "PM last date", "PM next date"]:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], dayfirst=True, errors="coerce")
+
+    df["Instrument family"] = df["Instrument type"].map(normalize_instrument_type)
+
+    today = pd.Timestamp(date.today())
+    df["Age (years)"] = ((today - df["Installation date"]).dt.days / 365.25).round(1)
+    df["Is in routine"] = df["Operational status"].fillna("").astype(str).str.upper().eq("IN ROUTINE")
+    df["Has geolocation"] = df["Latitude"].notna() & df["Longitude"].notna()
+
+    yes_map = {"yes", "y", "true", "1"}
+    assay_flags = {}
+    for col in ASSAY_COLS:
+        if col not in df.columns:
+            df[col] = pd.NA
+        normalized = df[col].fillna("No").astype(str).str.strip()
+        df[col] = normalized
+        assay_flags[f"FLAG::{col}"] = normalized.str.lower().isin(yes_map)
+
+    if assay_flags:
+        assay_flags_df = pd.DataFrame(assay_flags)
+        df = pd.concat([df, assay_flags_df], axis=1)
+        df["Enabled assay count"] = assay_flags_df.sum(axis=1)
+    else:
+        df["Enabled assay count"] = 0
+
+    base_cols = [c for c in CUSTOM_HEADERS if c != "_blank" and c in df.columns]
+    df["Data completeness %"] = (df[base_cols].notna().sum(axis=1) / len(base_cols) * 100).round(1)
+    return df
+
+
+def get_active_records_dataset(uploaded_file, sample_candidates: list[Path]) -> tuple[pd.DataFrame, str]:
+    if uploaded_file is not None:
+        current_sig = get_uploaded_file_signature(uploaded_file)
+        saved_sig = st.session_state.get("records_active_signature", "")
+
+        if "records_active_df" not in st.session_state or current_sig != saved_sig:
+            active_df = parse_uploaded_records(uploaded_file)
+            st.session_state["records_active_df"] = active_df.copy()
+            st.session_state["records_active_signature"] = current_sig
+            st.session_state["records_active_name"] = uploaded_file.name
+
+        return st.session_state["records_active_df"].copy(), st.session_state["records_active_name"]
+
+    if "records_active_df" in st.session_state and st.session_state.get("records_active_name"):
+        return st.session_state["records_active_df"].copy(), st.session_state["records_active_name"]
+
+    if sample_candidates:
+        sample_path = sample_candidates[0]
+        active_df = load_records(sample_path.read_bytes())
+        st.session_state["records_active_df"] = active_df.copy()
+        st.session_state["records_active_signature"] = f"sample::{sample_path.name}"
+        st.session_state["records_active_name"] = sample_path.name
+        return active_df, sample_path.name
+
+    return pd.DataFrame(), ""
 
 
 @st.cache_data(show_spinner=False)
@@ -543,7 +728,6 @@ def detect_stock_columns(df: pd.DataFrame) -> tuple[str | None, str | None, str 
     if desc_col is None and len(df.columns) >= 3:
         desc_col = df.columns[2]
     return part_col, qty_col, desc_col
-
 
 
 @st.cache_data(show_spinner=False)
@@ -971,6 +1155,7 @@ def compare_stock(
     extra_df = extra_df.sort_values(["Uploaded Qty", "Uploaded Part Number"], ascending=[False, True]).reset_index(drop=True)
     return merged, extra_df, stock_slim
 
+
 def active_config_fields(df: pd.DataFrame, config_keys: list[str]) -> list[str]:
     active = []
     for key in config_keys:
@@ -978,6 +1163,86 @@ def active_config_fields(df: pd.DataFrame, config_keys: list[str]) -> list[str]:
         if col in df.columns and df[col].notna().any():
             active.append(key)
     return active
+
+
+def build_distributor_instrument_hover_chart(df: pd.DataFrame) -> go.Figure:
+    if df.empty:
+        fig = go.Figure()
+        fig.update_layout(title="Instrumentos por distribuidor")
+        return glow_layout(fig, 520)
+
+    work = df.copy()
+    for col in ["Distributor name", "Instrument type", "Serial number", "Customer name", "City", "Operational status", "Machine Configurations", "Country"]:
+        if col not in work.columns:
+            work[col] = pd.NA
+
+    work["Distributor name"] = work["Distributor name"].fillna("No informado").astype(str)
+    work["Instrument type"] = work["Instrument type"].fillna("No informado").astype(str)
+    work["Serial number"] = work["Serial number"].fillna("No serial").astype(str)
+    work["Customer name"] = work["Customer name"].fillna("No customer").astype(str)
+    work["City"] = work["City"].fillna("No city").astype(str)
+    work["Country"] = work["Country"].fillna("No country").astype(str)
+    work["Operational status"] = work["Operational status"].fillna("No status").astype(str)
+    work["Machine Configurations"] = work["Machine Configurations"].fillna("No machine configuration").astype(str)
+
+    grouped = (
+        work.groupby(["Distributor name", "Instrument type"], dropna=False)
+        .agg(
+            Count=("Serial number", "count"),
+            Serials=("Serial number", lambda s: "<br>".join(sorted(set(s.tolist()))[:25])),
+            Customers=("Customer name", lambda s: "<br>".join(sorted(set(s.tolist()))[:15])),
+            Cities=("City", lambda s: "<br>".join(sorted(set(s.tolist()))[:15])),
+            Countries=("Country", lambda s: "<br>".join(sorted(set(s.tolist()))[:15])),
+            Statuses=("Operational status", lambda s: "<br>".join(sorted(set(s.tolist()))[:15])),
+            Configs=("Machine Configurations", lambda s: "<br>".join(sorted(set(s.tolist()))[:10])),
+        )
+        .reset_index()
+    )
+
+    totals = grouped.groupby("Distributor name", as_index=False)["Count"].sum().sort_values("Count", ascending=False)
+    distributor_order = totals["Distributor name"].tolist()
+    grouped["Distributor name"] = pd.Categorical(grouped["Distributor name"], categories=distributor_order, ordered=True)
+    grouped = grouped.sort_values(["Distributor name", "Instrument type"])
+
+    fig = px.bar(
+        grouped,
+        x="Distributor name",
+        y="Count",
+        color="Instrument type",
+        barmode="stack",
+        title="Instrumentos que tiene cada distribuidor",
+        custom_data=[
+            "Instrument type",
+            "Count",
+            "Serials",
+            "Customers",
+            "Cities",
+            "Countries",
+            "Statuses",
+            "Configs",
+        ],
+    )
+
+    fig.update_traces(
+        hovertemplate=(
+            "<b>Distributor:</b> %{x}<br>"
+            "<b>Instrument type:</b> %{customdata[0]}<br>"
+            "<b>Total instruments:</b> %{customdata[1]}<br><br>"
+            "<b>Serial numbers:</b><br>%{customdata[2]}<br><br>"
+            "<b>Customers:</b><br>%{customdata[3]}<br><br>"
+            "<b>Cities:</b><br>%{customdata[4]}<br><br>"
+            "<b>Countries:</b><br>%{customdata[5]}<br><br>"
+            "<b>Status:</b><br>%{customdata[6]}<br><br>"
+            "<b>Machine Configurations:</b><br>%{customdata[7]}<extra></extra>"
+        )
+    )
+    fig.update_layout(
+        xaxis_title="Distribuidor",
+        yaxis_title="Cantidad de instrumentos",
+        legend_title="Tipo de instrumento",
+        xaxis=dict(tickangle=-35),
+    )
+    return glow_layout(fig, 600, 17)
 
 
 st.markdown(
@@ -998,21 +1263,16 @@ st.markdown(
 )
 
 st.sidebar.title("⚙️ Filtros")
-uploaded_file = st.sidebar.file_uploader("Sube el archivo Records List (.csv)", type=["csv"])
+uploaded_file = st.sidebar.file_uploader("Sube el archivo Records List", type=["csv", "xlsx", "xls"])
 
 base_dir = Path(__file__).resolve().parent
 sample_candidates = sorted(base_dir.glob("Records_List_Report*.csv"))
 default_master_candidates = sorted(base_dir.glob("New TP Spare*.xlsx"))
 
-if uploaded_file is not None:
-    raw_df = load_records(uploaded_file.getvalue())
-    source_label = uploaded_file.name
-elif sample_candidates:
-    sample_path = sample_candidates[0]
-    raw_df = load_records(sample_path.read_bytes())
-    source_label = sample_path.name
-else:
-    st.info("Sube el CSV para activar el dashboard.")
+raw_df, source_label = get_active_records_dataset(uploaded_file, sample_candidates)
+
+if raw_df.empty:
+    st.info("Sube el archivo Records List para activar el dashboard.")
     st.stop()
 
 raw_df, CONFIG_KEYS = parse_machine_configuration(raw_df)
@@ -1198,6 +1458,13 @@ with base_tab:
         fig_city.update_traces(marker_color=ACCENT_3, textposition="outside", hovertemplate="Ciudad / País: %{y}<br>Activos: %{x}<extra></extra>")
         fig_city.update_layout(yaxis=dict(categoryorder="total ascending"))
         st.plotly_chart(glow_layout(fig_city, 470), use_container_width=True)
+
+    st.markdown("### Instrumentos por distribuidor")
+    st.markdown(
+        '<div class="small-note">En una sola gráfica puedes ver todos los distribuidores. Al pasar el mouse sobre cada bloque verás seriales, clientes, ciudades, países, status y machine configurations.</div>',
+        unsafe_allow_html=True,
+    )
+    st.plotly_chart(build_distributor_instrument_hover_chart(filtered), use_container_width=True)
 
     st.markdown("### Tabla general filtrada")
     visible_columns = [
@@ -2005,8 +2272,6 @@ with stock_tab:
                                     )
 
 with detail_tab:
-
-
     st.subheader("Detalle por equipo")
     detail_df = filtered.copy()
     detail_df["selector"] = (
@@ -2084,7 +2349,7 @@ st.markdown("---")
 foot_l, foot_r = st.columns((0.75, 0.25))
 with foot_l:
     st.markdown(
-        '<div class="small-note">Filtros activos: región comercial, país, distribuidor y tipo de instrumento. Base instalada incluye análisis por ciudad. Sistema operativo prioriza la detección de equipos legacy que deben migrar a Windows 10. En stock, el dashboard intenta identificar automáticamente el distribuidor a partir del título del archivo cargado.</div>',
+        '<div class="small-note">Filtros activos: región comercial, país, distribuidor y tipo de instrumento. Base instalada incluye análisis por ciudad. Sistema operativo prioriza la detección de equipos legacy que deben migrar a Windows 10. En stock, el dashboard intenta identificar automáticamente el distribuidor a partir del título del archivo cargado. La fuente activa de Records List conserva el último archivo que subas durante la sesión.</div>',
         unsafe_allow_html=True,
     )
 with foot_r:
