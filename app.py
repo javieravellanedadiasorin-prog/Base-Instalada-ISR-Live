@@ -666,6 +666,7 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
             ('OK SKUs', f"{stock_context.get('ok_skus', 0):,}"),
             ('LOW SKUs', f"{stock_context.get('low_skus', 0):,}"),
             ('Missing SKUs', f"{stock_context.get('missing_skus', 0):,}"),
+            ('Extra SKUs', f"{stock_context.get('extra_skus', 0):,}"),
             ('Gap total qty', safe_number_text(stock_context.get('gap_total', 0), '0')),
             ('Option 2 estimated cost', f"{stock_context.get('currency','EUR')} {float(stock_context.get('option2_cost', 0) or 0):,.2f}"),
         ]
@@ -674,6 +675,17 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
             'Count': [stock_context.get('ok_skus',0), stock_context.get('low_skus',0), stock_context.get('missing_skus',0), stock_context.get('extra_skus',0)]
         })
         stock_top_gap = stock_context.get('top_gap_df', pd.DataFrame())
+        full_comparison_df = stock_context.get('full_comparison_df', pd.DataFrame())
+        purchase_df = stock_context.get('purchase_df', pd.DataFrame())
+        extra_df = stock_context.get('extra_df', pd.DataFrame())
+        if full_comparison_df is None:
+            full_comparison_df = pd.DataFrame()
+        if purchase_df is None:
+            purchase_df = pd.DataFrame()
+        if extra_df is None:
+            extra_df = pd.DataFrame()
+
+        summary_table_df = stock_top_gap[['Required Part Number','Required Description','Required Qty','Uploaded Qty','Qty Gap','Status','Option 2 Estimated Cost','Currency']] if not stock_top_gap.empty else pd.DataFrame(columns=['Required Part Number','Required Description','Required Qty','Uploaded Qty','Qty Gap','Status','Option 2 Estimated Cost','Currency'])
         sections.append({
             'title': 'Spare Parts / Carstock Gap',
             'summary_pairs': stock_pairs,
@@ -682,9 +694,70 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
                 _make_matplotlib_barh(stock_top_gap.rename(columns={'Required Part Number':'Part number','Qty Gap':'Gap qty'}), 'Part number', 'Gap qty', 'Top missing parts'),
             ],
             'table_title': 'Top spare parts gaps',
-            'table_df': stock_top_gap[['Required Part Number','Required Description','Required Qty','Uploaded Qty','Qty Gap','Status','Option 2 Estimated Cost','Currency']] if not stock_top_gap.empty else pd.DataFrame(columns=['Required Part Number','Required Description','Required Qty','Uploaded Qty','Qty Gap','Status','Option 2 Estimated Cost','Currency']),
-            'table_max_rows': 20,
+            'table_df': summary_table_df,
+            'table_max_rows': 25,
         })
+
+        if not full_comparison_df.empty:
+            full_cols = [c for c in ['Required Part Number','Required Description','Required Qty','Uploaded Qty','Qty Gap','Coverage %','Status','Option 2 Unit Price','Option 2 Estimated Cost','Currency'] if c in full_comparison_df.columns]
+            full_table = full_comparison_df[full_cols].copy()
+            sections.append({
+                'title': 'Spare Parts Annex - Full Comparison',
+                'summary_pairs': [
+                    ('Rows included', f"{len(full_table):,}"),
+                    ('Scope', 'Complete carstock comparison for all required SKUs'),
+                ],
+                'charts': [],
+                'table_title': 'Complete spare parts comparison',
+                'table_df': full_table,
+                'table_max_rows': max(len(full_table), 1),
+            })
+
+        missing_low_df = full_comparison_df[full_comparison_df['Status'].isin(['Missing','LOW'])].copy() if not full_comparison_df.empty and 'Status' in full_comparison_df.columns else pd.DataFrame()
+        if not missing_low_df.empty:
+            ml_cols = [c for c in ['Required Part Number','Required Description','Required Qty','Uploaded Qty','Qty Gap','Coverage %','Status','Option 2 Unit Price','Option 2 Estimated Cost','Currency'] if c in missing_low_df.columns]
+            missing_low_table = missing_low_df[ml_cols].copy().sort_values(['Status','Qty Gap','Required Part Number'], ascending=[True, False, True])
+            sections.append({
+                'title': 'Spare Parts Annex - Missing and LOW',
+                'summary_pairs': [
+                    ('Rows included', f"{len(missing_low_table):,}"),
+                    ('Scope', 'Items with missing or insufficient stock'),
+                ],
+                'charts': [],
+                'table_title': 'Missing and LOW items',
+                'table_df': missing_low_table,
+                'table_max_rows': max(len(missing_low_table), 1),
+            })
+
+        if not purchase_df.empty:
+            pur_cols = [c for c in ['Required Part Number','Required Description','Qty Gap','Option 2 Unit Price','Option 2 Estimated Cost','Currency','Status'] if c in purchase_df.columns]
+            purchase_table = purchase_df[pur_cols].copy()
+            sections.append({
+                'title': 'Spare Parts Annex - Purchase Suggestion',
+                'summary_pairs': [
+                    ('Rows included', f"{len(purchase_table):,}"),
+                    ('Scope', 'Suggested purchase to close current gap using option 2 pricing'),
+                ],
+                'charts': [],
+                'table_title': 'Suggested purchase list',
+                'table_df': purchase_table,
+                'table_max_rows': max(len(purchase_table), 1),
+            })
+
+        if not extra_df.empty:
+            ex_cols = [c for c in ['Uploaded Part Number','Uploaded Description','Uploaded Qty','Status'] if c in extra_df.columns]
+            extra_table = extra_df[ex_cols].copy()
+            sections.append({
+                'title': 'Spare Parts Annex - Extra Items',
+                'summary_pairs': [
+                    ('Rows included', f"{len(extra_table):,}"),
+                    ('Scope', 'Parts reported by the distributor that are not required by the selected carstock master'),
+                ],
+                'charts': [],
+                'table_title': 'Extra items not required by master',
+                'table_df': extra_table,
+                'table_max_rows': max(len(extra_table), 1),
+            })
     else:
         sections.append({
             'title': 'Spare Parts / Carstock Gap',
@@ -794,11 +867,29 @@ def build_pdf_report(
                     'OS': 0.85 * inch, 'Asset': 0.75 * inch, 'Install Date': 0.9 * inch, 'Contract': 1.2 * inch,
                 }
                 col_widths = [width_map.get(c, 0.95 * inch) for c in table_df.columns]
+            elif section['title'].startswith('Spare Parts Annex') or section['title'] == 'Spare Parts / Carstock Gap':
+                spare_width_map = {
+                    'Required Part Number': 1.15 * inch,
+                    'Required Description': 2.45 * inch,
+                    'Required Qty': 0.65 * inch,
+                    'Uploaded Qty': 0.7 * inch,
+                    'Qty Gap': 0.65 * inch,
+                    'Coverage %': 0.7 * inch,
+                    'Status': 0.7 * inch,
+                    'Option 2 Unit Price': 0.9 * inch,
+                    'Option 2 Estimated Cost': 1.05 * inch,
+                    'Currency': 0.55 * inch,
+                    'Uploaded Part Number': 1.15 * inch,
+                    'Uploaded Description': 2.6 * inch,
+                    'Purchase Qty Option 2': 0.9 * inch,
+                }
+                col_widths = [spare_width_map.get(c, 0.9 * inch) for c in table_df.columns]
             else:
                 col_widths = None
-            elements.append(_df_to_wrapped_table(table_df, styles, col_widths=col_widths, max_rows=section.get('table_max_rows')))
-            if len(table_df) > section.get('table_max_rows', len(table_df)):
-                elements.append(Paragraph(f"Note. Only the first {section.get('table_max_rows')} rows are displayed in this section to preserve readability.", styles['APA_Body']))
+            max_rows = section.get('table_max_rows', len(table_df))
+            elements.append(_df_to_wrapped_table(table_df, styles, col_widths=col_widths, max_rows=max_rows))
+            if isinstance(max_rows, int) and len(table_df) > max_rows:
+                elements.append(Paragraph(f"Note. Only the first {max_rows} rows are displayed in this section to preserve readability.", styles['APA_Body']))
         else:
             elements.append(Paragraph("No detailed rows are available for this section.", styles['APA_Body']))
 
@@ -1870,61 +1961,6 @@ if filtered.empty:
     st.stop()
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("📄 Informe PDF")
-pdf_title = st.sidebar.text_input("Título del informe", value="Installed Base Dashboard Report")
-pdf_author = st.sidebar.text_input("Nombre para firma", value="Javier Avellaneda")
-pdf_role = st.sidebar.text_input("Cargo / título", value="Service Leader | Export LATAM")
-pdf_signature_date = st.sidebar.text_input("Fecha de firma", value=datetime.now().strftime("%Y-%m-%d"))
-pdf_references = st.sidebar.text_area(
-    "Referencias APA (opcional, una por línea)",
-    value="",
-    height=120,
-    placeholder="American Psychological Association. (2020). Publication manual of the American Psychological Association (7th ed.).",
-)
-
-pdf_filter_summary = build_filter_summary(
-    selected_regions=selected_regions,
-    selected_countries=selected_countries,
-    selected_distributors=selected_distributors,
-    selected_instruments=selected_instruments,
-    selected_states=selected_states,
-)
-pdf_bytes = build_pdf_report(
-    filtered_df=filtered,
-    filter_summary=pdf_filter_summary,
-    report_title=pdf_title,
-    author_name=pdf_author,
-    author_role=pdf_role,
-    signature_date=pdf_signature_date,
-    references_text=pdf_references,
-    stock_context=st.session_state.get("pdf_stock_context", {"available": False}),
-)
-st.sidebar.download_button(
-    "Generar informe PDF (APA)",
-    data=pdf_bytes,
-    file_name=f"dashboard_report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
-    mime="application/pdf",
-    use_container_width=True,
-)
-
-total_assets = len(filtered)
-country_count = int(filtered["Country"].nunique(dropna=True))
-distributor_count = int(filtered["Distributor name"].nunique(dropna=True))
-instrument_count = int(filtered["Instrument type"].nunique(dropna=True))
-in_routine = int(filtered["Is in routine"].sum())
-
-m1, m2, m3, m4, m5 = st.columns(5)
-with m1:
-    metric_card("Activos filtrados", f"{total_assets:,}", "Base instalada visible")
-with m2:
-    metric_card("Países", f"{country_count}", "Cobertura geográfica filtrada")
-with m3:
-    metric_card("Distribuidores", f"{distributor_count}", "Distribuidores en la vista")
-with m4:
-    metric_card("Instrumentos", f"{instrument_count}", "Tipos de instrumento visibles")
-with m5:
-    metric_card("En rutina", f"{in_routine:,}", f"{(in_routine / total_assets * 100):.1f}% del filtro" if total_assets else "0.0% del filtro")
-
 base_tab, machine_tab, os_tab, process_tab, stock_tab, detail_tab = st.tabs(
     ["Base instalada", "Machine configuration", "Sistema operativo", "Procesamiento / PM", "Stock / Carstock gap", "Detalle por equipo"]
 )
@@ -2579,6 +2615,7 @@ with stock_tab:
         master_name = None
 
     if master_bytes is None:
+        st.session_state["pdf_stock_context"] = {"available": False}
         st.info("Sube el archivo maestro de carstock para activar esta pestaña.")
     else:
         master_bundle = load_carstock_master_bundle(master_bytes, master_name)
@@ -2586,6 +2623,7 @@ with stock_tab:
         has_legacy = bool(master_bundle["legacy_families"])
 
         if not has_consolidated and not has_legacy:
+            st.session_state["pdf_stock_context"] = {"available": False}
             st.warning("No se pudo interpretar el archivo maestro. Debe contener al menos part number y quantity.")
         else:
             st.markdown(f"**Archivo maestro activo:** {master_name}")
@@ -2595,10 +2633,12 @@ with stock_tab:
             )
 
             if stock_upload is None:
+                st.session_state["pdf_stock_context"] = {"available": False}
                 st.info("Sube ahora el archivo trimestral del distribuidor. Ejemplo recomendado: `ANNAR_stock_Q1_2026.xlsx`.")
             else:
                 stock_df_raw = load_table_file(stock_upload.getvalue(), stock_upload.name)
                 if stock_df_raw is None or stock_df_raw.empty:
+                    st.session_state["pdf_stock_context"] = {"available": False}
                     st.warning("El archivo subido no contiene datos legibles.")
                 else:
                     part_col_guess, qty_col_guess, desc_col_guess = detect_stock_columns(stock_df_raw)
@@ -2607,6 +2647,7 @@ with stock_tab:
                     detected_distributor = inferred_matches[0] if inferred_matches else None
 
                     if not detected_distributor:
+                        st.session_state["pdf_stock_context"] = {"available": False}
                         st.error("No pude identificar el distribuidor desde el nombre del archivo.")
                         st.caption("Renombra el archivo con un formato claro, por ejemplo: `ANNAR_stock_Q1_2026.xlsx`, `Bio-Nuclear_stock_marzo.xlsx` o `Simed Ecuador_carstock.xlsx`.")
                     else:
@@ -2685,6 +2726,7 @@ with stock_tab:
                             selected_families_stock = auto_families
 
                         if not selected_families_stock:
+                            st.session_state["pdf_stock_context"] = {"available": False}
                             st.warning("No hay familias seleccionadas para comparar. Ajusta el maestro o la selección avanzada.")
                         else:
                             master_df, master_mode = build_required_master_from_scope(
@@ -2701,6 +2743,7 @@ with stock_tab:
                                 )
 
                             if master_df.empty:
+                                st.session_state["pdf_stock_context"] = {"available": False}
                                 st.warning("No encontré carstock requerido para este distribuidor con las familias inferidas. Revisa el maestro o el nombre del archivo.")
                             else:
                                 comparison, extra_df, stock_slim = compare_stock(
@@ -2719,6 +2762,16 @@ with stock_tab:
                                 extra_skus = int(len(extra_df))
                                 option2_cost = float(pd.to_numeric(comparison["Option 2 Estimated Cost"], errors="coerce").fillna(0).sum())
                                 option2_currency = next((c for c in comparison["Currency"].dropna().astype(str).tolist() if c.strip()), "EUR")
+                                purchase_df = comparison[comparison["Qty Gap"] > 0][[
+                                    "Required Part Number",
+                                    "Required Description",
+                                    "Qty Gap",
+                                    "Option 2 Unit Price",
+                                    "Option 2 Estimated Cost",
+                                    "Currency",
+                                    "Status",
+                                ]].sort_values(["Option 2 Estimated Cost", "Qty Gap"], ascending=[False, False])
+
                                 st.session_state["pdf_stock_context"] = {
                                     "available": True,
                                     "detected_distributor": detected_distributor,
@@ -2732,6 +2785,9 @@ with stock_tab:
                                     "option2_cost": option2_cost,
                                     "currency": option2_currency,
                                     "top_gap_df": comparison[comparison["Qty Gap"] > 0].sort_values(["Qty Gap", "Required Part Number"], ascending=[False, True]).head(15).copy(),
+                                    "full_comparison_df": comparison.copy(),
+                                    "purchase_df": purchase_df.copy() if not purchase_df.empty else pd.DataFrame(columns=["Required Part Number", "Required Description", "Qty Gap", "Option 2 Unit Price", "Option 2 Estimated Cost", "Currency", "Status"]),
+                                    "extra_df": extra_df.copy() if not extra_df.empty else pd.DataFrame(columns=["Uploaded Part Number", "Uploaded Description", "Uploaded Qty", "Status"]),
                                 }
 
                                 sm1, sm2, sm3, sm4, sm5, sm6, sm7 = st.columns(7)
@@ -2803,15 +2859,6 @@ with stock_tab:
                                 show_cols = ["Required Part Number", "Required Description", "Required Qty", "Uploaded Qty", "Qty Gap", "Coverage %", "Option 2 Unit Price", "Option 2 Estimated Cost", "Currency", "Status"]
                                 st.dataframe(comparison[show_cols], use_container_width=True, hide_index=True)
 
-                                purchase_df = comparison[comparison["Qty Gap"] > 0][[
-                                    "Required Part Number",
-                                    "Required Description",
-                                    "Qty Gap",
-                                    "Option 2 Unit Price",
-                                    "Option 2 Estimated Cost",
-                                    "Currency",
-                                    "Status",
-                                ]].sort_values(["Option 2 Estimated Cost", "Qty Gap"], ascending=[False, False])
                                 if not purchase_df.empty:
                                     st.markdown("### Compra sugerida para cerrar el gap (opción 2)")
                                     st.dataframe(purchase_df, use_container_width=True, hide_index=True)
@@ -2956,6 +3003,46 @@ with detail_tab:
 
     with st.expander("Machine configurations completas"):
         st.code(safe_text(row.get("Machine Configurations"), "No disponible"))
+
+
+with st.sidebar:
+    st.subheader("📄 Informe PDF")
+    pdf_title = st.text_input("Título del informe", value="Installed Base Dashboard Report")
+    pdf_author = st.text_input("Nombre para firma", value="Javier Avellaneda")
+    pdf_role = st.text_input("Cargo / título", value="Service Leader | Export LATAM")
+    pdf_signature_date = st.text_input("Fecha de firma", value=datetime.now().strftime("%Y-%m-%d"))
+    pdf_references = st.text_area(
+        "Referencias APA (una por línea, opcional)",
+        value="",
+        height=110,
+        placeholder="Ejemplo:\nDiaSorin. (2026). Installed base export dashboard. Internal operational dataset.",
+    )
+
+    pdf_filter_summary = build_filter_summary(
+        selected_regions=selected_regions,
+        selected_countries=selected_countries,
+        selected_distributors=selected_distributors,
+        selected_instruments=selected_instruments,
+        selected_status_labels=selected_status_labels if 'selected_status_labels' in locals() else [],
+        total_records=len(filtered),
+    )
+    pdf_bytes = build_pdf_report(
+        filtered_df=filtered,
+        filter_summary=pdf_filter_summary,
+        report_title=pdf_title,
+        author_name=pdf_author,
+        author_role=pdf_role,
+        signature_date=pdf_signature_date,
+        references_text=pdf_references,
+        stock_context=st.session_state.get("pdf_stock_context", {"available": False}),
+    )
+    st.download_button(
+        "Generar informe PDF (APA)",
+        data=pdf_bytes,
+        file_name=f"dashboard_report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+        mime="application/pdf",
+        use_container_width=True,
+    )
 
 st.markdown("---")
 foot_l, foot_r = st.columns((0.75, 0.25))
