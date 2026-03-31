@@ -785,22 +785,22 @@ def build_pdf_report(
     doc = SimpleDocTemplate(
         buffer,
         pagesize=landscape(A4),
-        leftMargin=0.55 * inch,
-        rightMargin=0.55 * inch,
-        topMargin=0.7 * inch,
-        bottomMargin=0.55 * inch,
+        leftMargin=1.0 * inch,
+        rightMargin=1.0 * inch,
+        topMargin=1.0 * inch,
+        bottomMargin=1.0 * inch,
         title=report_title,
         author=author_name,
     )
 
     styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name="APA_Title", parent=styles["Title"], fontName="Helvetica-Bold", fontSize=18, leading=22, alignment=TA_CENTER, spaceAfter=10, textColor=colors.HexColor("#111111")))
-    styles.add(ParagraphStyle(name="APA_Subtitle", parent=styles["Normal"], fontName="Helvetica", fontSize=10.5, leading=14, alignment=TA_CENTER, spaceAfter=6, textColor=colors.HexColor("#444444")))
-    styles.add(ParagraphStyle(name="APA_Heading", parent=styles["Heading2"], fontName="Helvetica-Bold", fontSize=11, leading=14, alignment=TA_LEFT, spaceBefore=4, spaceAfter=6, textColor=colors.HexColor("#111111")))
-    styles.add(ParagraphStyle(name="APA_Body", parent=styles["BodyText"], fontName="Helvetica", fontSize=9, leading=12, alignment=TA_JUSTIFY, spaceAfter=6))
-    styles.add(ParagraphStyle(name="APA_Cell", parent=styles["BodyText"], fontName="Helvetica", fontSize=6.7, leading=8, alignment=TA_LEFT, wordWrap='CJK'))
-    styles.add(ParagraphStyle(name="APA_Cell_Header", parent=styles["BodyText"], fontName="Helvetica-Bold", fontSize=7, leading=8, alignment=TA_LEFT, textColor=colors.white))
-    styles.add(ParagraphStyle(name="APA_Signature", parent=styles["BodyText"], fontName="Helvetica", fontSize=10, leading=13, alignment=TA_LEFT, spaceAfter=3))
+    styles.add(ParagraphStyle(name="APA_Title", parent=styles["Title"], fontName="Times-Bold", fontSize=16, leading=20, alignment=TA_CENTER, spaceAfter=10, textColor=colors.HexColor("#111111")))
+    styles.add(ParagraphStyle(name="APA_Subtitle", parent=styles["Normal"], fontName="Times-Roman", fontSize=12, leading=24, alignment=TA_CENTER, spaceAfter=6, textColor=colors.HexColor("#444444")))
+    styles.add(ParagraphStyle(name="APA_Heading", parent=styles["Heading2"], fontName="Times-Bold", fontSize=12, leading=16, alignment=TA_LEFT, spaceBefore=4, spaceAfter=6, textColor=colors.HexColor("#111111")))
+    styles.add(ParagraphStyle(name="APA_Body", parent=styles["BodyText"], fontName="Times-Roman", fontSize=12, leading=24, alignment=TA_JUSTIFY, spaceAfter=6))
+    styles.add(ParagraphStyle(name="APA_Cell", parent=styles["BodyText"], fontName="Times-Roman", fontSize=8, leading=10, alignment=TA_LEFT, wordWrap='CJK'))
+    styles.add(ParagraphStyle(name="APA_Cell_Header", parent=styles["BodyText"], fontName="Times-Bold", fontSize=8, leading=10, alignment=TA_LEFT, textColor=colors.white))
+    styles.add(ParagraphStyle(name="APA_Signature", parent=styles["BodyText"], fontName="Times-Roman", fontSize=12, leading=24, alignment=TA_LEFT, spaceAfter=3))
 
     elements = []
     today_str = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -3007,6 +3007,7 @@ with detail_tab:
 
 with st.sidebar:
     st.subheader("📄 Informe PDF")
+    st.caption("Formato ajustado con márgenes APA de 1 pulgada y estructura de informe técnico ejecutiva.")
     pdf_title = st.text_input("Título del informe", value="Installed Base Dashboard Report")
     pdf_author = st.text_input("Nombre para firma", value="Javier Avellaneda")
     pdf_role = st.text_input("Cargo / título", value="Service Leader | Export LATAM")
@@ -3026,23 +3027,34 @@ with st.sidebar:
         selected_status_labels=selected_status_labels if 'selected_status_labels' in locals() else [],
         total_records=len(filtered),
     )
-    pdf_bytes = build_pdf_report(
-        filtered_df=filtered,
-        filter_summary=pdf_filter_summary,
-        report_title=pdf_title,
-        author_name=pdf_author,
-        author_role=pdf_role,
-        signature_date=pdf_signature_date,
-        references_text=pdf_references,
-        stock_context=st.session_state.get("pdf_stock_context", {"available": False}),
-    )
-    st.download_button(
-        "Generar informe PDF (APA)",
-        data=pdf_bytes,
-        file_name=f"dashboard_report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
-        mime="application/pdf",
-        use_container_width=True,
-    )
+
+    if st.button("Preparar informe PDF", use_container_width=True, key="prepare_pdf_report"):
+        try:
+            st.session_state["prepared_pdf_bytes"] = build_pdf_report(
+                filtered_df=filtered,
+                filter_summary=pdf_filter_summary,
+                report_title=pdf_title,
+                author_name=pdf_author,
+                author_role=pdf_role,
+                signature_date=pdf_signature_date,
+                references_text=pdf_references,
+                stock_context=st.session_state.get("pdf_stock_context", {"available": False}),
+            )
+            st.session_state["prepared_pdf_name"] = f"dashboard_report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+            st.success("Informe PDF preparado correctamente.")
+        except Exception as e:
+            st.session_state.pop("prepared_pdf_bytes", None)
+            st.error(f"No fue posible generar el PDF: {e}")
+
+    if st.session_state.get("prepared_pdf_bytes") is not None:
+        st.download_button(
+            "Descargar informe PDF (APA)",
+            data=st.session_state["prepared_pdf_bytes"],
+            file_name=st.session_state.get("prepared_pdf_name", f"dashboard_report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"),
+            mime="application/pdf",
+            use_container_width=True,
+            key="download_prepared_pdf",
+        )
 
 st.markdown("---")
 foot_l, foot_r = st.columns((0.75, 0.25))
