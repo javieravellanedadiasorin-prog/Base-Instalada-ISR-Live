@@ -21,12 +21,22 @@ except Exception:
     plt = None
     MATPLOTLIB_AVAILABLE = False
 
-from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT
-from reportlab.lib.pagesizes import A4, landscape
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.lib.units import inch
-from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+try:
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import inch
+    from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    REPORTLAB_AVAILABLE = True
+except Exception:
+    colors = None
+    TA_CENTER = TA_JUSTIFY = TA_LEFT = None
+    A4 = landscape = None
+    ParagraphStyle = getSampleStyleSheet = None
+    inch = 72
+    PageBreak = Paragraph = SimpleDocTemplate = Spacer = Table = TableStyle = None
+    REPORTLAB_AVAILABLE = False
 
 
 st.set_page_config(
@@ -781,6 +791,8 @@ def build_pdf_report(
     references_text: str = "",
     stock_context: dict | None = None,
 ) -> bytes:
+    if not REPORTLAB_AVAILABLE:
+        raise RuntimeError("reportlab no está instalado en el entorno.")
     buffer = BytesIO()
     doc = SimpleDocTemplate(
         buffer,
@@ -3019,42 +3031,47 @@ with st.sidebar:
         placeholder="Ejemplo:\nDiaSorin. (2026). Installed base export dashboard. Internal operational dataset.",
     )
 
-    pdf_filter_summary = build_filter_summary(
-        selected_regions=selected_regions,
-        selected_countries=selected_countries,
-        selected_distributors=selected_distributors,
-        selected_instruments=selected_instruments,
-        selected_states=selected_status_labels if 'selected_status_labels' in locals() else [],
-    )
-    pdf_filter_summary["Total records"] = f"{len(filtered):,}"
-
-    if st.button("Preparar informe PDF", use_container_width=True, key="prepare_pdf_report"):
-        try:
-            st.session_state["prepared_pdf_bytes"] = build_pdf_report(
-                filtered_df=filtered,
-                filter_summary=pdf_filter_summary,
-                report_title=pdf_title,
-                author_name=pdf_author,
-                author_role=pdf_role,
-                signature_date=pdf_signature_date,
-                references_text=pdf_references,
-                stock_context=st.session_state.get("pdf_stock_context", {"available": False}),
-            )
-            st.session_state["prepared_pdf_name"] = f"dashboard_report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
-            st.success("Informe PDF preparado correctamente.")
-        except Exception as e:
-            st.session_state.pop("prepared_pdf_bytes", None)
-            st.error(f"No fue posible generar el PDF: {e}")
-
-    if st.session_state.get("prepared_pdf_bytes") is not None:
-        st.download_button(
-            "Descargar informe PDF (APA)",
-            data=st.session_state["prepared_pdf_bytes"],
-            file_name=st.session_state.get("prepared_pdf_name", f"dashboard_report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"),
-            mime="application/pdf",
-            use_container_width=True,
-            key="download_prepared_pdf",
+    if not REPORTLAB_AVAILABLE:
+        st.warning("La exportación PDF requiere reportlab en el entorno. Agrega `reportlab` a requirements.txt.")
+    else:
+        base_summary = build_filter_summary(
+            selected_regions=selected_regions,
+            selected_countries=selected_countries,
+            selected_distributors=selected_distributors,
+            selected_instruments=selected_instruments,
+            selected_states=selected_states,
         )
+        pdf_filter_summary = dict(base_summary) if isinstance(base_summary, dict) else {"Filters": str(base_summary)}
+        pdf_filter_summary["Total records"] = f"{len(filtered):,}"
+
+        if st.button("Preparar informe PDF", use_container_width=True, key="prepare_pdf_report"):
+            try:
+                prepared_bytes = build_pdf_report(
+                    filtered_df=filtered,
+                    filter_summary=pdf_filter_summary,
+                    report_title=pdf_title,
+                    author_name=pdf_author,
+                    author_role=pdf_role,
+                    signature_date=pdf_signature_date,
+                    references_text=pdf_references,
+                    stock_context=st.session_state.get("pdf_stock_context", {"available": False}),
+                )
+                st.session_state["prepared_pdf_bytes"] = prepared_bytes
+                st.session_state["prepared_pdf_name"] = f"dashboard_report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+                st.success("Informe PDF preparado correctamente.")
+            except Exception as e:
+                st.session_state.pop("prepared_pdf_bytes", None)
+                st.error(f"No fue posible generar el PDF: {e}")
+
+        if st.session_state.get("prepared_pdf_bytes") is not None:
+            st.download_button(
+                "Descargar informe PDF (APA)",
+                data=st.session_state["prepared_pdf_bytes"],
+                file_name=st.session_state.get("prepared_pdf_name", f"dashboard_report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"),
+                mime="application/pdf",
+                use_container_width=True,
+                key="download_prepared_pdf",
+            )
 
 st.markdown("---")
 foot_l, foot_r = st.columns((0.75, 0.25))
