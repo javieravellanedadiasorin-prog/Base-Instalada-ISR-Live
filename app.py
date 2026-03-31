@@ -1,17 +1,25 @@
 from __future__ import annotations
 
 from pathlib import Path
-from datetime import date
+from datetime import date, datetime
 from io import BytesIO, StringIO
 import re
 import hashlib
 import csv
+import math
 
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import inch
+from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 
 st.set_page_config(
@@ -253,6 +261,372 @@ def dataframe_to_excel_bytes(sheet_map: dict[str, pd.DataFrame]) -> bytes:
     return output.getvalue()
 
 
+
+def normalize_operational_status(value) -> str:
+    if pd.isna(value):
+        return "No informado"
+    text = str(value).strip()
+    if not text:
+        return "No informado"
+
+    upper = text.upper()
+    lower = text.lower()
+
+    if "scrap" in lower:
+        return "Scraped"
+    if upper in {"IN ROUTINE", "ROUTINE"} or "IN ROUTINE" in upper:
+        return "Routine"
+
+    return text.title()
+
+
+def compute_state_filter_counts(df: pd.DataFrame) -> list[tuple[str, int]]:
+    if df.empty or "Operational status grouped" not in df.columns:
+        return []
+
+    grouped = (
+        df["Operational status grouped"]
+        .fillna("No informado")
+        .astype(str)
+        .value_counts()
+    )
+
+    items = []
+    non_routine_count = int((~df["Operational status grouped"].eq("Routine")).sum())
+    if non_routine_count > 0:
+        items.append(("No rutina", non_routine_count))
+
+    preferred_order = ["Routine", "Scraped", "No informado"]
+    seen = set()
+
+    for name in preferred_order:
+        count = int(grouped.get(name, 0))
+        if count > 0:
+            items.append((name, count))
+            seen.add(name)
+
+    for name, count in grouped.items():
+        if name not in seen and int(count) > 0:
+            items.append((name, int(count)))
+
+    return items
+
+
+def apply_operational_status_filter(df: pd.DataFrame, selected_states: list[str]) -> pd.DataFrame:
+    if df.empty or not selected_states or "Operational status grouped" not in df.columns:
+        return df
+
+    mask = pd.Series(False, index=df.index)
+    state_series = df["Operational status grouped"].fillna("No informado").astype(str)
+
+    for state in selected_states:
+        if state == "No rutina":
+            mask = mask | (~state_series.eq("Routine"))
+        else:
+            mask = mask | state_series.eq(state)
+
+    return df[mask].copy()
+
+
+def clean_filter_value(values) -> str:
+    if values is None:
+        return "All"
+    if isinstance(values, (list, tuple, set)):
+        clean = [str(v) for v in values if str(v).strip()]
+        return ", ".join(clean) if clean else "All"
+    text = str(values).strip()
+    return text or "All"
+
+
+def build_filter_summary(
+    selected_regions: list[str],
+    selected_countries: list[str],
+    selected_distributors: list[str],
+    selected_instruments: list[str],
+    selected_states: list[str],
+) -> dict[str, str]:
+    return {
+        "Commercial Region": clean_filter_value(selected_regions),
+        "Country": clean_filter_value(selected_countries),
+        "Distributor": clean_filter_value(selected_distributors),
+        "Instrument Type": clean_filter_value(selected_instruments),
+        "Operational Status": clean_filter_value(selected_states),
+    }
+
+
+def prepare_pdf_report_table(df: pd.DataFrame) -> pd.DataFrame:
+    preferred_columns = [
+        "Commercial Region",
+        "Country",
+        "Distributor name",
+        "Customer name",
+        "Instrument type",
+        "Serial number",
+        "Operational status grouped",
+        "Operational status grouped",
+        "Operational status",
+        "Asset condition",
+        "Installation date",
+        "Operating System",
+        "Type of contract",
+        "PM next date",
+    ]
+    available = [col for col in preferred_columns if col in df.columns]
+    report_df = df[available].copy()
+
+    for col in ["Installation date", "PM next date"]:
+        if col in report_df.columns:
+            report_df[col] = pd.to_datetime(report_df[col], errors="coerce").dt.strftime("%Y-%m-%d")
+            report_df[col] = report_df[col].fillna("N/A")
+
+    report_df = report_df.rename(
+        columns={
+            "Distributor name": "Distributor",
+            "Customer name": "Customer",
+            "Instrument type": "Instrument",
+            "Serial number": "Serial Number",
+            "Operational status grouped": "State",
+            "Operational status": "Raw Status",
+            "Asset condition": "Asset Condition",
+            "Installation date": "Installation Date",
+            "Type of contract": "Contract Type",
+            "PM next date": "PM Next Date",
+        }
+    )
+    return report_df
+
+
+def _pdf_header_footer(canvas, doc, short_title: str):
+    canvas.saveState()
+    width, height = A4
+
+    canvas.setFont("Helvetica-Bold", 9)
+    canvas.drawString(doc.leftMargin, height - 30, f"Running head: {short_title[:60].upper()}")
+    canvas.drawRightString(width - doc.rightMargin, height - 30, str(doc.page))
+
+    canvas.setFont("Helvetica", 8)
+    canvas.setFillColor(colors.HexColor("#666666"))
+    canvas.drawString(doc.leftMargin, 20, "Records List Intelligence Dashboard | APA report")
+    canvas.drawRightString(width - doc.rightMargin, 20, datetime.now().strftime("%Y-%m-%d"))
+    canvas.restoreState()
+
+
+def build_pdf_report(
+    filtered_df: pd.DataFrame,
+    filter_summary: dict[str, str],
+    report_title: str,
+    author_name: str,
+    author_role: str,
+    signature_date: str,
+    references_text: str = "",
+) -> bytes:
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=0.85 * inch,
+        rightMargin=0.85 * inch,
+        topMargin=0.95 * inch,
+        bottomMargin=0.75 * inch,
+        title=report_title,
+        author=author_name,
+    )
+
+    styles = getSampleStyleSheet()
+    styles.add(
+        ParagraphStyle(
+            name="APA_Title",
+            parent=styles["Title"],
+            fontName="Helvetica-Bold",
+            fontSize=18,
+            leading=24,
+            alignment=TA_CENTER,
+            spaceAfter=14,
+            textColor=colors.HexColor("#111111"),
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="APA_Subtitle",
+            parent=styles["Normal"],
+            fontName="Helvetica",
+            fontSize=11,
+            leading=16,
+            alignment=TA_CENTER,
+            spaceAfter=8,
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="APA_Heading",
+            parent=styles["Heading2"],
+            fontName="Helvetica-Bold",
+            fontSize=12,
+            leading=16,
+            alignment=TA_LEFT,
+            spaceBefore=8,
+            spaceAfter=6,
+            textColor=colors.HexColor("#111111"),
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="APA_Body",
+            parent=styles["BodyText"],
+            fontName="Helvetica",
+            fontSize=10,
+            leading=15,
+            alignment=TA_JUSTIFY,
+            spaceAfter=8,
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="APA_Signature",
+            parent=styles["BodyText"],
+            fontName="Helvetica",
+            fontSize=10,
+            leading=14,
+            alignment=TA_LEFT,
+            spaceAfter=5,
+        )
+    )
+
+    elements = []
+
+    today_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+    short_title = re.sub(r"\s+", " ", report_title.strip() or "Dashboard Report")[:50]
+
+    # Title page
+    elements.append(Spacer(1, 1.4 * inch))
+    elements.append(Paragraph(report_title, styles["APA_Title"]))
+    elements.append(Paragraph(author_name, styles["APA_Subtitle"]))
+    elements.append(Paragraph(author_role, styles["APA_Subtitle"]))
+    elements.append(Paragraph(f"Generated on {today_str}", styles["APA_Subtitle"]))
+    elements.append(Spacer(1, 0.8 * inch))
+    elements.append(
+        Paragraph(
+            "This report was generated automatically from the filtered dashboard view. "
+            "The contents reflect only the records visible under the active filters at the time of export.",
+            styles["APA_Body"],
+        )
+    )
+    elements.append(PageBreak())
+
+    # Executive summary
+    elements.append(Paragraph("Executive Summary", styles["APA_Heading"]))
+    elements.append(
+        Paragraph(
+            f"A total of <b>{len(filtered_df):,}</b> records were included in this report. "
+            f"The dataset was filtered according to the operational, geographic, and distributor-level criteria selected by the user.",
+            styles["APA_Body"],
+        )
+    )
+
+    # Filters table
+    elements.append(Paragraph("Active Filters", styles["APA_Heading"]))
+    filters_table_data = [["Filter", "Selected Value"]]
+    for key, value in filter_summary.items():
+        filters_table_data.append([key, value])
+
+    filters_table = Table(filters_table_data, colWidths=[1.9 * inch, 4.65 * inch], repeatRows=1)
+    filters_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f4e79")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("LEADING", (0, 0), (-1, -1), 12),
+                ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#b8cce4")),
+                ("BACKGROUND", (0, 1), (-1, -1), colors.whitesmoke),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.HexColor("#ebf1f7")]),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ]
+        )
+    )
+    elements.append(filters_table)
+    elements.append(Spacer(1, 0.18 * inch))
+
+    # Data table
+    elements.append(Paragraph("Filtered Records", styles["APA_Heading"]))
+    report_df = prepare_pdf_report_table(filtered_df)
+    if report_df.empty:
+        elements.append(Paragraph("No records are available for the selected filter combination.", styles["APA_Body"]))
+    else:
+        table_df = report_df.head(250).fillna("N/A").astype(str)
+        table_data = [table_df.columns.tolist()] + table_df.values.tolist()
+
+        total_width = doc.width
+        column_count = max(len(table_df.columns), 1)
+        col_width = total_width / column_count
+        col_widths = [col_width] * column_count
+
+        data_table = Table(table_data, colWidths=col_widths, repeatRows=1)
+        data_table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f1f1f")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, 0), 7.5),
+                    ("FONTSIZE", (0, 1), (-1, -1), 6.6),
+                    ("LEADING", (0, 0), (-1, -1), 8),
+                    ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#a6a6a6")),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f4f6f8")]),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 3),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+                    ("TOPPADDING", (0, 0), (-1, -1), 4),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ]
+            )
+        )
+        elements.append(data_table)
+
+        if len(report_df) > 250:
+            elements.append(
+                Spacer(1, 0.12 * inch)
+            )
+            elements.append(
+                Paragraph(
+                    f"Note. Only the first 250 rows are displayed in the PDF table for readability. "
+                    f"The filtered dataset contains {len(report_df):,} rows in total.",
+                    styles["APA_Body"],
+                )
+            )
+
+    # References
+    elements.append(Spacer(1, 0.18 * inch))
+    elements.append(Paragraph("References", styles["APA_Heading"]))
+    references = [line.strip() for line in references_text.splitlines() if line.strip()]
+    if references:
+        for ref in references:
+            elements.append(Paragraph(ref, styles["APA_Body"]))
+    else:
+        elements.append(
+            Paragraph(
+                "No external bibliographic references were provided for this report. "
+                "The document is based on the operational data currently loaded in the dashboard.",
+                styles["APA_Body"],
+            )
+        )
+
+    # Signature
+    elements.append(Spacer(1, 0.28 * inch))
+    elements.append(Paragraph("Signature", styles["APA_Heading"]))
+    elements.append(Paragraph(author_name, styles["APA_Signature"]))
+    elements.append(Paragraph(author_role, styles["APA_Signature"]))
+    elements.append(Paragraph(f"Signature date: {signature_date}", styles["APA_Signature"]))
+
+    doc.build(
+        elements,
+        onFirstPage=lambda canvas, doc: _pdf_header_footer(canvas, doc, short_title),
+        onLaterPages=lambda canvas, doc: _pdf_header_footer(canvas, doc, short_title),
+    )
+    return buffer.getvalue()
+
+
 def metric_card(label: str, value: str, subtitle: str = "") -> None:
     st.markdown(
         f"""
@@ -453,6 +827,7 @@ def load_records(file_bytes: bytes) -> pd.DataFrame:
         df[col] = pd.to_datetime(df[col], dayfirst=True, errors="coerce")
 
     df["Instrument family"] = df["Instrument type"].map(normalize_instrument_type)
+    df["Operational status grouped"] = df["Operational status"].map(normalize_operational_status)
 
     today = pd.Timestamp(date.today())
     df["Age (years)"] = ((today - df["Installation date"]).dt.days / 365.25).round(1)
@@ -544,6 +919,7 @@ def parse_uploaded_records(uploaded_file) -> pd.DataFrame:
             df[col] = pd.to_datetime(df[col], dayfirst=True, errors="coerce")
 
     df["Instrument family"] = df["Instrument type"].map(normalize_instrument_type)
+    df["Operational status grouped"] = df["Operational status"].map(normalize_operational_status)
 
     today = pd.Timestamp(date.today())
     df["Age (years)"] = ((today - df["Installation date"]).dt.days / 365.25).round(1)
@@ -1264,6 +1640,27 @@ if selected_distributors:
 instrument_options = sorted(instrument_base["Instrument type"].dropna().unique().tolist())
 selected_instruments = st.sidebar.multiselect("Tipo de instrumento", options=instrument_options, default=[], placeholder="Selecciona uno o varios instrumentos")
 
+status_base = raw_df.copy()
+if selected_regions:
+    status_base = status_base[status_base["Commercial Region"].isin(selected_regions)]
+if selected_countries:
+    status_base = status_base[status_base["Country"].isin(selected_countries)]
+if selected_distributors:
+    status_base = status_base[status_base["Distributor name"].isin(selected_distributors)]
+if selected_instruments:
+    status_base = status_base[status_base["Instrument type"].isin(selected_instruments)]
+
+state_count_items = compute_state_filter_counts(status_base)
+state_option_map = {f"{state} ({count})": state for state, count in state_count_items}
+selected_state_labels = st.sidebar.multiselect(
+    "Estado operativo",
+    options=list(state_option_map.keys()),
+    default=[],
+    placeholder="Selecciona uno o varios estados",
+    help="Incluye el estado especial 'No rutina' y cualquier otro estado disponible en la vista actual.",
+)
+selected_states = [state_option_map[label] for label in selected_state_labels]
+
 filtered = raw_df.copy()
 if selected_regions:
     filtered = filtered[filtered["Commercial Region"].isin(selected_regions)]
@@ -1273,10 +1670,48 @@ if selected_distributors:
     filtered = filtered[filtered["Distributor name"].isin(selected_distributors)]
 if selected_instruments:
     filtered = filtered[filtered["Instrument type"].isin(selected_instruments)]
+filtered = apply_operational_status_filter(filtered, selected_states)
 
 if filtered.empty:
     st.warning("No hay datos para la combinación de filtros actual.")
     st.stop()
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("📄 Informe PDF")
+pdf_title = st.sidebar.text_input("Título del informe", value="Installed Base Dashboard Report")
+pdf_author = st.sidebar.text_input("Nombre para firma", value="Javier Avellaneda")
+pdf_role = st.sidebar.text_input("Cargo / título", value="Service Leader | Export LATAM")
+pdf_signature_date = st.sidebar.text_input("Fecha de firma", value=datetime.now().strftime("%Y-%m-%d"))
+pdf_references = st.sidebar.text_area(
+    "Referencias APA (opcional, una por línea)",
+    value="",
+    height=120,
+    placeholder="American Psychological Association. (2020). Publication manual of the American Psychological Association (7th ed.).",
+)
+
+pdf_filter_summary = build_filter_summary(
+    selected_regions=selected_regions,
+    selected_countries=selected_countries,
+    selected_distributors=selected_distributors,
+    selected_instruments=selected_instruments,
+    selected_states=selected_states,
+)
+pdf_bytes = build_pdf_report(
+    filtered_df=filtered,
+    filter_summary=pdf_filter_summary,
+    report_title=pdf_title,
+    author_name=pdf_author,
+    author_role=pdf_role,
+    signature_date=pdf_signature_date,
+    references_text=pdf_references,
+)
+st.sidebar.download_button(
+    "Generar informe PDF (APA)",
+    data=pdf_bytes,
+    file_name=f"dashboard_report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+    mime="application/pdf",
+    use_container_width=True,
+)
 
 total_assets = len(filtered)
 country_count = int(filtered["Country"].nunique(dropna=True))
@@ -1441,6 +1876,7 @@ with base_tab:
         "Customer name",
         "Instrument type",
         "Serial number",
+        "Operational status grouped",
         "Operational status",
         "Asset condition",
         "Installation date",
@@ -2316,7 +2752,7 @@ st.markdown("---")
 foot_l, foot_r = st.columns((0.75, 0.25))
 with foot_l:
     st.markdown(
-        '<div class="small-note">Filtros activos: región comercial, país, distribuidor y tipo de instrumento. Base instalada incluye análisis por ciudad. Sistema operativo prioriza la detección de equipos legacy que deben migrar a Windows 10. En stock, el dashboard intenta identificar automáticamente el distribuidor a partir del título del archivo cargado. La fuente activa de Records List conserva el último archivo que subas durante la sesión.</div>',
+        '<div class="small-note">Filtros activos: región comercial, país, distribuidor, tipo de instrumento y estado operativo. Base instalada incluye análisis por ciudad. Sistema operativo prioriza la detección de equipos legacy que deben migrar a Windows 10. En stock, el dashboard intenta identificar automáticamente el distribuidor a partir del título del archivo cargado. La fuente activa de Records List conserva el último archivo que subas durante la sesión.</div>',
         unsafe_allow_html=True,
     )
 with foot_r:
