@@ -14,37 +14,12 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-
-def _get_reportlab_modules():
-    try:
-        from reportlab.lib import colors
-        from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT
-        from reportlab.lib.pagesizes import A4
-        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-        from reportlab.lib.units import inch
-        from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
-        return {
-            "colors": colors,
-            "TA_CENTER": TA_CENTER,
-            "TA_JUSTIFY": TA_JUSTIFY,
-            "TA_LEFT": TA_LEFT,
-            "A4": A4,
-            "ParagraphStyle": ParagraphStyle,
-            "getSampleStyleSheet": getSampleStyleSheet,
-            "inch": inch,
-            "PageBreak": PageBreak,
-            "Paragraph": Paragraph,
-            "SimpleDocTemplate": SimpleDocTemplate,
-            "Spacer": Spacer,
-            "Table": Table,
-            "TableStyle": TableStyle,
-        }
-    except ModuleNotFoundError as exc:
-        raise ModuleNotFoundError(
-            "La librería 'reportlab' no está instalada. Agrega 'reportlab' a requirements.txt o instálala con 'pip install reportlab'."
-        ) from exc
-
-
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import inch
+from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 
 st.set_page_config(
@@ -388,13 +363,11 @@ def prepare_pdf_report_table(df: pd.DataFrame) -> pd.DataFrame:
         "Instrument type",
         "Serial number",
         "Operational status grouped",
-        "Operational status grouped",
         "Operational status",
+        "Operating System",
         "Asset condition",
         "Installation date",
-        "Operating System",
         "Type of contract",
-        "PM next date",
     ]
     available = [col for col in preferred_columns if col in df.columns]
     report_df = df[available].copy()
@@ -404,39 +377,51 @@ def prepare_pdf_report_table(df: pd.DataFrame) -> pd.DataFrame:
             report_df[col] = pd.to_datetime(report_df[col], errors="coerce").dt.strftime("%Y-%m-%d")
             report_df[col] = report_df[col].fillna("N/A")
 
+    for col in report_df.columns:
+        if col not in ["Installation date", "PM next date"]:
+            report_df[col] = report_df[col].fillna("N/A").astype(str).str.strip().replace("", "N/A")
+
     report_df = report_df.rename(
         columns={
+            "Commercial Region": "Region",
             "Distributor name": "Distributor",
             "Customer name": "Customer",
             "Instrument type": "Instrument",
-            "Serial number": "Serial Number",
+            "Serial number": "Serial",
             "Operational status grouped": "State",
             "Operational status": "Raw Status",
-            "Asset condition": "Asset Condition",
-            "Installation date": "Installation Date",
-            "Type of contract": "Contract Type",
-            "PM next date": "PM Next Date",
+            "Operating System": "OS",
+            "Asset condition": "Asset",
+            "Installation date": "Install Date",
+            "Type of contract": "Contract",
         }
     )
-    return report_df
+
+    ordered_cols = [
+        c for c in ["Region", "Country", "Distributor", "Customer", "Instrument", "Serial", "State", "Raw Status", "OS", "Asset", "Install Date", "Contract"]
+        if c in report_df.columns
+    ]
+    return report_df[ordered_cols]
 
 
 def _pdf_header_footer(canvas, doc, short_title: str):
-    rl = _get_reportlab_modules()
-    colors = rl["colors"]
-    A4 = rl["A4"]
-
     canvas.saveState()
-    width, height = A4
+    width, height = landscape(A4)
+
+    canvas.setStrokeColor(colors.HexColor("#D9D9D9"))
+    canvas.setLineWidth(0.6)
+    canvas.line(doc.leftMargin, height - 34, width - doc.rightMargin, height - 34)
+    canvas.line(doc.leftMargin, 28, width - doc.rightMargin, 28)
 
     canvas.setFont("Helvetica-Bold", 9)
-    canvas.drawString(doc.leftMargin, height - 30, f"Running head: {short_title[:60].upper()}")
-    canvas.drawRightString(width - doc.rightMargin, height - 30, str(doc.page))
+    canvas.setFillColor(colors.HexColor("#222222"))
+    canvas.drawString(doc.leftMargin, height - 24, short_title[:90])
+    canvas.drawRightString(width - doc.rightMargin, height - 24, f"Page {doc.page}")
 
     canvas.setFont("Helvetica", 8)
     canvas.setFillColor(colors.HexColor("#666666"))
-    canvas.drawString(doc.leftMargin, 20, "Records List Intelligence Dashboard | APA report")
-    canvas.drawRightString(width - doc.rightMargin, 20, datetime.now().strftime("%Y-%m-%d"))
+    canvas.drawString(doc.leftMargin, 16, "Records List Intelligence Dashboard | APA-style filtered report")
+    canvas.drawRightString(width - doc.rightMargin, 16, datetime.now().strftime("%Y-%m-%d %H:%M"))
     canvas.restoreState()
 
 
@@ -449,226 +434,129 @@ def build_pdf_report(
     signature_date: str,
     references_text: str = "",
 ) -> bytes:
-    rl = _get_reportlab_modules()
-    colors = rl["colors"]
-    TA_CENTER = rl["TA_CENTER"]
-    TA_JUSTIFY = rl["TA_JUSTIFY"]
-    TA_LEFT = rl["TA_LEFT"]
-    A4 = rl["A4"]
-    ParagraphStyle = rl["ParagraphStyle"]
-    getSampleStyleSheet = rl["getSampleStyleSheet"]
-    inch = rl["inch"]
-    PageBreak = rl["PageBreak"]
-    Paragraph = rl["Paragraph"]
-    SimpleDocTemplate = rl["SimpleDocTemplate"]
-    Spacer = rl["Spacer"]
-    Table = rl["Table"]
-    TableStyle = rl["TableStyle"]
-
     buffer = BytesIO()
     doc = SimpleDocTemplate(
         buffer,
-        pagesize=A4,
-        leftMargin=0.85 * inch,
-        rightMargin=0.85 * inch,
-        topMargin=0.95 * inch,
-        bottomMargin=0.75 * inch,
+        pagesize=landscape(A4),
+        leftMargin=0.55 * inch,
+        rightMargin=0.55 * inch,
+        topMargin=0.7 * inch,
+        bottomMargin=0.55 * inch,
         title=report_title,
         author=author_name,
     )
 
     styles = getSampleStyleSheet()
-    styles.add(
-        ParagraphStyle(
-            name="APA_Title",
-            parent=styles["Title"],
-            fontName="Helvetica-Bold",
-            fontSize=18,
-            leading=24,
-            alignment=TA_CENTER,
-            spaceAfter=14,
-            textColor=colors.HexColor("#111111"),
-        )
-    )
-    styles.add(
-        ParagraphStyle(
-            name="APA_Subtitle",
-            parent=styles["Normal"],
-            fontName="Helvetica",
-            fontSize=11,
-            leading=16,
-            alignment=TA_CENTER,
-            spaceAfter=8,
-        )
-    )
-    styles.add(
-        ParagraphStyle(
-            name="APA_Heading",
-            parent=styles["Heading2"],
-            fontName="Helvetica-Bold",
-            fontSize=12,
-            leading=16,
-            alignment=TA_LEFT,
-            spaceBefore=8,
-            spaceAfter=6,
-            textColor=colors.HexColor("#111111"),
-        )
-    )
-    styles.add(
-        ParagraphStyle(
-            name="APA_Body",
-            parent=styles["BodyText"],
-            fontName="Helvetica",
-            fontSize=10,
-            leading=15,
-            alignment=TA_JUSTIFY,
-            spaceAfter=8,
-        )
-    )
-    styles.add(
-        ParagraphStyle(
-            name="APA_Signature",
-            parent=styles["BodyText"],
-            fontName="Helvetica",
-            fontSize=10,
-            leading=14,
-            alignment=TA_LEFT,
-            spaceAfter=5,
-        )
-    )
+    styles.add(ParagraphStyle(name="APA_Title", parent=styles["Title"], fontName="Helvetica-Bold", fontSize=18, leading=22, alignment=TA_CENTER, spaceAfter=10, textColor=colors.HexColor("#111111")))
+    styles.add(ParagraphStyle(name="APA_Subtitle", parent=styles["Normal"], fontName="Helvetica", fontSize=10.5, leading=14, alignment=TA_CENTER, spaceAfter=6, textColor=colors.HexColor("#444444")))
+    styles.add(ParagraphStyle(name="APA_Heading", parent=styles["Heading2"], fontName="Helvetica-Bold", fontSize=11, leading=14, alignment=TA_LEFT, spaceBefore=4, spaceAfter=6, textColor=colors.HexColor("#111111")))
+    styles.add(ParagraphStyle(name="APA_Body", parent=styles["BodyText"], fontName="Helvetica", fontSize=9, leading=12, alignment=TA_JUSTIFY, spaceAfter=6))
+    styles.add(ParagraphStyle(name="APA_Cell", parent=styles["BodyText"], fontName="Helvetica", fontSize=6.6, leading=8, alignment=TA_LEFT, wordWrap='CJK'))
+    styles.add(ParagraphStyle(name="APA_Cell_Header", parent=styles["BodyText"], fontName="Helvetica-Bold", fontSize=7, leading=8, alignment=TA_LEFT, textColor=colors.white))
+    styles.add(ParagraphStyle(name="APA_Signature", parent=styles["BodyText"], fontName="Helvetica", fontSize=10, leading=13, alignment=TA_LEFT, spaceAfter=3))
 
     elements = []
-
     today_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-    short_title = re.sub(r"\s+", " ", report_title.strip() or "Dashboard Report")[:50]
+    short_title = re.sub(r"\s+", " ", report_title.strip() or "Dashboard Report")[:80]
 
-    # Title page
-    elements.append(Spacer(1, 1.4 * inch))
+    elements.append(Spacer(1, 0.45 * inch))
     elements.append(Paragraph(report_title, styles["APA_Title"]))
     elements.append(Paragraph(author_name, styles["APA_Subtitle"]))
     elements.append(Paragraph(author_role, styles["APA_Subtitle"]))
     elements.append(Paragraph(f"Generated on {today_str}", styles["APA_Subtitle"]))
-    elements.append(Spacer(1, 0.8 * inch))
-    elements.append(
-        Paragraph(
-            "This report was generated automatically from the filtered dashboard view. "
-            "The contents reflect only the records visible under the active filters at the time of export.",
-            styles["APA_Body"],
-        )
-    )
-    elements.append(PageBreak())
-
-    # Executive summary
-    elements.append(Paragraph("Executive Summary", styles["APA_Heading"]))
-    elements.append(
-        Paragraph(
-            f"A total of <b>{len(filtered_df):,}</b> records were included in this report. "
-            f"The dataset was filtered according to the operational, geographic, and distributor-level criteria selected by the user.",
-            styles["APA_Body"],
-        )
-    )
-
-    # Filters table
-    elements.append(Paragraph("Active Filters", styles["APA_Heading"]))
-    filters_table_data = [["Filter", "Selected Value"]]
-    for key, value in filter_summary.items():
-        filters_table_data.append([key, value])
-
-    filters_table = Table(filters_table_data, colWidths=[1.9 * inch, 4.65 * inch], repeatRows=1)
-    filters_table.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f4e79")),
-                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("FONTSIZE", (0, 0), (-1, -1), 9),
-                ("LEADING", (0, 0), (-1, -1), 12),
-                ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#b8cce4")),
-                ("BACKGROUND", (0, 1), (-1, -1), colors.whitesmoke),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.HexColor("#ebf1f7")]),
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ]
-        )
-    )
-    elements.append(filters_table)
     elements.append(Spacer(1, 0.18 * inch))
+    elements.append(Paragraph("This report was generated from the active dashboard filters and reflects only the records visible at export time.", styles["APA_Body"]))
 
-    # Data table
-    elements.append(Paragraph("Filtered Records", styles["APA_Heading"]))
+    elements.append(Paragraph("Executive Summary", styles["APA_Heading"]))
+    elements.append(Paragraph(f"A total of <b>{len(filtered_df):,}</b> records were included. This document summarizes the filtered installed-base view and presents the detailed records in a landscape appendix-style table for better readability.", styles["APA_Body"]))
+
+    elements.append(Paragraph("Active Filters", styles["APA_Heading"]))
+    filters_table_data = [[Paragraph("<b>Filter</b>", styles["APA_Cell_Header"]), Paragraph("<b>Selected Value</b>", styles["APA_Cell_Header"])]]
+    for key, value in filter_summary.items():
+        filters_table_data.append([Paragraph(str(key), styles["APA_Cell"]), Paragraph(str(value), styles["APA_Cell"])])
+    filters_table = Table(filters_table_data, colWidths=[2.0 * inch, 7.4 * inch], repeatRows=1)
+    filters_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f4e79")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#C8D6E5")),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.HexColor("#F7F9FB")]),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    elements.append(filters_table)
+    elements.append(Spacer(1, 0.12 * inch))
+
     report_df = prepare_pdf_report_table(filtered_df)
-    if report_df.empty:
-        elements.append(Paragraph("No records are available for the selected filter combination.", styles["APA_Body"]))
-    else:
-        table_df = report_df.head(250).fillna("N/A").astype(str)
-        table_data = [table_df.columns.tolist()] + table_df.values.tolist()
+    elements.append(Paragraph("Filtered Records", styles["APA_Heading"]))
+    if not report_df.empty:
+        elements.append(Paragraph("For readability, the detailed table uses wrapped text, landscape orientation, and capped row output in the PDF. Use the dashboard export for the full raw dataset when needed.", styles["APA_Body"]))
 
-        total_width = doc.width
-        column_count = max(len(table_df.columns), 1)
-        col_width = total_width / column_count
-        col_widths = [col_width] * column_count
+        table_df = report_df.head(120).copy()
+        for col in table_df.columns:
+            table_df[col] = table_df[col].fillna("N/A").astype(str)
+            table_df[col] = table_df[col].str.replace("&", "&amp;", regex=False).str.replace("<", "&lt;", regex=False).str.replace(">", "&gt;", regex=False)
+            table_df[col] = table_df[col].str.slice(0, 90)
+
+        header_row = [Paragraph(f"<b>{c}</b>", styles["APA_Cell_Header"]) for c in table_df.columns]
+        body_rows = [[Paragraph(v, styles["APA_Cell"]) for v in row] for row in table_df.values.tolist()]
+        table_data = [header_row] + body_rows
+
+        width_map = {
+            "Region": 0.8 * inch,
+            "Country": 0.85 * inch,
+            "Distributor": 1.15 * inch,
+            "Customer": 1.25 * inch,
+            "Instrument": 0.95 * inch,
+            "Serial": 0.9 * inch,
+            "State": 0.7 * inch,
+            "Raw Status": 1.0 * inch,
+            "OS": 0.75 * inch,
+            "Asset": 0.65 * inch,
+            "Install Date": 0.8 * inch,
+            "Contract": 1.1 * inch,
+        }
+        col_widths = [width_map.get(c, 0.9 * inch) for c in table_df.columns]
 
         data_table = Table(table_data, colWidths=col_widths, repeatRows=1)
-        data_table.setStyle(
-            TableStyle(
-                [
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f1f1f")),
-                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                    ("FONTSIZE", (0, 0), (-1, 0), 7.5),
-                    ("FONTSIZE", (0, 1), (-1, -1), 6.6),
-                    ("LEADING", (0, 0), (-1, -1), 8),
-                    ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#a6a6a6")),
-                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f4f6f8")]),
-                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 3),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 3),
-                    ("TOPPADDING", (0, 0), (-1, -1), 4),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-                ]
-            )
-        )
+        data_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#203864")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#BFBFBF")),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F5F7FA")]),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 3),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ]))
         elements.append(data_table)
 
-        if len(report_df) > 250:
-            elements.append(
-                Spacer(1, 0.12 * inch)
-            )
-            elements.append(
-                Paragraph(
-                    f"Note. Only the first 250 rows are displayed in the PDF table for readability. "
-                    f"The filtered dataset contains {len(report_df):,} rows in total.",
-                    styles["APA_Body"],
-                )
-            )
+        if len(report_df) > 120:
+            elements.append(Spacer(1, 0.1 * inch))
+            elements.append(Paragraph(f"Note. Only the first 120 filtered rows are displayed in the PDF to preserve legibility. The active filter contains {len(report_df):,} total rows.", styles["APA_Body"]))
+    else:
+        elements.append(Paragraph("No records are available for the selected filter combination.", styles["APA_Body"]))
 
-    # References
-    elements.append(Spacer(1, 0.18 * inch))
+    elements.append(Spacer(1, 0.12 * inch))
     elements.append(Paragraph("References", styles["APA_Heading"]))
     references = [line.strip() for line in references_text.splitlines() if line.strip()]
     if references:
         for ref in references:
+            ref = ref.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             elements.append(Paragraph(ref, styles["APA_Body"]))
     else:
-        elements.append(
-            Paragraph(
-                "No external bibliographic references were provided for this report. "
-                "The document is based on the operational data currently loaded in the dashboard.",
-                styles["APA_Body"],
-            )
-        )
+        elements.append(Paragraph("No external bibliographic references were provided. This document is based on the operational data loaded in the dashboard at export time.", styles["APA_Body"]))
 
-    # Signature
-    elements.append(Spacer(1, 0.28 * inch))
+    elements.append(Spacer(1, 0.14 * inch))
     elements.append(Paragraph("Signature", styles["APA_Heading"]))
     elements.append(Paragraph(author_name, styles["APA_Signature"]))
     elements.append(Paragraph(author_role, styles["APA_Signature"]))
     elements.append(Paragraph(f"Signature date: {signature_date}", styles["APA_Signature"]))
 
-    doc.build(
-        elements,
-        onFirstPage=lambda canvas, doc: _pdf_header_footer(canvas, doc, short_title),
-        onLaterPages=lambda canvas, doc: _pdf_header_footer(canvas, doc, short_title),
-    )
+    doc.build(elements, onFirstPage=lambda canvas, doc: _pdf_header_footer(canvas, doc, short_title), onLaterPages=lambda canvas, doc: _pdf_header_footer(canvas, doc, short_title))
     return buffer.getvalue()
 
 
@@ -1741,27 +1629,22 @@ pdf_filter_summary = build_filter_summary(
     selected_instruments=selected_instruments,
     selected_states=selected_states,
 )
-try:
-    pdf_bytes = build_pdf_report(
-        filtered_df=filtered,
-        filter_summary=pdf_filter_summary,
-        report_title=pdf_title,
-        author_name=pdf_author,
-        author_role=pdf_role,
-        signature_date=pdf_signature_date,
-        references_text=pdf_references,
-    )
-    st.sidebar.download_button(
-        "Generar informe PDF (APA)",
-        data=pdf_bytes,
-        file_name=f"dashboard_report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
-        mime="application/pdf",
-        use_container_width=True,
-    )
-except ModuleNotFoundError:
-    st.sidebar.error("Para generar el PDF debes instalar la librería 'reportlab'.")
-    st.sidebar.code("pip install reportlab")
-    st.sidebar.caption("Si usas Streamlit Cloud, agrega 'reportlab' a tu requirements.txt y vuelve a desplegar la app.")
+pdf_bytes = build_pdf_report(
+    filtered_df=filtered,
+    filter_summary=pdf_filter_summary,
+    report_title=pdf_title,
+    author_name=pdf_author,
+    author_role=pdf_role,
+    signature_date=pdf_signature_date,
+    references_text=pdf_references,
+)
+st.sidebar.download_button(
+    "Generar informe PDF (APA)",
+    data=pdf_bytes,
+    file_name=f"dashboard_report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+    mime="application/pdf",
+    use_container_width=True,
+)
 
 total_assets = len(filtered)
 country_count = int(filtered["Country"].nunique(dropna=True))
