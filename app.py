@@ -14,12 +14,37 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.lib.units import inch
-from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+def _get_reportlab_modules():
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+        from reportlab.lib.units import inch
+        from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+        return {
+            "colors": colors,
+            "TA_CENTER": TA_CENTER,
+            "TA_JUSTIFY": TA_JUSTIFY,
+            "TA_LEFT": TA_LEFT,
+            "A4": A4,
+            "ParagraphStyle": ParagraphStyle,
+            "getSampleStyleSheet": getSampleStyleSheet,
+            "inch": inch,
+            "PageBreak": PageBreak,
+            "Paragraph": Paragraph,
+            "SimpleDocTemplate": SimpleDocTemplate,
+            "Spacer": Spacer,
+            "Table": Table,
+            "TableStyle": TableStyle,
+        }
+    except ModuleNotFoundError as exc:
+        raise ModuleNotFoundError(
+            "La librería 'reportlab' no está instalada. Agrega 'reportlab' a requirements.txt o instálala con 'pip install reportlab'."
+        ) from exc
+
+
 
 
 st.set_page_config(
@@ -397,6 +422,10 @@ def prepare_pdf_report_table(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _pdf_header_footer(canvas, doc, short_title: str):
+    rl = _get_reportlab_modules()
+    colors = rl["colors"]
+    A4 = rl["A4"]
+
     canvas.saveState()
     width, height = A4
 
@@ -420,6 +449,22 @@ def build_pdf_report(
     signature_date: str,
     references_text: str = "",
 ) -> bytes:
+    rl = _get_reportlab_modules()
+    colors = rl["colors"]
+    TA_CENTER = rl["TA_CENTER"]
+    TA_JUSTIFY = rl["TA_JUSTIFY"]
+    TA_LEFT = rl["TA_LEFT"]
+    A4 = rl["A4"]
+    ParagraphStyle = rl["ParagraphStyle"]
+    getSampleStyleSheet = rl["getSampleStyleSheet"]
+    inch = rl["inch"]
+    PageBreak = rl["PageBreak"]
+    Paragraph = rl["Paragraph"]
+    SimpleDocTemplate = rl["SimpleDocTemplate"]
+    Spacer = rl["Spacer"]
+    Table = rl["Table"]
+    TableStyle = rl["TableStyle"]
+
     buffer = BytesIO()
     doc = SimpleDocTemplate(
         buffer,
@@ -1696,22 +1741,27 @@ pdf_filter_summary = build_filter_summary(
     selected_instruments=selected_instruments,
     selected_states=selected_states,
 )
-pdf_bytes = build_pdf_report(
-    filtered_df=filtered,
-    filter_summary=pdf_filter_summary,
-    report_title=pdf_title,
-    author_name=pdf_author,
-    author_role=pdf_role,
-    signature_date=pdf_signature_date,
-    references_text=pdf_references,
-)
-st.sidebar.download_button(
-    "Generar informe PDF (APA)",
-    data=pdf_bytes,
-    file_name=f"dashboard_report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
-    mime="application/pdf",
-    use_container_width=True,
-)
+try:
+    pdf_bytes = build_pdf_report(
+        filtered_df=filtered,
+        filter_summary=pdf_filter_summary,
+        report_title=pdf_title,
+        author_name=pdf_author,
+        author_role=pdf_role,
+        signature_date=pdf_signature_date,
+        references_text=pdf_references,
+    )
+    st.sidebar.download_button(
+        "Generar informe PDF (APA)",
+        data=pdf_bytes,
+        file_name=f"dashboard_report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+        mime="application/pdf",
+        use_container_width=True,
+    )
+except ModuleNotFoundError:
+    st.sidebar.error("Para generar el PDF debes instalar la librería 'reportlab'.")
+    st.sidebar.code("pip install reportlab")
+    st.sidebar.caption("Si usas Streamlit Cloud, agrega 'reportlab' a tu requirements.txt y vuelve a desplegar la app.")
 
 total_assets = len(filtered)
 country_count = int(filtered["Country"].nunique(dropna=True))
