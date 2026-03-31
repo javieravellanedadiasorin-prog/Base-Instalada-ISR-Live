@@ -3024,9 +3024,9 @@ with st.sidebar:
         selected_countries=selected_countries,
         selected_distributors=selected_distributors,
         selected_instruments=selected_instruments,
-        selected_status_labels=selected_status_labels if 'selected_status_labels' in locals() else [],
-        total_records=len(filtered),
+        selected_states=selected_status_labels if 'selected_status_labels' in locals() else [],
     )
+    pdf_filter_summary["Total records"] = f"{len(filtered):,}"
 
     if st.button("Preparar informe PDF", use_container_width=True, key="prepare_pdf_report"):
         try:
