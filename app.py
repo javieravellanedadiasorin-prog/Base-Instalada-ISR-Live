@@ -2765,8 +2765,8 @@ with stock_tab:
                         info_lines = []
                         if distributor_inst:
                             info_lines.append("Instrumentos en base: " + ", ".join(sorted(distributor_inst)))
-                        if inferred_matches and len(inferred_matches) > 1:
-                            info_lines.append("Coincidencias secundarias detectadas en el nombre: " + ", ".join(inferred_matches[1:4]))
+                        if candidate_distributors and len(candidate_distributors) > 1:
+                            info_lines.append("Coincidencias secundarias detectadas en el nombre: " + ", ".join(candidate_distributors[1:4]))
                         if info_lines:
                             st.caption(" | ".join(info_lines))
 
