@@ -271,8 +271,11 @@ def dataframe_to_excel_bytes(sheet_map: dict[str, pd.DataFrame]) -> bytes:
             for idx, col in enumerate(clean_df.columns, start=1):
                 max_len = len(str(col))
                 if not clean_df.empty:
-                    series = clean_df[col].astype(str).replace("<NA>", "").replace("nan", "")
-                    max_len = max(max_len, series.map(len).max())
+                    series = clean_df[col].astype("string").fillna("")
+                    series = series.str.replace("<NA>", "", regex=False).str.replace("nan", "", regex=False)
+                    lengths = series.str.len().fillna(0)
+                    series_max_len = int(lengths.max()) if len(lengths) else 0
+                    max_len = max(max_len, series_max_len)
                 ws.column_dimensions[ws.cell(row=1, column=idx).column_letter].width = min(max(max_len + 2, 12), 42)
     output.seek(0)
     return output.getvalue()
@@ -2874,6 +2877,7 @@ with stock_tab:
                                 if not purchase_df.empty:
                                     st.markdown("### Compra sugerida para cerrar el gap (opción 2)")
                                     st.dataframe(purchase_df, use_container_width=True, hide_index=True)
+                                    st.markdown(f"**Total estimado de compra sugerida:** {option2_currency} {option2_cost:,.2f}")
 
                                 if not extra_df.empty:
                                     st.markdown("### Partes reportadas que no están en el carstock requerido")
@@ -2908,6 +2912,15 @@ with stock_tab:
 
                                 export_df = export_df.sort_values(["Status", "Qty Gap", "Required Part Number"], ascending=[True, False, True], na_position="last").reset_index(drop=True)
                                 purchase_export = purchase_df.reset_index(drop=True) if not purchase_df.empty else pd.DataFrame(columns=["Required Part Number", "Required Description", "Qty Gap", "Option 2 Unit Price", "Option 2 Estimated Cost", "Currency", "Status"])
+                                if not purchase_export.empty:
+                                    purchase_total_row = {col: "" for col in purchase_export.columns}
+                                    if "Required Part Number" in purchase_total_row:
+                                        purchase_total_row["Required Part Number"] = "TOTAL"
+                                    if "Option 2 Estimated Cost" in purchase_total_row:
+                                        purchase_total_row["Option 2 Estimated Cost"] = round(option2_cost, 2)
+                                    if "Currency" in purchase_total_row:
+                                        purchase_total_row["Currency"] = option2_currency
+                                    purchase_export = pd.concat([purchase_export, pd.DataFrame([purchase_total_row])], ignore_index=True)
                                 if not extra_df.empty:
                                     extras_export_final = extra_df[["Uploaded Part Number", "Uploaded Description", "Uploaded Qty", "Status"]].copy()
                                     extras_export_final["__sort_uploaded_part_number"] = extras_export_final["Uploaded Part Number"].astype("string").fillna("")
@@ -3044,7 +3057,7 @@ with st.sidebar:
         pdf_filter_summary = dict(base_summary) if isinstance(base_summary, dict) else {"Filters": str(base_summary)}
         pdf_filter_summary["Total records"] = f"{len(filtered):,}"
 
-        if st.button("Preparar informe PDF", use_container_width=True, key="prepare_pdf_report"):
+        if st.button("🧾 Preparar informe PDF", use_container_width=True, key="prepare_pdf_report"):
             try:
                 prepared_bytes = build_pdf_report(
                     filtered_df=filtered,
@@ -3065,7 +3078,7 @@ with st.sidebar:
 
         if st.session_state.get("prepared_pdf_bytes") is not None:
             st.download_button(
-                "Descargar informe PDF (APA)",
+                "⬇️ Descargar informe PDF (APA)",
                 data=st.session_state["prepared_pdf_bytes"],
                 file_name=st.session_state.get("prepared_pdf_name", f"dashboard_report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"),
                 mime="application/pdf",
