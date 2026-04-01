@@ -2702,6 +2702,7 @@ with stock_tab:
                 st.info("Sube ahora el archivo trimestral del distribuidor. Ejemplo recomendado: `ANNAR_stock_Q1_2026.xlsx`.")
             else:
                 stock_df_raw = load_table_file(stock_upload.getvalue(), stock_upload.name)
+                candidate_distributors = []
                 if stock_df_raw is None or stock_df_raw.empty:
                     st.session_state["pdf_stock_context"] = {"available": False}
                     st.warning("El archivo subido no contiene datos legibles.")
