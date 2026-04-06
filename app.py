@@ -118,16 +118,16 @@ CUSTOM_HEADERS = [
 
 ASSAY_COLS = CUSTOM_HEADERS[28:-1]
 
-PLOT_TEMPLATE = "plotly_dark"
-PLOT_BG = "rgba(0,0,0,0)"
-GRID = "rgba(255,255,255,0.10)"
-ACCENT = "#4df6ff"
-ACCENT_2 = "#b15cff"
-ACCENT_3 = "#00ff9d"
+PLOT_TEMPLATE = "plotly_white"
+PLOT_BG = "rgba(255,255,255,0)"
+GRID = "rgba(84, 107, 138, 0.16)"
+ACCENT = "#61d7ff"
+ACCENT_2 = "#90a8ff"
+ACCENT_3 = "#6df2d2"
 WARNING = "#ffb454"
 DANGER = "#ff5d8f"
 TEXT = "#f7fbff"
-MUTED = "#a9b9d6"
+MUTED = "rgba(239,245,252,0.78)"
 
 APP_CSS = """
 <style>
@@ -466,11 +466,100 @@ def glow_layout(fig: go.Figure, height: int = 420, title_size: int = 18) -> go.F
         font=dict(color=TEXT),
         title_font=dict(size=title_size),
         hovermode="closest",
-        hoverlabel=dict(bgcolor="#0d1228", font=dict(color=TEXT)),
+        hoverlabel=dict(
+            bgcolor="rgba(102, 126, 157, 0.92)",
+            bordercolor="rgba(255,255,255,0.20)",
+            font=dict(color=TEXT),
+        ),
     )
-    fig.update_xaxes(showgrid=True, gridcolor=GRID, zeroline=False, automargin=True)
-    fig.update_yaxes(showgrid=True, gridcolor=GRID, zeroline=False, automargin=True)
+    fig.update_xaxes(
+        showgrid=True,
+        gridcolor=GRID,
+        zeroline=False,
+        automargin=True,
+        linecolor="rgba(255,255,255,0.12)",
+        tickfont=dict(color=TEXT),
+        title_font=dict(color=TEXT),
+    )
+    fig.update_yaxes(
+        showgrid=True,
+        gridcolor=GRID,
+        zeroline=False,
+        automargin=True,
+        linecolor="rgba(255,255,255,0.12)",
+        tickfont=dict(color=TEXT),
+        title_font=dict(color=TEXT),
+    )
     return fig
+
+
+
+def compress_value_distribution(series: pd.Series, max_slices: int = 4) -> pd.DataFrame:
+    work = (
+        series.fillna("No informado")
+        .astype(str)
+        .str.strip()
+        .replace("", "No informado")
+        .value_counts()
+        .reset_index()
+    )
+    if work.empty:
+        return pd.DataFrame(columns=["Label", "Count"])
+    work.columns = ["Label", "Count"]
+    if len(work) > max_slices:
+        top = work.head(max_slices).copy()
+        other_count = int(work.iloc[max_slices:]["Count"].sum())
+        if other_count > 0:
+            top = pd.concat([top, pd.DataFrame([{"Label": "Otros", "Count": other_count}])], ignore_index=True)
+        work = top
+    return work
+
+
+def build_config_donut(field_name: str, series: pd.Series, total_assets: int) -> go.Figure:
+    dist = compress_value_distribution(series, max_slices=4)
+    fig = go.Figure()
+
+    if dist.empty:
+        fig.add_annotation(
+            text="Sin datos",
+            x=0.5,
+            y=0.5,
+            xref="paper",
+            yref="paper",
+            showarrow=False,
+            font=dict(size=15, color=TEXT),
+        )
+        fig.update_layout(title=f"{field_name}")
+        return glow_layout(fig, 360, 15)
+
+    palette = [ACCENT, ACCENT_2, ACCENT_3, WARNING, "rgba(255,255,255,0.32)"]
+    fig.add_trace(
+        go.Pie(
+            labels=dist["Label"],
+            values=dist["Count"],
+            hole=0.68,
+            sort=False,
+            marker=dict(colors=palette[:len(dist)], line=dict(color="rgba(255,255,255,0.18)", width=1.2)),
+            textinfo="percent",
+            textfont=dict(color="#ffffff", size=12),
+            hovertemplate="Valor: %{label}<br>Equipos: %{value}<br>Participación: %{percent}<extra></extra>",
+        )
+    )
+    fig.add_annotation(
+        text=f"<b>{total_assets:,}</b><br><span style='font-size:11px'>equipos</span>",
+        x=0.5,
+        y=0.5,
+        xref="paper",
+        yref="paper",
+        showarrow=False,
+        font=dict(color=TEXT, size=16),
+    )
+    fig.update_layout(
+        title=field_name,
+        showlegend=True,
+        legend=dict(orientation="h", yanchor="bottom", y=-0.15, xanchor="center", x=0.5),
+    )
+    return glow_layout(fig, 360, 15)
 
 
 def compute_mapbox_center_zoom(df: pd.DataFrame, lat_col: str = "Latitude", lon_col: str = "Longitude") -> tuple[dict, float]:
@@ -2318,7 +2407,12 @@ with base_tab:
             projection="mollweide",
         )
         fig_geo.update_traces(
-            marker=dict(size=3, color=ACCENT, opacity=0.98),
+            marker=dict(
+                size=6,
+                color=ACCENT,
+                opacity=0.92,
+                line=dict(color="rgba(255,255,255,0.78)", width=0.9),
+            ),
             hovertemplate=(
                 "<b>%{hovertext}</b><br>"
                 "Serie: %{customdata[0]}<br>"
@@ -2333,21 +2427,23 @@ with base_tab:
             fitbounds="locations",
             projection_type="mollweide",
             showframe=False,
-            bgcolor="rgba(0,0,0,0)",
+            bgcolor="rgba(255,255,255,0)",
             showocean=True,
-            oceancolor="rgba(7,14,28,0.94)",
+            oceancolor="rgba(220,232,244,0.16)",
             showland=True,
-            landcolor="rgba(16,26,42,0.95)",
+            landcolor="rgba(246,250,255,0.08)",
             showcountries=True,
-            countrycolor="rgba(255,255,255,0.08)",
+            countrycolor="rgba(255,255,255,0.28)",
+            countrywidth=0.7,
             showcoastlines=True,
-            coastlinecolor="rgba(77,246,255,0.25)",
+            coastlinecolor="rgba(255,255,255,0.22)",
+            coastlinewidth=0.7,
             showlakes=True,
-            lakecolor="rgba(7,14,28,0.94)",
+            lakecolor="rgba(230,240,250,0.10)",
             lataxis_showgrid=True,
             lonaxis_showgrid=True,
-            lataxis_gridcolor="rgba(255,255,255,0.10)",
-            lonaxis_gridcolor="rgba(255,255,255,0.10)",
+            lataxis_gridcolor="rgba(255,255,255,0.08)",
+            lonaxis_gridcolor="rgba(255,255,255,0.08)",
             lataxis_dtick=15,
             lonaxis_dtick=30,
         )
@@ -2356,7 +2452,7 @@ with base_tab:
             plot_bgcolor=PLOT_BG,
             margin=dict(l=10, r=10, t=10, b=10),
             font=dict(color=TEXT),
-            geo=dict(domain=dict(x=[0.02, 0.98], y=[0.11, 0.89])),
+            geo=dict(domain=dict(x=[0.02, 0.98], y=[0.10, 0.90])),
         )
         st.plotly_chart(fig_geo, use_container_width=True)
 
@@ -2445,6 +2541,7 @@ with base_tab:
 
 with machine_tab:
     st.subheader("Machine configuration")
+    st.caption("Vista ejecutiva por ítem de configuración, con gráficas separadas para cada campo aplicable y mayor lectura visual del comportamiento de la base instalada.")
     applicable_fields = active_config_fields(filtered, CONFIG_KEYS)
     cfg_cols_prefixed = [f"CFG::{col}" for col in applicable_fields]
 
@@ -2484,91 +2581,62 @@ with machine_tab:
         fig_cfg_fill.update_layout(yaxis=dict(categoryorder="total ascending"))
         st.plotly_chart(glow_layout(fig_cfg_fill, 520), use_container_width=True)
 
-        selected_cfg_field = st.selectbox("Ítem de machine configuration para analizar", applicable_fields, key="cfg_field_selector")
-        selected_cfg_col = f"CFG::{selected_cfg_field}"
+        st.markdown("### Distribución visual por ítem")
+        st.markdown(
+            '<div class="small-note">Cada gráfico resume la distribución de valores del ítem correspondiente. Se muestran los valores principales y, si aplica, una categoría <b>Otros</b> para simplificar la lectura.</div>',
+            unsafe_allow_html=True,
+        )
 
-        item_df = filtered[filtered[selected_cfg_col].notna()].copy()
-        item_df["Config Value"] = item_df[selected_cfg_col].astype(str)
-        item_df["Installation date text"] = item_df["Installation date"].map(format_date_for_hover)
-        item_df = item_df.sort_values(["Config Value", "Distributor name", "Customer name", "Serial number"]).reset_index(drop=True)
-        item_df["Point ID"] = np.arange(1, len(item_df) + 1)
+        donut_fields = coverage_df["Config field"].tolist()
+        if donut_fields:
+            for idx in range(0, len(donut_fields), 3):
+                cols = st.columns(3)
+                for col_ui, field_name in zip(cols, donut_fields[idx:idx + 3]):
+                    selected_cfg_col = f"CFG::{field_name}"
+                    item_series = filtered[selected_cfg_col].dropna()
+                    item_series = item_series.astype(str).str.strip()
+                    item_series = item_series[item_series.ne("")]
+                    total_assets = int(item_series.shape[0])
+                    with col_ui:
+                        st.plotly_chart(build_config_donut(field_name, item_series, total_assets), use_container_width=True)
 
-        g1, g2 = st.columns(2)
-        with g1:
-            value_dist = item_df["Config Value"].value_counts().reset_index()
-            value_dist.columns = ["Value", "Count"]
-            value_dist = value_dist.head(20)
-            fig_cfg_value = px.bar(
-                value_dist,
-                x="Count",
-                y="Value",
-                orientation="h",
-                title=f"Distribución de valores | {selected_cfg_field}",
-                text="Count",
+        st.markdown("### Top valores por ítem")
+        detail_rows = []
+        for field_name in donut_fields:
+            selected_cfg_col = f"CFG::{field_name}"
+            item_series = filtered[selected_cfg_col].dropna().astype(str).str.strip()
+            item_series = item_series[item_series.ne("")]
+            if item_series.empty:
+                continue
+            dist = item_series.value_counts().reset_index()
+            dist.columns = ["Value", "Count"]
+            top_row = dist.iloc[0]
+            detail_rows.append(
+                {
+                    "Config field": field_name,
+                    "Top value": str(top_row["Value"]),
+                    "Top count": int(top_row["Count"]),
+                    "Unique values": int(dist.shape[0]),
+                    "Assets with value": int(item_series.shape[0]),
+                }
             )
-            fig_cfg_value.update_traces(
-                marker_color=ACCENT_2,
-                textposition="outside",
-                hovertemplate="Valor: %{y}<br>Equipos: %{x}<extra></extra>",
-            )
-            fig_cfg_value.update_layout(yaxis=dict(categoryorder="total ascending"))
-            st.plotly_chart(glow_layout(fig_cfg_value, 480), use_container_width=True)
 
-        with g2:
-            fig_cfg_points = px.scatter(
-                item_df,
-                x="Config Value",
-                y="Point ID",
-                color="Config Value",
-                title=f"Detalle por equipo | {selected_cfg_field}",
-                custom_data=[
-                    "Serial number",
-                    "Instrument type",
-                    "Distributor name",
-                    "Customer name",
-                    "Country",
-                    "City",
-                    "Commercial Region",
-                    "Operational status",
-                    "Operating System",
-                    "Installation date text",
-                ],
-            )
-            fig_cfg_points.update_traces(
-                marker=dict(size=8, opacity=0.9),
-                hovertemplate=(
-                    "Valor: %{x}<br>"
-                    "Serie: %{customdata[0]}<br>"
-                    "Instrumento: %{customdata[1]}<br>"
-                    "Distribuidor: %{customdata[2]}<br>"
-                    "Cliente: %{customdata[3]}<br>"
-                    "País: %{customdata[4]}<br>"
-                    "Ciudad: %{customdata[5]}<br>"
-                    "Región: %{customdata[6]}<br>"
-                    "Estado: %{customdata[7]}<br>"
-                    "OS: %{customdata[8]}<br>"
-                    "Instalación: %{customdata[9]}<extra></extra>"
-                ),
-                showlegend=False,
-            )
-            fig_cfg_points.update_yaxes(visible=False, showticklabels=False, title="")
-            fig_cfg_points.update_xaxes(title=selected_cfg_field)
-            st.plotly_chart(glow_layout(fig_cfg_points, 480), use_container_width=True)
+        if detail_rows:
+            st.dataframe(pd.DataFrame(detail_rows), use_container_width=True, hide_index=True)
 
-        st.markdown("### Tabla ampliada de machine configuration")
-        table_cols = [
-            "Commercial Region",
-            "Country",
-            "Distributor name",
-            "Customer name",
-            "Instrument type",
-            "Serial number",
-            selected_cfg_col,
-            "Operating System",
-            "Operational status",
-        ]
-        machine_table = item_df[table_cols].rename(columns={selected_cfg_col: selected_cfg_field})
-        st.dataframe(machine_table, use_container_width=True, hide_index=True)
+        with st.expander("Ver tabla ampliada de machine configuration"):
+            detail_columns = [
+                "Commercial Region",
+                "Country",
+                "Distributor name",
+                "Customer name",
+                "Instrument type",
+                "Serial number",
+                "Operating System",
+                "Operational status",
+            ] + [f"CFG::{field}" for field in donut_fields]
+            machine_table = filtered[detail_columns].copy().rename(columns={f"CFG::{field}": field for field in donut_fields})
+            st.dataframe(machine_table, use_container_width=True, hide_index=True)
 
 with os_tab:
     st.subheader("Sistema operativo")
