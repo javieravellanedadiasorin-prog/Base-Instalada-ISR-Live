@@ -505,6 +505,59 @@ hr {
     height: 1px;
     background: linear-gradient(90deg, transparent, rgba(255,255,255,0.24), transparent);
 }
+
+.section-shell {
+    padding: 1rem 1.1rem 1.15rem 1.1rem;
+    border-radius: 30px;
+    border: 1px solid rgba(255,255,255,0.18);
+    background: linear-gradient(180deg, rgba(255,255,255,0.14), rgba(255,255,255,0.07));
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    box-shadow:
+        0 16px 34px rgba(37, 55, 80, 0.10),
+        inset 0 1px 0 rgba(255,255,255,0.20);
+    margin-bottom: 1rem;
+}
+
+.section-title {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: #ffffff;
+    margin-bottom: 0.2rem;
+}
+
+.section-subtitle {
+    font-size: 0.88rem;
+    color: rgba(245,249,255,0.72);
+    margin-bottom: 0.65rem;
+}
+
+.map-shell {
+    padding: 0.8rem;
+    border-radius: 34px;
+    border: 1px solid rgba(255,255,255,0.18);
+    background: linear-gradient(180deg, rgba(255,255,255,0.16), rgba(255,255,255,0.07));
+    backdrop-filter: blur(22px);
+    -webkit-backdrop-filter: blur(22px);
+    box-shadow:
+        0 18px 38px rgba(37, 55, 80, 0.11),
+        inset 0 1px 0 rgba(255,255,255,0.20);
+    margin-bottom: 1rem;
+}
+
+.map-note {
+    margin-top: -0.1rem;
+    margin-bottom: 0.6rem;
+    color: rgba(245,249,255,0.72);
+    font-size: 0.84rem;
+}
+
+.config-grid-note {
+    color: rgba(245,249,255,0.72);
+    font-size: 0.86rem;
+    margin-bottom: 0.8rem;
+}
+
 </style>
 """
 st.markdown(APP_CSS, unsafe_allow_html=True)
@@ -596,7 +649,7 @@ def build_config_donut(field_name: str, series: pd.Series, total_assets: int) ->
             font=dict(size=15, color=TEXT),
         )
         fig.update_layout(title=f"{field_name}")
-        return glow_layout(fig, 360, 15)
+        return glow_layout(fig, 340, 15)
 
     palette = [ACCENT, ACCENT_2, ACCENT_3, WARNING, "rgba(255,255,255,0.32)"]
     fig.add_trace(
@@ -625,7 +678,7 @@ def build_config_donut(field_name: str, series: pd.Series, total_assets: int) ->
         showlegend=True,
         legend=dict(orientation="h", yanchor="bottom", y=-0.15, xanchor="center", x=0.5),
     )
-    return glow_layout(fig, 360, 15)
+    return glow_layout(fig, 340, 15)
 
 
 def compute_mapbox_center_zoom(df: pd.DataFrame, lat_col: str = "Latitude", lon_col: str = "Longitude") -> tuple[dict, float]:
@@ -2465,6 +2518,10 @@ with base_tab:
     if geo_df.empty:
         st.info("No hay coordenadas válidas para mostrar en el mapa.")
     else:
+        st.markdown('<div class="map-shell">', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">Vista global de la base instalada</div>', unsafe_allow_html=True)
+        st.markdown('<div class="map-note">La proyección se muestra completa desde la carga inicial para conservar el efecto ovalado y el contraste con el fondo glass.</div>', unsafe_allow_html=True)
+
         fig_geo = px.scatter_geo(
             geo_df,
             lat="Latitude",
@@ -2480,15 +2537,15 @@ with base_tab:
                 "Latitude": False,
                 "Longitude": False,
             },
-            height=620,
+            height=560,
             projection="mollweide",
         )
         fig_geo.update_traces(
             marker=dict(
-                size=6,
+                size=6.5,
                 color=ACCENT,
-                opacity=0.92,
-                line=dict(color="rgba(255,255,255,0.78)", width=0.9),
+                opacity=0.95,
+                line=dict(color="rgba(255,255,255,0.86)", width=1.0),
             ),
             hovertemplate=(
                 "<b>%{hovertext}</b><br>"
@@ -2501,37 +2558,39 @@ with base_tab:
             ),
         )
         fig_geo.update_geos(
-            fitbounds="locations",
             projection_type="mollweide",
+            projection_scale=0.96,
+            center=dict(lat=4, lon=-52),
             showframe=False,
             bgcolor="rgba(255,255,255,0)",
             showocean=True,
-            oceancolor="rgba(220,232,244,0.16)",
+            oceancolor="rgba(230,240,250,0.14)",
             showland=True,
-            landcolor="rgba(246,250,255,0.08)",
+            landcolor="rgba(248,251,255,0.10)",
             showcountries=True,
-            countrycolor="rgba(255,255,255,0.28)",
+            countrycolor="rgba(255,255,255,0.24)",
             countrywidth=0.7,
             showcoastlines=True,
-            coastlinecolor="rgba(255,255,255,0.22)",
+            coastlinecolor="rgba(255,255,255,0.18)",
             coastlinewidth=0.7,
             showlakes=True,
-            lakecolor="rgba(230,240,250,0.10)",
+            lakecolor="rgba(230,240,250,0.08)",
             lataxis_showgrid=True,
             lonaxis_showgrid=True,
-            lataxis_gridcolor="rgba(255,255,255,0.08)",
-            lonaxis_gridcolor="rgba(255,255,255,0.08)",
+            lataxis_gridcolor="rgba(255,255,255,0.05)",
+            lonaxis_gridcolor="rgba(255,255,255,0.05)",
             lataxis_dtick=15,
             lonaxis_dtick=30,
+            domain=dict(x=[0.06, 0.94], y=[0.12, 0.88]),
         )
         fig_geo.update_layout(
             paper_bgcolor=PLOT_BG,
             plot_bgcolor=PLOT_BG,
-            margin=dict(l=10, r=10, t=10, b=10),
+            margin=dict(l=0, r=0, t=0, b=0),
             font=dict(color=TEXT),
-            geo=dict(domain=dict(x=[0.02, 0.98], y=[0.10, 0.90])),
         )
         st.plotly_chart(fig_geo, use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
     c1, c2 = st.columns(2)
     with c1:
