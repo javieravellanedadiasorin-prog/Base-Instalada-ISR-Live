@@ -119,39 +119,37 @@ CUSTOM_HEADERS = [
 ASSAY_COLS = CUSTOM_HEADERS[28:-1]
 
 PLOT_TEMPLATE = "plotly_dark"
-PLOT_BG = "rgba(8, 14, 24, 0.22)"
-GRID = "rgba(151, 214, 255, 0.14)"
+PLOT_BG = "rgba(6, 10, 20, 0.10)"
+GRID = "rgba(151, 214, 255, 0.10)"
 ACCENT = "#56d8ff"
 ACCENT_2 = "#8fa8ff"
 ACCENT_3 = "#59f0d0"
 WARNING = "#ffb454"
 DANGER = "#ff5d8f"
 TEXT = "#f7fbff"
-MUTED = "rgba(236,244,255,0.94)"
+MUTED = "rgba(231,240,252,0.90)"
 
 APP_CSS = """
 <style>
 :root {
-    --bg-deep: #040916;
-    --bg-deeper: #07101d;
-    --bg-mid: #0b1625;
-    --panel-dark: rgba(10, 18, 31, 0.82);
-    --glass: rgba(196, 226, 255, 0.08);
-    --glass-2: rgba(255, 255, 255, 0.055);
-    --glass-3: rgba(255, 255, 255, 0.16);
-    --line: rgba(189, 227, 255, 0.22);
-    --line-soft: rgba(159, 211, 255, 0.10);
-    --txt: #f8fbff;
-    --txt-strong: #ffffff;
-    --txt-soft: rgba(244, 249, 255, 0.98);
-    --muted: rgba(216, 230, 247, 0.86);
-    --cyan: #62dbff;
-    --cyan-2: #37bfff;
-    --blue: #90aaff;
-    --mint: #57f2d3;
-    --amber: #ffbf57;
-    --shadow: rgba(0, 0, 0, 0.40);
-    --shadow-soft: rgba(2, 8, 18, 0.30);
+    --bg-1: #060b14;
+    --bg-2: #09101b;
+    --bg-3: #0d1624;
+    --panel: rgba(18, 28, 44, 0.62);
+    --panel-strong: rgba(20, 30, 48, 0.78);
+    --panel-soft: rgba(255, 255, 255, 0.05);
+    --stroke: rgba(189, 227, 255, 0.18);
+    --stroke-2: rgba(255, 255, 255, 0.12);
+    --txt: #f6fbff;
+    --txt-soft: rgba(234, 244, 255, 0.92);
+    --muted: rgba(198, 214, 232, 0.78);
+    --cyan: #69d9ff;
+    --cyan-2: #2fc1ff;
+    --blue: #88a5ff;
+    --mint: #52efcf;
+    --amber: #ffb84f;
+    --danger: #ff6b88;
+    --shadow: rgba(0, 0, 0, 0.34);
 }
 
 html, body, [class*="css"] {
@@ -160,11 +158,11 @@ html, body, [class*="css"] {
 
 .stApp {
     background:
-        radial-gradient(circle at 18% 18%, rgba(120, 211, 255, 0.14), transparent 16%),
-        radial-gradient(circle at 74% 14%, rgba(255, 255, 255, 0.10), transparent 14%),
-        radial-gradient(circle at 82% 72%, rgba(88, 245, 208, 0.08), transparent 18%),
-        radial-gradient(circle at 30% 80%, rgba(141, 164, 255, 0.12), transparent 18%),
-        linear-gradient(180deg, #030814 0%, #08101c 20%, #0b1522 45%, #09111c 74%, #040914 100%);
+        radial-gradient(circle at 15% 18%, rgba(116, 215, 255, 0.14), transparent 15%),
+        radial-gradient(circle at 80% 12%, rgba(255,255,255,0.08), transparent 14%),
+        radial-gradient(circle at 80% 72%, rgba(82,239,207,0.08), transparent 18%),
+        radial-gradient(circle at 26% 82%, rgba(136,165,255,0.10), transparent 18%),
+        linear-gradient(180deg, #060b14 0%, #09101b 18%, #0d1624 44%, #0a1220 72%, #070c15 100%);
     background-attachment: fixed;
     color: var(--txt);
 }
@@ -175,33 +173,33 @@ html, body, [class*="css"] {
     inset: 0;
     pointer-events: none;
     background:
-        linear-gradient(180deg, rgba(255,255,255,0.035), transparent 22%, transparent 78%, rgba(255,255,255,0.02)),
-        radial-gradient(circle at 50% -10%, rgba(205, 233, 255, 0.13), transparent 26%),
-        radial-gradient(circle at 50% 52%, rgba(120, 198, 255, 0.08), transparent 30%);
+        linear-gradient(180deg, rgba(255,255,255,0.03), transparent 25%, transparent 75%, rgba(255,255,255,0.02)),
+        radial-gradient(circle at 50% -5%, rgba(255,255,255,0.08), transparent 20%),
+        radial-gradient(circle at 50% 45%, rgba(105,217,255,0.05), transparent 26%);
     z-index: 0;
 }
 
 .block-container {
     position: relative;
     z-index: 1;
-    padding-top: 1rem;
+    padding-top: 0.9rem;
     padding-bottom: 2rem;
-    max-width: 97rem;
+    max-width: 98rem;
 }
 
 section[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.045) 100%);
-    backdrop-filter: blur(32px);
-    -webkit-backdrop-filter: blur(32px);
-    border-right: 1px solid rgba(173, 220, 255, 0.18);
+    background: linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.04) 100%);
+    border-right: 1px solid rgba(188, 226, 255, 0.14);
     box-shadow:
-        inset 1px 1px 0 rgba(255,255,255,0.12),
-        16px 0 36px rgba(0, 0, 0, 0.24);
+        inset 1px 1px 0 rgba(255,255,255,0.08),
+        16px 0 36px rgba(0, 0, 0, 0.22);
+    backdrop-filter: blur(26px);
+    -webkit-backdrop-filter: blur(26px);
 }
 
 section[data-testid="stSidebar"] > div {
     background: transparent;
-    padding-top: 0.5rem;
+    padding-top: 0.35rem;
 }
 
 section[data-testid="stSidebar"] h1,
@@ -211,46 +209,94 @@ section[data-testid="stSidebar"] label,
 section[data-testid="stSidebar"] p,
 section[data-testid="stSidebar"] span,
 section[data-testid="stSidebar"] div {
-    color: var(--txt-strong) !important;
-    text-shadow:
-        0 0 6px rgba(255,255,255,0.20),
-        0 0 14px rgba(89,216,255,0.18),
-        0 1px 10px rgba(0,0,0,0.55) !important;
+    color: var(--txt) !important;
 }
 
-section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
-    line-height: 1.42;
+.sidebar-top-card {
+    position: relative;
+    overflow: hidden;
+    padding: 1.1rem 1rem 1rem 1rem;
+    border-radius: 24px;
+    margin-bottom: 0.9rem;
+    background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03));
+    border: 1px solid rgba(188, 226, 255, 0.15);
+    box-shadow:
+        0 14px 32px rgba(0, 0, 0, 0.18),
+        inset 0 1px 0 rgba(255,255,255,0.12),
+        0 0 26px rgba(105,217,255,0.05);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+}
+
+.sidebar-top-card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(135deg, rgba(255,255,255,0.12), transparent 28%, rgba(105,217,255,0.08) 68%, transparent 100%);
+}
+
+.sidebar-top-card h3 {
+    margin: 0 0 0.3rem 0;
+    font-size: 1rem;
+    font-weight: 700;
+    color: #ffffff;
+    text-shadow: 0 0 12px rgba(105,217,255,0.18);
+}
+
+.sidebar-top-card p {
+    margin: 0;
+    font-size: 0.84rem;
+    color: var(--txt-soft);
+    line-height: 1.45;
+}
+
+.sidebar-pill {
+    margin-top: 0.72rem;
+    display: inline-block;
+    padding: 0.34rem 0.84rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    color: #f9fdff;
+    background: linear-gradient(180deg, rgba(105,217,255,0.20), rgba(47,193,255,0.10));
+    border: 1px solid rgba(188, 226, 255, 0.18);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.12), 0 0 16px rgba(105,217,255,0.08);
 }
 
 section[data-testid="stSidebar"] .stTextInput input,
-section[data-testid="stSidebar"] .stNumberInput input,
-section[data-testid="stSidebar"] .stDateInput input,
-section[data-testid="stSidebar"] .stTextArea textarea,
 section[data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] > div,
 section[data-testid="stSidebar"] .stMultiSelect div[data-baseweb="select"] > div,
-section[data-testid="stSidebar"] .stFileUploader {
-    background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.045)) !important;
-    border: 1px solid rgba(186, 229, 255, 0.18) !important;
+section[data-testid="stSidebar"] .stFileUploader section,
+.stTextInput input,
+.stNumberInput input,
+.stDateInput input,
+.stTextArea textarea,
+.stSelectbox div[data-baseweb="select"] > div,
+.stMultiSelect div[data-baseweb="select"] > div {
+    background: rgba(12, 20, 33, 0.58) !important;
+    border: 1px solid rgba(188, 226, 255, 0.14) !important;
     border-radius: 18px !important;
-    box-shadow:
-        inset 0 1px 0 rgba(255,255,255,0.14),
-        0 8px 18px rgba(0, 0, 0, 0.14);
+    color: #f6fbff !important;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 10px 24px rgba(0,0,0,0.10);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+}
+
+.stTextInput input::placeholder,
+.stTextArea textarea::placeholder {
+    color: rgba(230, 239, 250, 0.52) !important;
 }
 
 .hero {
     position: relative;
     overflow: hidden;
-    padding: 1.5rem 1.8rem;
+    padding: 1.35rem 1.55rem 1.2rem 1.55rem;
     border-radius: 30px;
-    border: 1px solid rgba(196, 229, 255, 0.18);
-    background:
-        linear-gradient(180deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.05) 100%);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    box-shadow:
-        0 18px 42px rgba(0, 0, 0, 0.22),
-        inset 0 1px 0 rgba(255,255,255,0.16),
-        inset 0 -1px 0 rgba(255,255,255,0.04);
+    border: 1px solid rgba(194, 230, 255, 0.15);
+    background: linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.03) 100%);
+    backdrop-filter: blur(26px);
+    -webkit-backdrop-filter: blur(26px);
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255,255,255,0.12), 0 0 28px rgba(105,217,255,0.04);
     margin-bottom: 1rem;
 }
 
@@ -258,30 +304,73 @@ section[data-testid="stSidebar"] .stFileUploader {
     content: "";
     position: absolute;
     inset: 0;
-    background:
-        radial-gradient(circle at 20% 12%, rgba(255,255,255,0.16), transparent 16%),
-        linear-gradient(120deg, rgba(98,219,255,0.08), transparent 38%, rgba(144,170,255,0.06) 80%, transparent 100%);
     pointer-events: none;
+    background:
+        radial-gradient(circle at 16% 14%, rgba(255,255,255,0.10), transparent 14%),
+        linear-gradient(125deg, rgba(105,217,255,0.06), transparent 36%, rgba(136,165,255,0.05) 78%, transparent 100%);
+}
+
+.hero-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+}
+
+.hero-brand {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.brand-chip {
+    padding: 0.5rem 0.9rem;
+    border-radius: 16px;
+    border: 1px solid rgba(188, 226, 255, 0.14);
+    background: rgba(255,255,255,0.04);
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    color: #dff7ff;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 0 20px rgba(105,217,255,0.06);
+}
+
+.workspace-chip {
+    padding: 0.55rem 0.95rem;
+    border-radius: 16px;
+    border: 1px solid rgba(188, 226, 255, 0.12);
+    background: rgba(255,255,255,0.04);
+    color: var(--txt-soft);
+    font-size: 0.86rem;
 }
 
 .hero h1 {
     margin: 0;
-    font-size: 2.2rem;
+    font-size: 2.15rem;
     letter-spacing: 0.01em;
     color: #ffffff;
-    text-shadow:
-        0 0 10px rgba(255,255,255,0.18),
-        0 0 24px rgba(98,219,255,0.12),
-        0 2px 12px rgba(0,0,0,0.30);
+    text-shadow: 0 0 6px rgba(255,255,255,0.16), 0 0 18px rgba(105,217,255,0.14), 0 2px 12px rgba(0,0,0,0.35);
+}
+
+.hero p,
+.section-title,
+.map-note,
+.small-note,
+.metric-sub,
+.stCaptionContainer,
+[data-testid="stMarkdownContainer"] p,
+.stMarkdown p,
+label,
+span,
+div {
+    color: var(--txt-soft);
 }
 
 .hero p {
-    margin: 0.45rem 0 0 0;
-    color: var(--txt-soft);
-    font-size: 1rem;
-    text-shadow:
-        0 0 6px rgba(255,255,255,0.10),
-        0 1px 8px rgba(0,0,0,0.32);
+    margin: 0.42rem 0 0 0;
+    max-width: 64rem;
+    font-size: 0.98rem;
+    font-weight: 500;
 }
 
 .badge-row {
@@ -292,209 +381,118 @@ section[data-testid="stSidebar"] .stFileUploader {
 }
 
 .badge {
-    padding: 0.35rem 0.8rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.36rem 0.84rem;
     border-radius: 999px;
-    font-size: 0.77rem;
-    color: #f8fbff;
-    background: rgba(255,255,255,0.08);
-    border: 1px solid rgba(186,229,255,0.20);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.14);
+    font-size: 0.76rem;
+    color: #f7fbff;
+    background: linear-gradient(180deg, rgba(105,217,255,0.14), rgba(255,255,255,0.03));
+    border: 1px solid rgba(188, 226, 255, 0.14);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 0 14px rgba(105,217,255,0.05);
 }
 
 .metric-shell,
-div[data-testid="stMetric"] {
-    position: relative;
-    overflow: hidden;
+div[data-testid="stMetric"],
+.map-shell,
+div[data-testid="stDataFrame"],
+div[data-testid="stTable"],
+div[data-testid="stPlotlyChart"] {
     border-radius: 26px;
-    background: linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.05));
-    border: 1px solid rgba(188,228,255,0.16);
+    overflow: hidden;
+    background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03));
+    border: 1px solid rgba(188, 226, 255, 0.12);
+    box-shadow: 0 14px 32px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255,255,255,0.10);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
-    box-shadow:
-        0 12px 28px rgba(0, 0, 0, 0.18),
-        inset 0 1px 0 rgba(255,255,255,0.14),
-        inset 0 -1px 0 rgba(255,255,255,0.04);
 }
 
 .metric-shell {
-    padding: 1rem 1rem;
-    min-height: 118px;
-}
-
-div[data-testid="stMetric"] {
-    padding: 0.9rem 1rem;
-}
-
-.metric-shell::before,
-div[data-testid="stMetric"]::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    background: radial-gradient(circle at top left, rgba(255,255,255,0.10), transparent 26%);
+    padding: 0.95rem 1rem;
+    min-height: 116px;
 }
 
 .metric-label {
     font-size: 0.78rem;
-    color: var(--txt-soft);
+    color: rgba(219, 233, 249, 0.75);
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    text-shadow: 0 0 8px rgba(98,219,255,0.10), 0 1px 8px rgba(0,0,0,0.30);
 }
 
 .metric-value {
-    font-size: 1.96rem;
+    font-size: 1.95rem;
     font-weight: 700;
     margin-top: 0.2rem;
     color: #ffffff;
-    text-shadow:
-        0 0 8px rgba(255,255,255,0.16),
-        0 0 18px rgba(98,219,255,0.08),
-        0 2px 12px rgba(0,0,0,0.24);
+    text-shadow: 0 0 16px rgba(105,217,255,0.10);
 }
 
 .metric-sub {
-    margin-top: 0.2rem;
+    margin-top: 0.25rem;
     font-size: 0.86rem;
     color: var(--txt-soft);
-    text-shadow: 0 0 6px rgba(255,255,255,0.08), 0 1px 8px rgba(0,0,0,0.28);
 }
 
 .stTabs [data-baseweb="tab-list"] {
     gap: 0.55rem;
-    padding: 0.25rem;
+    padding: 0.22rem;
     background: rgba(255,255,255,0.05);
     border-radius: 18px;
-    border: 1px solid rgba(186,229,255,0.12);
+    border: 1px solid rgba(188, 226, 255, 0.12);
     backdrop-filter: blur(14px);
     -webkit-backdrop-filter: blur(14px);
 }
 
 .stTabs [data-baseweb="tab"] {
     border-radius: 14px;
-    background: rgba(255,255,255,0.05);
-    padding: 0.5rem 0.95rem;
-    color: #f5fbff;
+    background: rgba(255,255,255,0.03);
+    padding: 0.52rem 0.92rem;
+    color: var(--txt-soft);
     border: 1px solid transparent;
-    transition: all 0.2s ease;
-    text-shadow: 0 0 8px rgba(89,216,255,0.10), 0 1px 6px rgba(0,0,0,0.30);
 }
 
 .stTabs [data-baseweb="tab"]:hover {
-    background: rgba(255,255,255,0.10);
-    border: 1px solid rgba(186,229,255,0.18);
+    background: rgba(255,255,255,0.07);
+    border-color: rgba(188, 226, 255, 0.12);
 }
 
 .stTabs [aria-selected="true"] {
-    background: linear-gradient(180deg, rgba(98,219,255,0.18), rgba(55,191,255,0.10)) !important;
-    border: 1px solid rgba(120, 221, 255, 0.34) !important;
-    box-shadow:
-        0 0 18px rgba(98,219,255,0.10),
-        inset 0 1px 0 rgba(255,255,255,0.18) !important;
+    background: linear-gradient(180deg, rgba(105,217,255,0.20), rgba(47,193,255,0.10)) !important;
+    border: 1px solid rgba(188, 226, 255, 0.18) !important;
     color: #ffffff !important;
-}
-
-div[data-testid="stDataFrame"],
-div[data-testid="stTable"],
-div[data-testid="stExpander"] {
-    border-radius: 24px;
-    overflow: hidden;
-    border: 1px solid rgba(188,228,255,0.14);
-    background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.04));
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
-    box-shadow:
-        0 10px 24px rgba(0, 0, 0, 0.18),
-        inset 0 1px 0 rgba(255,255,255,0.10);
-}
-
-div[data-testid="stPlotlyChart"] {
-    border-radius: 28px;
-    overflow: hidden;
-    background: linear-gradient(180deg, rgba(10, 19, 33, 0.64), rgba(10, 19, 33, 0.42));
-    border: 1px solid rgba(188,228,255,0.12);
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
-    padding: 0.35rem;
-    box-shadow:
-        0 12px 28px rgba(0, 0, 0, 0.22),
-        inset 0 1px 0 rgba(255,255,255,0.10);
+    box-shadow: 0 0 16px rgba(105,217,255,0.08), inset 0 1px 0 rgba(255,255,255,0.10);
 }
 
 .stButton > button,
 .stDownloadButton > button {
     border-radius: 16px;
-    border: 1px solid rgba(120, 221, 255, 0.28);
-    background: linear-gradient(180deg, rgba(98,219,255,0.20), rgba(55,191,255,0.10));
+    border: 1px solid rgba(188, 226, 255, 0.16);
+    background: linear-gradient(180deg, rgba(105,217,255,0.22), rgba(47,193,255,0.10));
     color: white;
     font-weight: 600;
-    box-shadow:
-        0 0 16px rgba(98,219,255,0.08),
-        inset 0 1px 0 rgba(255,255,255,0.16);
-    transition: all 0.2s ease;
-    text-shadow: 0 0 8px rgba(255,255,255,0.12), 0 1px 6px rgba(0,0,0,0.24);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 0 18px rgba(105,217,255,0.08);
 }
 
 .stButton > button:hover,
 .stDownloadButton > button:hover {
-    transform: translateY(-1px);
-    border-color: rgba(166,236,255,0.42);
-    box-shadow:
-        0 0 22px rgba(98,219,255,0.12),
-        inset 0 1px 0 rgba(255,255,255,0.20);
-}
-
-.stTextInput input,
-.stNumberInput input,
-.stDateInput input,
-.stTextArea textarea,
-.stSelectbox div[data-baseweb="select"] > div,
-.stMultiSelect div[data-baseweb="select"] > div {
-    background: rgba(255,255,255,0.08) !important;
-    border: 1px solid rgba(188,228,255,0.14) !important;
-    border-radius: 16px !important;
-    color: #ffffff !important;
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-}
-
-.stTextInput input::placeholder,
-.stTextArea textarea::placeholder {
-    color: rgba(245,249,255,0.60);
+    border-color: rgba(188, 226, 255, 0.22);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.12), 0 0 22px rgba(105,217,255,0.10);
 }
 
 h1, h2, h3, h4, h5, h6 {
     color: #ffffff !important;
-    letter-spacing: 0.01em;
-    text-shadow:
-        0 0 8px rgba(255,255,255,0.18),
-        0 0 20px rgba(98,219,255,0.10),
-        0 2px 10px rgba(0,0,0,0.30);
 }
 
-p, label, span, div {
-    color: var(--txt-soft);
-}
-
-[data-testid="stMarkdownContainer"] p,
-.small-note,
-li {
-    color: var(--txt-soft) !important;
-    text-shadow:
-        0 0 5px rgba(255,255,255,0.10),
-        0 1px 8px rgba(0,0,0,0.34);
+.small-note {
+    color: var(--muted);
+    font-size: 0.88rem;
 }
 
 hr {
     border: none;
     height: 1px;
-    background: linear-gradient(90deg, transparent, rgba(186,229,255,0.18), transparent);
-}
-
-.js-plotly-plot .plotly .main-svg {
-    filter: drop-shadow(0 0 12px rgba(89,216,255,0.05));
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.14), transparent);
 }
 </style>
 """
@@ -507,7 +505,7 @@ def glow_layout(fig: go.Figure, height: int = 420, title_size: int = 18) -> go.F
         height=height,
         paper_bgcolor=PLOT_BG,
         plot_bgcolor=PLOT_BG,
-        margin=dict(l=18, r=18, t=82, b=18),
+        margin=dict(l=18, r=18, t=78, b=18),
         legend=dict(
             orientation="h",
             yanchor="bottom",
@@ -784,43 +782,74 @@ def build_filter_summary(
 
 def prepare_pdf_report_table(df: pd.DataFrame) -> pd.DataFrame:
     preferred_columns = [
-        "Commercial Region", "Country", "Distributor name", "Customer name", "Instrument type", "Serial number",
-        "Operational status grouped", "Operational status", "Operating System", "Asset condition", "Installation date", "Type of contract",
+        "Commercial Region",
+        "Country",
+        "Distributor name",
+        "Customer name",
+        "Instrument type",
+        "Serial number",
+        "Operational status grouped",
+        "Operational status",
+        "Operating System",
+        "Asset condition",
+        "Installation date",
+        "Type of contract",
     ]
     available = [col for col in preferred_columns if col in df.columns]
     report_df = df[available].copy()
+
     for col in ["Installation date", "PM next date"]:
         if col in report_df.columns:
             report_df[col] = pd.to_datetime(report_df[col], errors="coerce").dt.strftime("%Y-%m-%d")
-            report_df[col] = report_df[col].fillna("N/D")
+            report_df[col] = report_df[col].fillna("N/A")
+
     for col in report_df.columns:
         if col not in ["Installation date", "PM next date"]:
-            report_df[col] = report_df[col].fillna("N/D").astype(str).str.strip().replace("", "N/D")
-    report_df = report_df.rename(columns={
-        "Commercial Region": "Región", "Country": "País", "Distributor name": "Distribuidor", "Customer name": "Cliente",
-        "Instrument type": "Instrumento", "Serial number": "Serial", "Operational status grouped": "Estado",
-        "Operational status": "Estado original", "Operating System": "Sistema operativo", "Asset condition": "Condición",
-        "Installation date": "Fecha de instalación", "Type of contract": "Contrato",
-    })
-    ordered_cols = [c for c in ["Región", "País", "Distribuidor", "Cliente", "Instrumento", "Serial", "Estado", "Estado original", "Sistema operativo", "Condición", "Fecha de instalación", "Contrato"] if c in report_df.columns]
+            report_df[col] = report_df[col].fillna("N/A").astype(str).str.strip().replace("", "N/A")
+
+    report_df = report_df.rename(
+        columns={
+            "Commercial Region": "Region",
+            "Distributor name": "Distributor",
+            "Customer name": "Customer",
+            "Instrument type": "Instrument",
+            "Serial number": "Serial",
+            "Operational status grouped": "State",
+            "Operational status": "Raw Status",
+            "Operating System": "OS",
+            "Asset condition": "Asset",
+            "Installation date": "Install Date",
+            "Type of contract": "Contract",
+        }
+    )
+
+    ordered_cols = [
+        c for c in ["Region", "Country", "Distributor", "Customer", "Instrument", "Serial", "State", "Raw Status", "OS", "Asset", "Install Date", "Contract"]
+        if c in report_df.columns
+    ]
     return report_df[ordered_cols]
+
 
 def _pdf_header_footer(canvas, doc, short_title: str):
     canvas.saveState()
     width, height = landscape(A4)
+
     canvas.setStrokeColor(colors.HexColor("#D9D9D9"))
     canvas.setLineWidth(0.6)
     canvas.line(doc.leftMargin, height - 34, width - doc.rightMargin, height - 34)
     canvas.line(doc.leftMargin, 28, width - doc.rightMargin, 28)
+
     canvas.setFont("Helvetica-Bold", 9)
     canvas.setFillColor(colors.HexColor("#222222"))
     canvas.drawString(doc.leftMargin, height - 24, short_title[:90])
-    canvas.drawRightString(width - doc.rightMargin, height - 24, f"Página {doc.page}")
+    canvas.drawRightString(width - doc.rightMargin, height - 24, f"Page {doc.page}")
+
     canvas.setFont("Helvetica", 8)
     canvas.setFillColor(colors.HexColor("#666666"))
-    canvas.drawString(doc.leftMargin, 16, "Records List Intelligence Dashboard | Informe filtrado en formato APA")
+    canvas.drawString(doc.leftMargin, 16, "Records List Intelligence Dashboard | APA-style filtered report")
     canvas.drawRightString(width - doc.rightMargin, 16, datetime.now().strftime("%Y-%m-%d %H:%M"))
     canvas.restoreState()
+
 
 def _escape_pdf_text(value) -> str:
     text = safe_text(value, "N/A")
@@ -836,174 +865,97 @@ def _df_to_wrapped_table(df: pd.DataFrame, styles, col_widths=None, max_rows=Non
     if max_rows is not None:
         work = work.head(max_rows)
     if work.empty:
-        return Paragraph("No hay datos disponibles para esta sección.", styles["APA_Body"])
+        return Paragraph("No data available for this section.", styles["APA_Body"])
+
     for col in work.columns:
-        work[col] = work[col].fillna("N/D").astype(str).str.slice(0, 110)
+        work[col] = work[col].fillna("N/A").astype(str).str.slice(0, 110)
+
     header_row = [Paragraph(f"<b>{_escape_pdf_text(c)}</b>", styles["APA_Cell_Header"]) for c in work.columns]
     body_rows = [[_paragraph_cell(v, styles["APA_Cell"]) for v in row] for row in work.values.tolist()]
     table = Table([header_row] + body_rows, colWidths=col_widths, repeatRows=1)
     table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#203864")), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#BFBFBF")), ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F5F7FA")]),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 3), ("RIGHTPADDING", (0, 0), (-1, -1), 3),
-        ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#203864")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#BFBFBF")),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F5F7FA")]),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 3),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
     ]))
     return table
 
+
 def _summary_table_from_pairs(title: str, pairs: list[tuple[str, str]], styles):
-    data = [[Paragraph("<b>Métrica</b>", styles["APA_Cell_Header"]), Paragraph("<b>Valor</b>", styles["APA_Cell_Header"])]]
+    data = [[Paragraph("<b>Metric</b>", styles["APA_Cell_Header"]), Paragraph("<b>Value</b>", styles["APA_Cell_Header"])]]
     for k, v in pairs:
         data.append([_paragraph_cell(k, styles["APA_Cell"]), _paragraph_cell(v, styles["APA_Cell"])])
     table = Table(data, colWidths=[2.8 * inch, 2.1 * inch], repeatRows=1)
     table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f4e79")), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#C8D6E5")), ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.HexColor("#F7F9FB")]),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 5), ("RIGHTPADDING", (0, 0), (-1, -1), 5),
-        ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f4e79")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#C8D6E5")),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.HexColor("#F7F9FB")]),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
     ]))
     return [Paragraph(title, styles["APA_Heading"]), table]
 
-def _make_matplotlib_barh(df: pd.DataFrame, label_col: str, value_col: str, title: str, max_rows: int = 10, xlabel: str = "Cantidad", annotate: bool = True):
+
+def _make_matplotlib_barh(df: pd.DataFrame, label_col: str, value_col: str, title: str, max_rows: int = 10):
     if not MATPLOTLIB_AVAILABLE or df is None or df.empty:
         return None
     work = df[[label_col, value_col]].copy().dropna().head(max_rows)
     if work.empty:
         return None
-    work[value_col] = pd.to_numeric(work[value_col], errors="coerce")
-    work = work.dropna().sort_values(value_col, ascending=True)
-    if work.empty:
-        return None
-    fig_h = max(2.6, min(5.8, 0.45 * len(work) + 1.5))
-    fig, ax = plt.subplots(figsize=(8.6, fig_h))
-    bars = ax.barh(work[label_col].astype(str), work[value_col].astype(float), alpha=0.9)
-    ax.set_title(title, fontsize=12, weight="bold", pad=12)
-    ax.set_xlabel(xlabel, fontsize=9)
+    work = work.sort_values(value_col, ascending=True)
+    fig, ax = plt.subplots(figsize=(8.4, 3.8))
+    ax.barh(work[label_col].astype(str), work[value_col].astype(float))
+    ax.set_title(title, fontsize=11)
+    ax.set_xlabel("Count")
     ax.tick_params(axis="y", labelsize=8)
     ax.tick_params(axis="x", labelsize=8)
-    ax.grid(axis="x", alpha=0.22)
-    ax.spines[['top','right']].set_visible(False)
-    if annotate:
-        max_val = float(work[value_col].max()) if len(work) else 0
-        offset = max_val * 0.015 if max_val else 0.1
-        for bar in bars:
-            width = bar.get_width()
-            ax.text(width + offset, bar.get_y() + bar.get_height()/2, safe_number_text(width, "0"), va='center', ha='left', fontsize=8)
+    ax.grid(axis="x", alpha=0.25)
     fig.tight_layout()
     buf = BytesIO()
-    fig.savefig(buf, format="png", dpi=190, bbox_inches="tight", facecolor="white")
+    fig.savefig(buf, format="png", dpi=180, bbox_inches="tight")
     plt.close(fig)
     buf.seek(0)
     return buf
 
 
-def _make_matplotlib_top_tests(df: pd.DataFrame, title: str, max_rows: int = 12):
-    if not MATPLOTLIB_AVAILABLE or df is None or df.empty:
+def _make_matplotlib_scatter(df: pd.DataFrame, x_col: str, y_col: str, title: str, max_rows: int = 200):
+    if not MATPLOTLIB_AVAILABLE or df is None or df.empty or x_col not in df.columns or y_col not in df.columns:
         return None
-    work = df.copy()
-    work['Number of tests per day'] = pd.to_numeric(work['Number of tests per day'], errors='coerce').fillna(0)
-    work = work[work['Number of tests per day'] > 0].sort_values('Number of tests per day', ascending=False).head(max_rows)
+    work = df[[x_col, y_col]].copy().dropna().head(max_rows)
     if work.empty:
         return None
-    label_col = 'Etiqueta'
-    work[label_col] = work['Serial number'].astype(str) + ' | ' + work['Instrument type'].astype(str).str.replace('CLIA: ', '', regex=False)
-    return _make_matplotlib_barh(work[[label_col, 'Number of tests per day']], label_col, 'Number of tests per day', title, max_rows=max_rows, xlabel='Pruebas por día')
-
-
-def _make_matplotlib_distribution_bar(series: pd.Series, title: str, max_slices: int = 5):
-    if not MATPLOTLIB_AVAILABLE or series is None:
+    work[y_col] = pd.to_numeric(work[y_col], errors="coerce")
+    work = work.dropna()
+    if work.empty:
         return None
-    dist = compress_value_distribution(series, max_slices=max_slices)
-    if dist.empty:
-        return None
-    fig_h = max(2.8, min(4.8, 0.45 * len(dist) + 1.2))
-    fig, ax = plt.subplots(figsize=(8.2, fig_h))
-    work = dist.sort_values('Count', ascending=True)
-    bars = ax.barh(work['Label'].astype(str), work['Count'].astype(float), alpha=0.92)
-    ax.set_title(title, fontsize=11, weight='bold', pad=10)
-    ax.set_xlabel('Cantidad de equipos', fontsize=9)
-    ax.tick_params(axis='y', labelsize=8)
-    ax.tick_params(axis='x', labelsize=8)
-    ax.grid(axis='x', alpha=0.2)
-    ax.spines[['top','right']].set_visible(False)
-    total = float(work['Count'].sum()) if len(work) else 0
-    for bar, (_, row) in zip(bars, work.iterrows()):
-        pct = (float(row['Count']) / total * 100) if total else 0
-        ax.text(bar.get_width() + max(total*0.01, 0.1), bar.get_y() + bar.get_height()/2, f"{int(row['Count'])} ({pct:.1f}%)", va='center', ha='left', fontsize=8)
+    fig, ax = plt.subplots(figsize=(8.4, 3.8))
+    ax.scatter(range(len(work)), work[y_col].astype(float))
+    ax.set_title(title, fontsize=11)
+    ax.set_xlabel(x_col)
+    ax.set_ylabel(y_col)
+    step = max(1, len(work) // 10)
+    idx = list(range(0, len(work), step))
+    ax.set_xticks(idx)
+    ax.set_xticklabels([str(work.iloc[i][x_col])[:14] for i in idx], rotation=45, ha="right", fontsize=7)
+    ax.tick_params(axis="y", labelsize=8)
+    ax.grid(alpha=0.25)
     fig.tight_layout()
     buf = BytesIO()
-    fig.savefig(buf, format='png', dpi=190, bbox_inches='tight', facecolor='white')
+    fig.savefig(buf, format="png", dpi=180, bbox_inches="tight")
     plt.close(fig)
     buf.seek(0)
     return buf
 
-
-def build_machine_config_summary_tables(filtered_df: pd.DataFrame) -> tuple[pd.DataFrame, list[BytesIO], pd.DataFrame]:
-    cfg_cols = [c for c in filtered_df.columns if c.startswith('CFG::') and int(filtered_df[c].notna().sum()) > 0]
-    summary_rows = []
-    chart_buffers = []
-    detail_rows = []
-    ordered_cfg = sorted(cfg_cols, key=lambda c: int(filtered_df[c].notna().sum()), reverse=True)
-    for cfg_col in ordered_cfg:
-        field_name = cfg_col.replace('CFG::', '')
-        item_series = filtered_df[cfg_col].dropna().astype(str).str.strip()
-        item_series = item_series[item_series.ne('')]
-        if item_series.empty:
-            continue
-        dist = item_series.value_counts().reset_index()
-        dist.columns = ['Value', 'Count']
-        top = dist.iloc[0]
-        summary_rows.append({
-            'Campo de configuración': field_name,
-            'Equipos con valor': int(item_series.shape[0]),
-            'Valores únicos': int(dist.shape[0]),
-            'Valor principal': str(top['Value'])[:90],
-            'Conteo principal': int(top['Count']),
-        })
-        for _, row in dist.head(5).iterrows():
-            detail_rows.append({
-                'Campo de configuración': field_name,
-                'Valor': str(row['Value'])[:100],
-                'Cantidad': int(row['Count']),
-                'Participación %': round(float(row['Count']) / float(item_series.shape[0]) * 100, 1) if item_series.shape[0] else 0,
-            })
-    for cfg_col in ordered_cfg[:8]:
-        field_name = cfg_col.replace('CFG::', '')
-        item_series = filtered_df[cfg_col].dropna().astype(str).str.strip()
-        item_series = item_series[item_series.ne('')]
-        buf = _make_matplotlib_distribution_bar(item_series, field_name, max_slices=5)
-        if buf is not None:
-            chart_buffers.append(buf)
-    summary_df = pd.DataFrame(summary_rows)
-    detail_df = pd.DataFrame(detail_rows)
-    return summary_df, chart_buffers, detail_df
-
-def build_executive_insights(filtered_df: pd.DataFrame, stock_context: dict | None = None) -> list[str]:
-    insights = []
-    total_records = len(filtered_df)
-    if total_records == 0:
-        return ["No hay registros disponibles para la selección de filtros actual."]
-    top_country = filtered_df['Country'].fillna('No informado').value_counts()
-    if not top_country.empty:
-        insights.append(f"La base instalada filtrada se concentra principalmente en {top_country.index[0]} con {int(top_country.iloc[0]):,} equipos.")
-    status_counts = filtered_df['Operational status grouped'].fillna('No informado').value_counts()
-    if not status_counts.empty:
-        insights.append(f"El estado operativo dominante es {status_counts.index[0]}, que representa {round(float(status_counts.iloc[0]) / total_records * 100, 1)}% de la base filtrada.")
-    if 'Operating System' in filtered_df.columns:
-        legacy_mask = filtered_df['Operating System'].isin(['Windows XP', 'Windows Vista', 'Windows 7', 'Windows 2000'])
-        legacy_count = int(legacy_mask.sum())
-        if legacy_count > 0:
-            insights.append(f"Se identificaron {legacy_count:,} equipos con sistemas operativos legacy que deben priorizarse para migración o remediación.")
-    cfg_assets = int(filtered_df['Machine Configurations'].notna().sum()) if 'Machine Configurations' in filtered_df.columns else 0
-    if cfg_assets > 0:
-        insights.append(f"La información de machine configuration está disponible para {cfg_assets:,} equipos, lo que permite segmentar por software, hardware y configuración local.")
-    stock_context = stock_context or {}
-    if stock_context.get('available'):
-        missing = int(stock_context.get('missing_skus', 0) or 0)
-        low = int(stock_context.get('low_skus', 0) or 0)
-        cost = float(stock_context.get('option2_cost', 0) or 0)
-        currency = stock_context.get('currency', 'EUR')
-        insights.append(f"El análisis de stock detectó {missing:,} repuestos faltantes y {low:,} en nivel bajo, con una exposición estimada de {currency} {cost:,.2f} usando precios Option 2.")
-    return insights
 
 def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = None):
     sections = []
@@ -1022,26 +974,13 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
     top_inst.columns = ['Instrument', 'Count']
     state_counts = filtered_df['Operational status grouped'].fillna('No informado').value_counts().reset_index()
     state_counts.columns = ['State', 'Count']
-    age_df = filtered_df.copy()
-    if 'Age (years)' in age_df.columns:
-        age_df['Age bucket'] = pd.cut(
-            age_df['Age (years)'],
-            bins=[-1, 5, 8, 10, 100],
-            labels=['0-5 years', '5-8 years', '8-10 years', '10+ years'],
-        )
-        age_bucket = age_df['Age bucket'].value_counts().reset_index()
-        age_bucket.columns = ['Age bucket', 'Count']
-    else:
-        age_bucket = pd.DataFrame(columns=['Age bucket', 'Count'])
     sections.append({
         'title': 'Base Installed Overview',
-        'section_text': 'This section summarizes the filtered installed base and highlights the main concentration patterns by geography, instrument mix, age profile, and operational status.',
         'summary_pairs': base_pairs,
         'charts': [
-            _make_matplotlib_barh(top_country, 'Country', 'Count', 'Top países'),
-            _make_matplotlib_barh(top_inst, 'Instrument', 'Count', 'Mezcla de instrumentos'),
-            _make_matplotlib_barh(state_counts, 'State', 'Count', 'Distribución de estado operativo'),
-            _make_matplotlib_barh(age_bucket, 'Age bucket', 'Count', 'Perfil de antigüedad'),
+            _make_matplotlib_barh(top_country, 'Country', 'Count', 'Top countries'),
+            _make_matplotlib_barh(top_inst, 'Instrument', 'Count', 'Instrument mix'),
+            _make_matplotlib_barh(state_counts, 'State', 'Count', 'Operational status mix'),
         ],
         'table_title': 'Top filtered records snapshot',
         'table_df': prepare_pdf_report_table(filtered_df),
@@ -1049,7 +988,7 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
     })
 
     # Machine config
-    cfg_cols = [c for c in filtered_df.columns if c.startswith('CFG::') and int(filtered_df[c].notna().sum()) > 0]
+    cfg_cols = [c for c in filtered_df.columns if c.startswith('CFG::')]
     cfg_pairs = [
         ('Assets with machine configuration', f"{int(filtered_df['Machine Configurations'].notna().sum()):,}"),
         ('Active config fields', f"{sum(int(filtered_df[c].notna().sum()) > 0 for c in cfg_cols):,}"),
@@ -1058,29 +997,17 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
     cfg_cov = pd.DataFrame([
         {'Field': c.replace('CFG::', ''), 'Count': int(filtered_df[c].notna().sum())} for c in cfg_cols if int(filtered_df[c].notna().sum()) > 0
     ]).sort_values('Count', ascending=False) if cfg_cols else pd.DataFrame(columns=['Field', 'Count'])
-    machine_summary_df, machine_donut_buffers, machine_detail_df = build_machine_config_summary_tables(filtered_df)
+    cfg_top_table = cfg_cov.head(12).rename(columns={'Field':'Config field', 'Count':'Populated assets'})
     sections.append({
         'title': 'Machine Configuration',
-        'section_text': 'This section consolidates the machine-configuration fields detected in the current filter scope, including the most populated fields and the dominant values used by the installed base.',
         'summary_pairs': cfg_pairs,
-        'charts': [_make_matplotlib_barh(cfg_cov, 'Field', 'Count', 'Cobertura por campo de configuración')] + machine_donut_buffers,
-        'table_title': 'Machine configuration summary',
-        'table_df': machine_summary_df,
-        'table_max_rows': 20,
+        'charts': [
+            _make_matplotlib_barh(cfg_cov, 'Field', 'Count', 'Configuration field coverage'),
+        ],
+        'table_title': 'Most populated configuration fields',
+        'table_df': cfg_top_table,
+        'table_max_rows': 12,
     })
-    if not machine_detail_df.empty:
-        sections.append({
-            'title': 'Machine Configuration Annex - Top Values',
-            'section_text': 'Top recurring values per machine-configuration field, based on the current filter selection.',
-            'summary_pairs': [
-                ('Rows included', f"{len(machine_detail_df):,}"),
-                ('Scope', 'Top five values for the most relevant machine-configuration fields'),
-            ],
-            'charts': [],
-            'table_title': 'Top values by configuration field',
-            'table_df': machine_detail_df,
-            'table_max_rows': max(len(machine_detail_df), 1),
-        })
 
     # OS
     os_df = filtered_df.copy()
@@ -1100,11 +1027,10 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
     urgent_table = os_df[os_df['Operating System'].isin(['Windows XP','Windows Vista','Windows 7','Windows 2000'])][['Country','Distributor name','Customer name','Instrument type','Serial number','Operating System']].copy()
     sections.append({
         'title': 'Operating System',
-        'section_text': 'Operating-system visibility is used to identify outdated environments, migration priorities, and data-quality gaps across the installed base.',
         'summary_pairs': os_pairs,
         'charts': [
-            _make_matplotlib_barh(os_counts, 'Operating System', 'Count', 'Distribución de sistema operativo'),
-            _make_matplotlib_barh(os_bucket, 'Bucket', 'Count', 'Priorización de actualización'),
+            _make_matplotlib_barh(os_counts, 'Operating System', 'Count', 'OS distribution'),
+            _make_matplotlib_barh(os_bucket, 'Bucket', 'Count', 'Upgrade prioritization'),
         ],
         'table_title': 'Assets requiring Windows upgrade',
         'table_df': urgent_table,
@@ -1138,12 +1064,11 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
     tests_table = proc_df[['Country','Distributor name','Instrument type','Serial number','Number of tests per day','PM planner status']].copy().sort_values('Number of tests per day', ascending=False, na_position='last')
     sections.append({
         'title': 'Processing and PM Planner',
-        'section_text': 'Processing intensity and preventive-maintenance timing are shown together to support prioritization by utilization and maintenance exposure.',
         'summary_pairs': proc_pairs,
         'charts': [
-            _make_matplotlib_top_tests(proc_df[['Serial number','Instrument type','Number of tests per day']].dropna(), 'Top equipos por pruebas por día'),
-            _make_matplotlib_barh(product_df, 'Product line', 'Count', 'Líneas de producto principales'),
-            _make_matplotlib_barh(pm_status, 'PM status', 'Count', 'Estado del plan de PM'),
+            _make_matplotlib_scatter(proc_df[['Serial number','Number of tests per day']].dropna().sort_values('Number of tests per day', ascending=False), 'Serial number', 'Number of tests per day', 'Tests/day by serial'),
+            _make_matplotlib_barh(product_df, 'Product line', 'Count', 'Top product lines'),
+            _make_matplotlib_barh(pm_status, 'PM status', 'Count', 'PM planner status'),
         ],
         'table_title': 'Processing and PM snapshot',
         'table_df': tests_table,
@@ -1182,11 +1107,10 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
         summary_table_df = stock_top_gap[['Required Part Number','Required Description','Required Qty','Uploaded Qty','Qty Gap','Status','Option 2 Estimated Cost','Currency']] if not stock_top_gap.empty else pd.DataFrame(columns=['Required Part Number','Required Description','Required Qty','Uploaded Qty','Qty Gap','Status','Option 2 Estimated Cost','Currency'])
         sections.append({
             'title': 'Spare Parts / Carstock Gap',
-            'section_text': 'When a spare-parts stock file is loaded, this section compares the uploaded stock against the selected master and quantifies the replenishment gap.',
             'summary_pairs': stock_pairs,
             'charts': [
-                _make_matplotlib_barh(stock_status[stock_status['Status'].isin(['OK','LOW','Missing'])], 'Status', 'Count', 'Estado de cobertura del carstock'),
-                _make_matplotlib_barh(stock_top_gap.assign(Etiqueta=stock_top_gap['Required Part Number'].astype(str) + ' | ' + stock_top_gap['Required Description'].fillna('').astype(str).str.slice(0,28)).rename(columns={'Qty Gap':'Gap qty'}), 'Etiqueta', 'Gap qty', 'Principales faltantes por brecha'),
+                _make_matplotlib_barh(stock_status, 'Status', 'Count', 'Carstock coverage status'),
+                _make_matplotlib_barh(stock_top_gap.rename(columns={'Required Part Number':'Part number','Qty Gap':'Gap qty'}), 'Part number', 'Gap qty', 'Top missing parts'),
             ],
             'table_title': 'Top spare parts gaps',
             'table_df': summary_table_df,
@@ -1198,7 +1122,6 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
             full_table = full_comparison_df[full_cols].copy()
             sections.append({
                 'title': 'Spare Parts Annex - Full Comparison',
-                'section_text': 'Complete detail of the compared carstock, including coverage ratio, price reference, and estimated replenishment values.',
                 'summary_pairs': [
                     ('Rows included', f"{len(full_table):,}"),
                     ('Scope', 'Complete carstock comparison for all required SKUs'),
@@ -1215,7 +1138,6 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
             missing_low_table = missing_low_df[ml_cols].copy().sort_values(['Status','Qty Gap','Required Part Number'], ascending=[True, False, True])
             sections.append({
                 'title': 'Spare Parts Annex - Missing and LOW',
-                'section_text': 'Focused view of items that are either fully missing or below the requested stock threshold.',
                 'summary_pairs': [
                     ('Rows included', f"{len(missing_low_table):,}"),
                     ('Scope', 'Items with missing or insufficient stock'),
@@ -1231,7 +1153,6 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
             purchase_table = purchase_df[pur_cols].copy()
             sections.append({
                 'title': 'Spare Parts Annex - Purchase Suggestion',
-                'section_text': 'Suggested purchase list derived from the detected stock gap and the available price reference.',
                 'summary_pairs': [
                     ('Rows included', f"{len(purchase_table):,}"),
                     ('Scope', 'Suggested purchase to close current gap using option 2 pricing'),
@@ -1247,7 +1168,6 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
             extra_table = extra_df[ex_cols].copy()
             sections.append({
                 'title': 'Spare Parts Annex - Extra Items',
-                'section_text': 'These items were reported in the uploaded file but are not required by the selected stock master.',
                 'summary_pairs': [
                     ('Rows included', f"{len(extra_table):,}"),
                     ('Scope', 'Parts reported by the distributor that are not required by the selected carstock master'),
@@ -1260,7 +1180,6 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
     else:
         sections.append({
             'title': 'Spare Parts / Carstock Gap',
-            'section_text': 'No spare-parts comparison was loaded for the current session, so this section remains informational only.',
             'summary_pairs': [('Status', 'No spare parts comparison loaded in the current session.')],
             'charts': [],
             'table_title': 'Spare parts comparison',
@@ -1283,250 +1202,132 @@ def build_pdf_report(
 ) -> bytes:
     if not REPORTLAB_AVAILABLE:
         raise RuntimeError("reportlab no está instalado en el entorno.")
-
-    from reportlab.platypus import Image
-
-    section_title_map = {
-        'Base Installed Overview': 'Resumen de base instalada',
-        'Machine Configuration': 'Machine configuration',
-        'Machine Configuration Annex - Top Values': 'Anexo de machine configuration - valores principales',
-        'Operating System': 'Sistema operativo',
-        'Processing and PM Planner': 'Procesamiento y plan de mantenimiento preventivo',
-        'Spare Parts / Carstock Gap': 'Análisis de brecha de stock / carstock',
-        'Spare Parts Annex - Full Comparison': 'Anexo de repuestos - comparación completa',
-        'Spare Parts Annex - Missing and LOW': 'Anexo de repuestos - faltantes y stock bajo',
-        'Spare Parts Annex - Purchase Suggestion': 'Anexo de repuestos - sugerencia de compra',
-        'Spare Parts Annex - Extra Items': 'Anexo de repuestos - ítems extra',
-    }
-    section_text_map = {
-        'Base Installed Overview': 'Esta sección resume la base instalada filtrada y resalta la concentración geográfica, la mezcla de instrumentos, la antigüedad de los equipos y el estado operativo general.',
-        'Machine Configuration': 'Esta sección consolida los campos detectados dentro de machine configuration y presenta sus distribuciones de valor en un formato más legible para gestión técnica.',
-        'Machine Configuration Annex - Top Values': 'Se muestran los valores más recurrentes por campo de configuración para facilitar el entendimiento de la estandarización actual de la base instalada.',
-        'Operating System': 'La visibilidad del sistema operativo permite priorizar migraciones, detectar entornos legacy y cuantificar vacíos de información.',
-        'Processing and PM Planner': 'Aquí se relacionan la intensidad de uso y el calendario de mantenimiento preventivo para apoyar la priorización operativa.',
-        'Spare Parts / Carstock Gap': 'Cuando se carga un archivo de stock, esta sección compara el inventario reportado contra el maestro seleccionado y estima la brecha de reposición.',
-        'Spare Parts Annex - Full Comparison': 'Detalle completo de la comparación de carstock, incluyendo cobertura, estado y costo estimado de reposición.',
-        'Spare Parts Annex - Missing and LOW': 'Listado de repuestos faltantes o en nivel bajo, ordenados para facilitar priorización de compra.',
-        'Spare Parts Annex - Purchase Suggestion': 'Sugerencia de compra para cerrar la brecha actual utilizando la referencia de precio Option 2.',
-        'Spare Parts Annex - Extra Items': 'Ítems reportados por el distribuidor que no forman parte del maestro seleccionado de carstock.',
-    }
-    metric_map = {
-        'Filtered records': 'Registros filtrados', 'Countries': 'Países', 'Distributors': 'Distribuidores',
-        'Instrument types': 'Tipos de instrumento', 'Routine assets': 'Equipos en rutina',
-        'Assets with machine configuration': 'Equipos con machine configuration', 'Active config fields': 'Campos activos de configuración',
-        'Average populated config fields': 'Promedio de campos poblados', 'Assets with OS identified': 'Equipos con SO identificado',
-        'Unique OS values': 'Valores únicos de SO', 'Legacy OS / urgent migration': 'SO legacy / migración urgente',
-        'Unknown / not informed': 'Desconocido / no informado', 'Average tests per day': 'Promedio de pruebas por día',
-        'Max tests per day': 'Máximo de pruebas por día', 'Upcoming PM in next 90 days': 'PM en próximos 90 días',
-        'Overdue PM': 'PM vencidos', 'Detected distributor': 'Distribuidor detectado', 'Families compared': 'Familias comparadas',
-        'Required SKUs': 'SKU requeridos', 'OK SKUs': 'SKU OK', 'LOW SKUs': 'SKU bajos', 'Missing SKUs': 'SKU faltantes',
-        'Extra SKUs': 'SKU extra', 'Gap total qty': 'Brecha total de cantidad', 'Option 2 estimated cost': 'Costo estimado Option 2',
-        'Rows included': 'Filas incluidas', 'Scope': 'Alcance', 'Status': 'Estado',
-    }
-    filter_key_map = {
-        'Commercial Region': 'Región comercial', 'Country': 'País', 'Distributor': 'Distribuidor',
-        'Instrument Type': 'Tipo de instrumento', 'Operational Status': 'Estado operativo', 'Total records': 'Registros totales'
-    }
-    support_table_title_map = {
-        'Top filtered records snapshot': 'Detalle principal de equipos filtrados',
-        'Most populated configuration fields': 'Resumen de machine configuration',
-        'Machine configuration summary': 'Resumen de machine configuration',
-        'Assets requiring Windows upgrade': 'Equipos que requieren actualización de Windows',
-        'Processing and PM snapshot': 'Resumen de procesamiento y PM',
-        'Top spare parts gaps': 'Principales brechas de repuestos',
-        'Complete spare parts comparison': 'Comparación completa de repuestos',
-        'Missing and LOW items': 'Ítems faltantes y con stock bajo',
-        'Suggested purchase list': 'Sugerencia de compra',
-        'Extra items not required by master': 'Ítems extra no requeridos por el maestro',
-        'Supporting Table': 'Tabla de soporte',
-    }
-
     buffer = BytesIO()
     doc = SimpleDocTemplate(
         buffer,
         pagesize=landscape(A4),
-        leftMargin=0.75 * inch,
-        rightMargin=0.75 * inch,
-        topMargin=0.8 * inch,
-        bottomMargin=0.8 * inch,
+        leftMargin=1.0 * inch,
+        rightMargin=1.0 * inch,
+        topMargin=1.0 * inch,
+        bottomMargin=1.0 * inch,
         title=report_title,
         author=author_name,
     )
 
     styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name="APA_Title", parent=styles["Title"], fontName="Times-Bold", fontSize=18, leading=22, alignment=TA_CENTER, spaceAfter=10, textColor=colors.HexColor("#111111")))
-    styles.add(ParagraphStyle(name="APA_Subtitle", parent=styles["Normal"], fontName="Times-Roman", fontSize=12, leading=18, alignment=TA_CENTER, spaceAfter=6, textColor=colors.HexColor("#444444")))
-    styles.add(ParagraphStyle(name="APA_Heading", parent=styles["Heading2"], fontName="Times-Bold", fontSize=12, leading=16, alignment=TA_LEFT, spaceBefore=6, spaceAfter=6, textColor=colors.HexColor("#111111")))
-    styles.add(ParagraphStyle(name="APA_Body", parent=styles["BodyText"], fontName="Times-Roman", fontSize=11, leading=18, alignment=TA_JUSTIFY, spaceAfter=6))
+    styles.add(ParagraphStyle(name="APA_Title", parent=styles["Title"], fontName="Times-Bold", fontSize=16, leading=20, alignment=TA_CENTER, spaceAfter=10, textColor=colors.HexColor("#111111")))
+    styles.add(ParagraphStyle(name="APA_Subtitle", parent=styles["Normal"], fontName="Times-Roman", fontSize=12, leading=24, alignment=TA_CENTER, spaceAfter=6, textColor=colors.HexColor("#444444")))
+    styles.add(ParagraphStyle(name="APA_Heading", parent=styles["Heading2"], fontName="Times-Bold", fontSize=12, leading=16, alignment=TA_LEFT, spaceBefore=4, spaceAfter=6, textColor=colors.HexColor("#111111")))
+    styles.add(ParagraphStyle(name="APA_Body", parent=styles["BodyText"], fontName="Times-Roman", fontSize=12, leading=24, alignment=TA_JUSTIFY, spaceAfter=6))
     styles.add(ParagraphStyle(name="APA_Cell", parent=styles["BodyText"], fontName="Times-Roman", fontSize=8, leading=10, alignment=TA_LEFT, wordWrap='CJK'))
     styles.add(ParagraphStyle(name="APA_Cell_Header", parent=styles["BodyText"], fontName="Times-Bold", fontSize=8, leading=10, alignment=TA_LEFT, textColor=colors.white))
-    styles.add(ParagraphStyle(name="APA_Signature", parent=styles["BodyText"], fontName="Times-Roman", fontSize=11, leading=18, alignment=TA_LEFT, spaceAfter=3))
-    styles.add(ParagraphStyle(name="APA_Insight", parent=styles["BodyText"], fontName="Times-Roman", fontSize=11, leading=16, alignment=TA_LEFT, leftIndent=14, bulletIndent=0, spaceAfter=4))
-    styles.add(ParagraphStyle(name="APA_Caption", parent=styles["BodyText"], fontName="Times-Italic", fontSize=9, leading=12, alignment=TA_CENTER, spaceAfter=4, textColor=colors.HexColor("#4A4A4A")))
-
-    def tr_metric_pairs(pairs):
-        return [(metric_map.get(k, k), v) for k, v in pairs]
-
-    def translated_filter_summary(fs):
-        return {filter_key_map.get(k, k): v for k, v in fs.items()}
-
-    def localize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-        if df is None or df.empty:
-            return df
-        rename_map = {
-            'Config field': 'Campo de configuración', 'Assets with value': 'Equipos con valor', 'Unique values': 'Valores únicos',
-            'Top value': 'Valor principal', 'Top count': 'Conteo principal', 'Value': 'Valor', 'Count': 'Cantidad',
-            'Share %': 'Participación %', 'Country': 'País', 'Distributor name': 'Distribuidor', 'Customer name': 'Cliente',
-            'Instrument type': 'Instrumento', 'Serial number': 'Serial', 'Operating System': 'Sistema operativo',
-            'Number of tests per day': 'Pruebas por día', 'PM planner status': 'Estado PM', 'Required Part Number': 'Número de parte requerido',
-            'Required Description': 'Descripción requerida', 'Required Qty': 'Cantidad requerida', 'Uploaded Qty': 'Cantidad cargada',
-            'Qty Gap': 'Brecha de cantidad', 'Coverage %': 'Cobertura %', 'Status': 'Estado', 'Option 2 Unit Price': 'Precio unitario Option 2',
-            'Option 2 Estimated Cost': 'Costo estimado Option 2', 'Currency': 'Moneda', 'Uploaded Part Number': 'Número de parte cargado',
-            'Uploaded Description': 'Descripción cargada', 'Purchase Qty Option 2': 'Cantidad sugerida Option 2', 'PM status': 'Estado PM',
-            'Product line': 'Línea de producto', 'Bucket': 'Categoría', 'OS': 'Sistema operativo'
-        }
-        return df.rename(columns=rename_map)
-
-    def add_chart_grid(elements_list, charts, caption_prefix='Figura'):
-        valid = [c for c in charts if c is not None]
-        if not valid:
-            return
-        for idx in range(0, len(valid), 2):
-            row = valid[idx:idx+2]
-            cells = []
-            for j, chart in enumerate(row, start=1):
-                img = Image(chart, width=5.0 * inch, height=2.55 * inch)
-                caption = Paragraph(f"{caption_prefix} {idx + j}. Visual analítico generado a partir de los filtros activos.", styles['APA_Caption'])
-                cells.append([img, caption])
-            if len(cells) == 1:
-                cells.append([Spacer(1, 2.55 * inch), Paragraph('', styles['APA_Caption'])])
-            table = Table(cells, colWidths=[5.2 * inch, 5.2 * inch])
-            table.setStyle(TableStyle([
-                ('VALIGN', (0,0), (-1,-1), 'TOP'),
-                ('LEFTPADDING', (0,0), (-1,-1), 4), ('RIGHTPADDING', (0,0), (-1,-1), 4),
-                ('TOPPADDING', (0,0), (-1,-1), 2), ('BOTTOMPADDING', (0,0), (-1,-1), 4),
-            ]))
-            elements_list.append(table)
-            elements_list.append(Spacer(1, 0.05 * inch))
+    styles.add(ParagraphStyle(name="APA_Signature", parent=styles["BodyText"], fontName="Times-Roman", fontSize=12, leading=24, alignment=TA_LEFT, spaceAfter=3))
 
     elements = []
     today_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-    short_title = re.sub(r"\s+", " ", report_title.strip() or "Informe")[:80]
+    short_title = re.sub(r"\s+", " ", report_title.strip() or "Dashboard Report")[:80]
 
-    elements.append(Spacer(1, 0.9 * inch))
+    elements.append(Spacer(1, 0.45 * inch))
     elements.append(Paragraph(report_title, styles["APA_Title"]))
-    elements.append(Spacer(1, 0.18 * inch))
     elements.append(Paragraph(author_name, styles["APA_Subtitle"]))
     elements.append(Paragraph(author_role, styles["APA_Subtitle"]))
-    elements.append(Paragraph(f"Generado el {today_str}", styles["APA_Subtitle"]))
-    elements.append(Paragraph("Records List Intelligence Dashboard", styles["APA_Subtitle"]))
-    elements.append(Spacer(1, 0.28 * inch))
-    elements.append(Paragraph(
-        "Este informe en formato APA resume la vista filtrada del dashboard de base instalada y compila los análisis visuales mostrados en la aplicación, incluyendo machine configuration, sistema operativo, procesamiento, mantenimiento preventivo y, cuando aplica, la comparación de stock de repuestos.",
-        styles["APA_Body"],
-    ))
-    elements.append(PageBreak())
+    elements.append(Paragraph(f"Generated on {today_str}", styles["APA_Subtitle"]))
+    elements.append(Spacer(1, 0.18 * inch))
+    elements.append(Paragraph("This report was generated from the active dashboard filters and includes executive summaries, charts, and supporting tables for the visible tabs in the dashboard, including spare parts when loaded in the current session.", styles["APA_Body"]))
 
-    elements.append(Paragraph("Resumen ejecutivo", styles["APA_Heading"]))
-    elements.append(Paragraph(
-        "El siguiente resumen presenta una visión de alto nivel de la base instalada filtrada y sirve como una fotografía ejecutiva del tamaño de la base, su concentración geográfica, el estado operativo, la visibilidad de configuración y la exposición por mantenimiento o repuestos.",
-        styles["APA_Body"],
-    ))
-    elements += _summary_table_from_pairs("Métricas clave", tr_metric_pairs([
+    elements += _summary_table_from_pairs("Executive Summary", [
         ("Filtered records", f"{len(filtered_df):,}"),
         ("Countries", f"{filtered_df['Country'].nunique(dropna=True):,}"),
         ("Distributors", f"{filtered_df['Distributor name'].nunique(dropna=True):,}"),
         ("Instrument types", f"{filtered_df['Instrument type'].nunique(dropna=True):,}"),
         ("Routine assets", f"{int(filtered_df.get('Is in routine', pd.Series(dtype=bool)).sum()):,}"),
-    ]), styles)
+    ], styles)
     elements.append(Spacer(1, 0.12 * inch))
 
-    elements.append(Paragraph("Filtros activos", styles["APA_Heading"]))
-    filters_table_data = [[Paragraph("<b>Filtro</b>", styles["APA_Cell_Header"]), Paragraph("<b>Valor seleccionado</b>", styles["APA_Cell_Header"])]]
-    for key, value in translated_filter_summary(filter_summary).items():
+    filters_table_data = [[Paragraph("<b>Filter</b>", styles["APA_Cell_Header"]), Paragraph("<b>Selected Value</b>", styles["APA_Cell_Header"])]]
+    for key, value in filter_summary.items():
         filters_table_data.append([_paragraph_cell(key, styles["APA_Cell"]), _paragraph_cell(value, styles["APA_Cell"])])
-    filters_table = Table(filters_table_data, colWidths=[2.5 * inch, 6.9 * inch], repeatRows=1)
+    filters_table = Table(filters_table_data, colWidths=[2.2 * inch, 7.2 * inch], repeatRows=1)
     filters_table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f4e79")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#C8D6E5")),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.HexColor("#F7F9FB")]),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 5), ("RIGHTPADDING", (0, 0), (-1, -1), 5),
-        ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
     ]))
+    elements.append(Paragraph("Active Filters", styles["APA_Heading"]))
     elements.append(filters_table)
-    elements.append(Spacer(1, 0.14 * inch))
 
-    elements.append(Paragraph("Hallazgos ejecutivos", styles["APA_Heading"]))
-    for insight in build_executive_insights(filtered_df, stock_context=stock_context):
-        elements.append(Paragraph(_escape_pdf_text(insight), styles["APA_Insight"], bulletText="•"))
-
+    from reportlab.platypus import Image
     sections = _build_pdf_sections(filtered_df, stock_context=stock_context)
     for section in sections:
         elements.append(PageBreak())
-        title_en = section['title']
-        title_es = section_title_map.get(title_en, title_en)
-        elements.append(Paragraph(title_es, styles['APA_Heading']))
-        elements.append(Paragraph(section_text_map.get(title_en, section.get('section_text') or ''), styles['APA_Body']))
-        elements += _summary_table_from_pairs("Resumen de sección", tr_metric_pairs(section['summary_pairs']), styles)
+        elements.append(Paragraph(section['title'], styles['APA_Heading']))
+        for block in _summary_table_from_pairs("Section Summary", section['summary_pairs'], styles):
+            elements.append(block)
         charts = [c for c in section.get('charts', []) if c is not None]
         if charts:
-            elements.append(Spacer(1, 0.05 * inch))
-            add_chart_grid(elements, charts)
+            elements.append(Spacer(1, 0.08 * inch))
+            for chart in charts:
+                elements.append(Image(chart, width=7.8 * inch, height=3.5 * inch))
+                elements.append(Spacer(1, 0.08 * inch))
         elif not MATPLOTLIB_AVAILABLE:
-            elements.append(Paragraph("La generación de gráficas no está disponible porque matplotlib no está instalado en el entorno.", styles['APA_Body']))
+            elements.append(Paragraph("Chart rendering is unavailable because matplotlib is not installed in the environment.", styles['APA_Body']))
 
-        table_df = localize_dataframe(section.get('table_df', pd.DataFrame()))
-        table_title = support_table_title_map.get(section.get('table_title', 'Supporting Table'), section.get('table_title', 'Tabla de soporte'))
-        elements.append(Paragraph(table_title, styles['APA_Heading']))
+        table_df = section.get('table_df', pd.DataFrame())
+        elements.append(Paragraph(section.get('table_title', 'Supporting Table'), styles['APA_Heading']))
         if table_df is not None and not table_df.empty:
-            if title_en == 'Base Installed Overview':
+            if section['title'] == 'Base Installed Overview':
                 width_map = {
-                    'Región': 0.75 * inch, 'País': 0.9 * inch, 'Distribuidor': 1.05 * inch, 'Cliente': 1.25 * inch,
-                    'Instrumento': 1.0 * inch, 'Serial': 0.9 * inch, 'Estado': 0.8 * inch, 'Estado original': 1.0 * inch,
-                    'Sistema operativo': 0.95 * inch, 'Condición': 0.75 * inch, 'Fecha de instalación': 0.95 * inch, 'Contrato': 1.25 * inch,
+                    'Region': 0.9 * inch, 'Country': 0.9 * inch, 'Distributor': 1.2 * inch, 'Customer': 1.3 * inch,
+                    'Instrument': 1.0 * inch, 'Serial': 0.95 * inch, 'State': 0.8 * inch, 'Raw Status': 1.0 * inch,
+                    'OS': 0.85 * inch, 'Asset': 0.75 * inch, 'Install Date': 0.9 * inch, 'Contract': 1.2 * inch,
                 }
                 col_widths = [width_map.get(c, 0.95 * inch) for c in table_df.columns]
-                max_rows = section.get('table_max_rows', 24)
-            elif title_en.startswith('Spare Parts Annex') or title_en == 'Spare Parts / Carstock Gap':
+            elif section['title'].startswith('Spare Parts Annex') or section['title'] == 'Spare Parts / Carstock Gap':
                 spare_width_map = {
-                    'Número de parte requerido': 1.1 * inch, 'Descripción requerida': 2.35 * inch, 'Cantidad requerida': 0.62 * inch,
-                    'Cantidad cargada': 0.68 * inch, 'Brecha de cantidad': 0.65 * inch, 'Cobertura %': 0.7 * inch,
-                    'Estado': 0.7 * inch, 'Precio unitario Option 2': 0.85 * inch, 'Costo estimado Option 2': 0.95 * inch,
-                    'Moneda': 0.5 * inch, 'Número de parte cargado': 1.1 * inch, 'Descripción cargada': 2.3 * inch,
-                    'Cantidad sugerida Option 2': 0.85 * inch,
+                    'Required Part Number': 1.15 * inch,
+                    'Required Description': 2.45 * inch,
+                    'Required Qty': 0.65 * inch,
+                    'Uploaded Qty': 0.7 * inch,
+                    'Qty Gap': 0.65 * inch,
+                    'Coverage %': 0.7 * inch,
+                    'Status': 0.7 * inch,
+                    'Option 2 Unit Price': 0.9 * inch,
+                    'Option 2 Estimated Cost': 1.05 * inch,
+                    'Currency': 0.55 * inch,
+                    'Uploaded Part Number': 1.15 * inch,
+                    'Uploaded Description': 2.6 * inch,
+                    'Purchase Qty Option 2': 0.9 * inch,
                 }
                 col_widths = [spare_width_map.get(c, 0.9 * inch) for c in table_df.columns]
-                max_rows = section.get('table_max_rows', 20)
             else:
                 col_widths = None
-                max_rows = section.get('table_max_rows', 20)
+            max_rows = section.get('table_max_rows', len(table_df))
             elements.append(_df_to_wrapped_table(table_df, styles, col_widths=col_widths, max_rows=max_rows))
             if isinstance(max_rows, int) and len(table_df) > max_rows:
-                elements.append(Paragraph(f"Nota. Solo se muestran las primeras {max_rows} filas para preservar la legibilidad del informe.", styles['APA_Body']))
+                elements.append(Paragraph(f"Note. Only the first {max_rows} rows are displayed in this section to preserve readability.", styles['APA_Body']))
         else:
-            elements.append(Paragraph("No hay filas detalladas disponibles para esta sección.", styles['APA_Body']))
+            elements.append(Paragraph("No detailed rows are available for this section.", styles['APA_Body']))
 
     elements.append(PageBreak())
-    elements.append(Paragraph("Nota metodológica", styles["APA_Heading"]))
-    elements.append(Paragraph(
-        "Todas las métricas de este documento se calculan con base en los filtros activos del dashboard en el momento de generar el informe. Los análisis de machine configuration se construyen a partir de los campos parseados dentro del filtro vigente. Los hallazgos de mantenimiento preventivo se derivan de la próxima fecha programada de PM cuando existe información. El análisis de repuestos aparece únicamente cuando se cargan en la misma sesión un archivo de stock compatible y un maestro de referencia válido.",
-        styles["APA_Body"],
-    ))
-
-    elements.append(Paragraph("Referencias", styles["APA_Heading"]))
+    elements.append(Paragraph("References", styles["APA_Heading"]))
     references = [line.strip() for line in references_text.splitlines() if line.strip()]
     if references:
         for ref in references:
             elements.append(Paragraph(_escape_pdf_text(ref), styles["APA_Body"]))
     else:
-        elements.append(Paragraph("No se proporcionaron referencias bibliográficas externas. Este documento se basa en la información operativa cargada en el dashboard y, cuando estuvo disponible, en la comparación de stock de repuestos realizada en la misma sesión.", styles["APA_Body"]))
+        elements.append(Paragraph("No external bibliographic references were provided. This document is based on the operational data loaded in the dashboard and, when available, on the spare parts comparison loaded in the current session.", styles["APA_Body"]))
 
-    elements.append(Spacer(1, 0.1 * inch))
-    elements.append(Paragraph("Firma", styles["APA_Heading"]))
+    elements.append(Spacer(1, 0.14 * inch))
+    elements.append(Paragraph("Signature", styles["APA_Heading"]))
     elements.append(Paragraph(_escape_pdf_text(author_name), styles["APA_Signature"]))
     elements.append(Paragraph(_escape_pdf_text(author_role), styles["APA_Signature"]))
-    elements.append(Paragraph(f"Fecha de firma: {_escape_pdf_text(signature_date)}", styles["APA_Signature"]))
+    elements.append(Paragraph(f"Signature date: {_escape_pdf_text(signature_date)}", styles["APA_Signature"]))
 
     doc.build(elements, onFirstPage=lambda canvas, doc: _pdf_header_footer(canvas, doc, short_title), onLaterPages=lambda canvas, doc: _pdf_header_footer(canvas, doc, short_title))
     return buffer.getvalue()
@@ -2393,7 +2194,7 @@ def build_required_master_from_scope(
 def prepare_uploaded_stock(stock_df: pd.DataFrame, part_col: str, qty_col: str, desc_col: str | None) -> pd.DataFrame:
     work = stock_df.copy()
     work["Uploaded Part Number"] = work[part_col]
-    work["Uploaded Qty"] = to_numeric_series(work[qty_col]).fillna(0.0).clip(lower=0.0)
+    work["Uploaded Qty"] = to_numeric_series(work[qty_col]).fillna(0.0)
     if desc_col is not None and desc_col in work.columns:
         work["Uploaded Description"] = work[desc_col]
     else:
@@ -2401,9 +2202,12 @@ def prepare_uploaded_stock(stock_df: pd.DataFrame, part_col: str, qty_col: str, 
     work["Uploaded Description"] = work["Uploaded Description"].fillna("").astype(str).str.strip()
     work["Part Key"] = work["Uploaded Part Number"].map(normalize_part_number)
     work = work[work["Part Key"] != ""].copy()
-    stock_slim = work.groupby("Part Key", as_index=False).agg({"Uploaded Part Number": "first", "Uploaded Description": "first", "Uploaded Qty": "sum"})
-    stock_slim["Uploaded Qty"] = pd.to_numeric(stock_slim["Uploaded Qty"], errors="coerce").fillna(0.0).clip(lower=0.0)
+    stock_slim = work.groupby("Part Key", as_index=False).agg(
+        {"Uploaded Part Number": "first", "Uploaded Description": "first", "Uploaded Qty": "sum"}
+    )
+    stock_slim["Uploaded Qty"] = pd.to_numeric(stock_slim["Uploaded Qty"], errors="coerce").fillna(0.0)
     return stock_slim.sort_values(["Uploaded Qty", "Uploaded Part Number"], ascending=[False, True]).reset_index(drop=True)
+
 
 def compare_stock(
     master_df: pd.DataFrame,
@@ -2534,14 +2338,21 @@ def build_distributor_status_chart(df: pd.DataFrame, selected_model: str) -> go.
 st.markdown(
     """
     <div class="hero">
+        <div class="hero-top">
+            <div class="hero-brand">
+                <div class="brand-chip">DASHBOARD</div>
+                <div class="workspace-chip">Hi, Javier · Workspace de base instalada</div>
+            </div>
+            <div class="workspace-chip">Control visual · Devoryn dark mode</div>
+        </div>
         <h1>Records List Intelligence Dashboard</h1>
-        <p>Dashboard futurista y ejecutivo para explorar la base instalada, machine configuration, sistema operativo y brechas de carstock desde un único entorno.</p>
+        <p>Panel ejecutivo para explorar la base instalada, configuration insights, sistema operativo, procesamiento y gap de repuestos con una apariencia oscura, limpia y premium.</p>
         <div class="badge-row">
-            <span class="badge">Python + Streamlit</span>
             <span class="badge">Base instalada</span>
             <span class="badge">Machine configuration</span>
-            <span class="badge">Operating system analytics</span>
-            <span class="badge">Spare parts gap analysis</span>
+            <span class="badge">Operating system</span>
+            <span class="badge">PM & processing</span>
+            <span class="badge">Stock gap analysis</span>
         </div>
     </div>
     """,
@@ -2551,9 +2362,9 @@ st.markdown(
 st.sidebar.markdown(
     """
     <div class="sidebar-top-card">
-        <h3>⚙️ Control center</h3>
-        <p>Explora la base instalada, filtra la operación y navega el dashboard con una experiencia más ejecutiva y visual.</p>
-        <div class="sidebar-pill">Glass mode · active</div>
+        <h3>✦ Control center</h3>
+        <p>Explora la base instalada, filtra la operación y navega el dashboard con una experiencia visual alineada al estilo oscuro premium que definiste.</p>
+        <div class="sidebar-pill">Devoryn dark · active</div>
     </div>
     """,
     unsafe_allow_html=True,
@@ -3695,8 +3506,8 @@ with detail_tab:
 
 with st.sidebar:
     st.subheader("📄 Informe PDF")
-    st.caption("Formato ajustado con márgenes APA de 1 pulgada, estructura ejecutiva y contenido en español.")
-    pdf_title = st.text_input("Título del informe", value="Informe de Base Instalada")
+    st.caption("Formato ajustado con márgenes APA de 1 pulgada y estructura de informe técnico ejecutiva.")
+    pdf_title = st.text_input("Título del informe", value="Installed Base Dashboard Report")
     pdf_author = st.text_input("Nombre para firma", value="Javier Avellaneda")
     pdf_role = st.text_input("Cargo / título", value="Service Leader | Export LATAM")
     pdf_signature_date = st.text_input("Fecha de firma", value=datetime.now().strftime("%Y-%m-%d"))
@@ -3741,7 +3552,7 @@ with st.sidebar:
 
         if st.session_state.get("prepared_pdf_bytes") is not None:
             st.download_button(
-                "⬇️ Descargar informe PDF (APA, español)",
+                "⬇️ Descargar informe PDF (APA)",
                 data=st.session_state["prepared_pdf_bytes"],
                 file_name=st.session_state.get("prepared_pdf_name", f"dashboard_report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"),
                 mime="application/pdf",
