@@ -132,62 +132,324 @@ MUTED = "#a9b9d6"
 APP_CSS = """
 <style>
 :root {
-    --bg1: #040814;
-    --bg2: #090d1d;
-    --card: rgba(12,16,35,0.75);
-    --border: rgba(77,246,255,0.16);
-    --txt: #f7fbff;
-    --muted: #9db0d3;
+    --bg1: #dbe4ee;
+    --bg2: #c7d2df;
+    --bg3: #a8b6c8;
+    --glass: rgba(255, 255, 255, 0.16);
+    --glass-2: rgba(255, 255, 255, 0.10);
+    --glass-3: rgba(255, 255, 255, 0.24);
+    --line: rgba(255, 255, 255, 0.26);
+    --line-soft: rgba(255, 255, 255, 0.16);
+    --txt: #f8fbff;
+    --txt-soft: rgba(248, 251, 255, 0.88);
+    --muted: rgba(236, 243, 252, 0.72);
+    --cyan: #69dbff;
+    --cyan-2: #4bbcff;
+    --blue: #7fb6ff;
+    --mint: #6bffd9;
+    --violet: #c0abff;
+    --shadow: rgba(33, 56, 86, 0.18);
 }
+
+html, body, [class*="css"] {
+    font-family: "Inter", "Segoe UI", sans-serif;
+}
+
 .stApp {
     background:
-        radial-gradient(circle at 12% 8%, rgba(77,246,255,0.10), transparent 22%),
-        radial-gradient(circle at 88% 0%, rgba(177,92,255,0.10), transparent 22%),
-        radial-gradient(circle at 82% 82%, rgba(0,255,157,0.07), transparent 18%),
-        linear-gradient(180deg, #040814 0%, #080c1a 45%, #050712 100%);
+        radial-gradient(circle at 14% 10%, rgba(255,255,255,0.32), transparent 18%),
+        radial-gradient(circle at 86% 12%, rgba(255,255,255,0.16), transparent 18%),
+        radial-gradient(circle at 78% 82%, rgba(105,219,255,0.14), transparent 20%),
+        linear-gradient(145deg, #8d9db0 0%, #8294a8 18%, #8fa1b5 36%, #9fb0c2 56%, #b9c7d5 78%, #d7e0e8 100%);
+    background-attachment: fixed;
     color: var(--txt);
 }
+
+.stApp::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background:
+        linear-gradient(180deg, rgba(255,255,255,0.08), transparent 28%, transparent 72%, rgba(255,255,255,0.05)),
+        radial-gradient(circle at 26% 18%, rgba(255,255,255,0.22), transparent 10%),
+        radial-gradient(circle at 72% 26%, rgba(255,255,255,0.10), transparent 16%);
+    z-index: 0;
+}
+
 .block-container {
+    position: relative;
+    z-index: 1;
     padding-top: 1rem;
     padding-bottom: 2rem;
+    max-width: 96rem;
 }
+
 section[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, rgba(8,12,28,0.97) 0%, rgba(10,14,30,0.97) 100%);
-    border-right: 1px solid rgba(255,255,255,0.06);
+    background: linear-gradient(180deg, rgba(255,255,255,0.13) 0%, rgba(255,255,255,0.10) 100%);
+    backdrop-filter: blur(26px);
+    -webkit-backdrop-filter: blur(26px);
+    border-right: 1px solid rgba(255,255,255,0.20);
+    box-shadow:
+        inset 1px 1px 0 rgba(255,255,255,0.22),
+        12px 0 28px rgba(36, 56, 84, 0.10);
 }
+
+section[data-testid="stSidebar"] > div {
+    background: transparent;
+}
+
+section[data-testid="stSidebar"] h1,
+section[data-testid="stSidebar"] h2,
+section[data-testid="stSidebar"] h3,
+section[data-testid="stSidebar"] label,
+section[data-testid="stSidebar"] p,
+section[data-testid="stSidebar"] span,
+section[data-testid="stSidebar"] div {
+    color: var(--txt-soft) !important;
+}
+
+section[data-testid="stSidebar"] .stFileUploader,
+section[data-testid="stSidebar"] .stMultiSelect,
+section[data-testid="stSidebar"] .stSelectbox,
+section[data-testid="stSidebar"] .stTextInput {
+    border-radius: 18px;
+}
+
 .hero {
-    padding: 1.35rem 1.55rem;
-    border-radius: 24px;
-    border: 1px solid rgba(77,246,255,0.16);
-    background: linear-gradient(135deg, rgba(15,24,50,0.85) 0%, rgba(8,12,28,0.92) 100%);
-    box-shadow: 0 0 0 1px rgba(255,255,255,0.03), 0 20px 45px rgba(0,0,0,0.28);
+    position: relative;
+    overflow: hidden;
+    padding: 1.45rem 1.7rem;
+    border-radius: 30px;
+    border: 1px solid var(--line);
+    background: linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.11) 100%);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    box-shadow:
+        0 18px 44px rgba(43, 61, 88, 0.14),
+        inset 0 1px 0 rgba(255,255,255,0.30),
+        inset 0 -1px 0 rgba(255,255,255,0.06);
     margin-bottom: 1rem;
 }
-.hero h1 { margin: 0; font-size: 2.15rem; letter-spacing: 0.02em; }
-.hero p { margin: 0.45rem 0 0 0; color: var(--muted); }
-.badge-row { display: flex; flex-wrap: wrap; gap: 0.55rem; margin-top: 0.8rem; }
+
+.hero::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+        radial-gradient(circle at 18% 14%, rgba(255,255,255,0.20), transparent 18%),
+        linear-gradient(120deg, rgba(105,219,255,0.08), transparent 36%, rgba(192,171,255,0.08) 82%, transparent 100%);
+}
+
+.hero h1 {
+    margin: 0;
+    font-size: 2.2rem;
+    letter-spacing: 0.01em;
+    color: #ffffff;
+    text-shadow: 0 0 14px rgba(255,255,255,0.10);
+}
+
+.hero p {
+    margin: 0.45rem 0 0 0;
+    color: var(--muted);
+    font-size: 1rem;
+}
+
+.badge-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem;
+    margin-top: 0.9rem;
+}
+
 .badge {
-    padding: 0.3rem 0.75rem; border-radius: 999px; font-size: 0.77rem;
-    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
+    padding: 0.36rem 0.82rem;
+    border-radius: 999px;
+    font-size: 0.77rem;
+    color: #f7fbff;
+    background: rgba(255,255,255,0.10);
+    border: 1px solid rgba(255,255,255,0.20);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.18);
 }
+
 .metric-shell {
-    padding: 0.95rem 1rem; border-radius: 20px;
-    background: linear-gradient(180deg, rgba(16,21,42,0.84), rgba(9,13,27,0.86));
-    border: 1px solid rgba(255,255,255,0.08); min-height: 115px;
+    position: relative;
+    overflow: hidden;
+    padding: 1rem 1rem;
+    border-radius: 26px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.19), rgba(255,255,255,0.09));
+    border: 1px solid rgba(255,255,255,0.24);
+    backdrop-filter: blur(22px);
+    -webkit-backdrop-filter: blur(22px);
+    min-height: 118px;
+    box-shadow:
+        0 10px 28px rgba(38, 58, 86, 0.12),
+        inset 0 1px 0 rgba(255,255,255,0.28),
+        inset 0 -1px 0 rgba(255,255,255,0.06);
 }
-.metric-label { font-size: 0.82rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
-.metric-value { font-size: 1.9rem; font-weight: 700; margin-top: 0.2rem; }
-.metric-sub { margin-top: 0.2rem; font-size: 0.85rem; color: #c3d0ea; }
-.stTabs [data-baseweb="tab-list"] { gap: 0.45rem; }
-.stTabs [data-baseweb="tab"] { border-radius: 12px; background: rgba(255,255,255,0.04); padding: 0.45rem 0.85rem; }
+
+.metric-shell::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(circle at top left, rgba(255,255,255,0.18), transparent 26%);
+}
+
+.metric-label {
+    font-size: 0.78rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.metric-value {
+    font-size: 1.95rem;
+    font-weight: 700;
+    margin-top: 0.2rem;
+    color: #ffffff;
+}
+
+.metric-sub {
+    margin-top: 0.2rem;
+    font-size: 0.86rem;
+    color: var(--txt-soft);
+}
+
+div[data-testid="stMetric"] {
+    background: linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0.08));
+    border: 1px solid rgba(255,255,255,0.22);
+    border-radius: 24px;
+    padding: 0.9rem 1rem;
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    box-shadow:
+        0 10px 24px rgba(40, 58, 84, 0.10),
+        inset 0 1px 0 rgba(255,255,255,0.24);
+}
+
+.stTabs [data-baseweb="tab-list"] {
+    gap: 0.55rem;
+    padding: 0.25rem;
+    background: rgba(255,255,255,0.07);
+    border-radius: 18px;
+    border: 1px solid rgba(255,255,255,0.14);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+}
+
+.stTabs [data-baseweb="tab"] {
+    border-radius: 14px;
+    background: rgba(255,255,255,0.08);
+    padding: 0.5rem 0.95rem;
+    color: var(--txt-soft);
+    border: 1px solid transparent;
+    transition: all 0.2s ease;
+}
+
+.stTabs [data-baseweb="tab"]:hover {
+    background: rgba(255,255,255,0.14);
+    border: 1px solid rgba(255,255,255,0.18);
+}
+
 .stTabs [aria-selected="true"] {
-    background: rgba(77,246,255,0.12) !important;
-    border: 1px solid rgba(77,246,255,0.30) !important;
+    background: linear-gradient(180deg, rgba(117,220,255,0.28), rgba(95,180,255,0.22)) !important;
+    border: 1px solid rgba(147,223,255,0.44) !important;
+    box-shadow:
+        0 0 18px rgba(99,216,255,0.16),
+        inset 0 1px 0 rgba(255,255,255,0.26) !important;
+    color: #ffffff !important;
 }
-[data-testid="stDataFrame"] {
-    border-radius: 18px; overflow: hidden; border: 1px solid rgba(255,255,255,0.08);
+
+div[data-testid="stDataFrame"],
+div[data-testid="stTable"] {
+    border-radius: 24px;
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.18);
+    background: rgba(255,255,255,0.10);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    box-shadow:
+        0 10px 26px rgba(39, 57, 82, 0.10),
+        inset 0 1px 0 rgba(255,255,255,0.18);
 }
-.small-note { color: var(--muted); font-size: 0.88rem; }
+
+div[data-testid="stPlotlyChart"] {
+    border-radius: 26px;
+    overflow: hidden;
+    background: linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.06));
+    border: 1px solid rgba(255,255,255,0.14);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    padding: 0.25rem;
+    box-shadow:
+        0 10px 26px rgba(40, 58, 84, 0.08),
+        inset 0 1px 0 rgba(255,255,255,0.12);
+}
+
+.stButton > button,
+.stDownloadButton > button {
+    border-radius: 16px;
+    border: 1px solid rgba(146,225,255,0.34);
+    background: linear-gradient(180deg, rgba(98,214,255,0.35), rgba(72,173,255,0.28));
+    color: white;
+    font-weight: 600;
+    box-shadow:
+        0 0 18px rgba(95, 204, 255, 0.18),
+        inset 0 1px 0 rgba(255,255,255,0.28);
+    transition: all 0.2s ease;
+}
+
+.stButton > button:hover,
+.stDownloadButton > button:hover {
+    transform: translateY(-1px);
+    border-color: rgba(166,236,255,0.52);
+    box-shadow:
+        0 0 22px rgba(95, 204, 255, 0.22),
+        inset 0 1px 0 rgba(255,255,255,0.34);
+}
+
+.stTextInput input,
+.stNumberInput input,
+.stDateInput input,
+.stTextArea textarea,
+.stSelectbox div[data-baseweb="select"] > div,
+.stMultiSelect div[data-baseweb="select"] > div {
+    background: rgba(255,255,255,0.10) !important;
+    border: 1px solid rgba(255,255,255,0.18) !important;
+    border-radius: 16px !important;
+    color: #ffffff !important;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+}
+
+.stTextInput input::placeholder,
+.stTextArea textarea::placeholder {
+    color: rgba(245,249,255,0.52);
+}
+
+h1, h2, h3, h4, h5, h6 {
+    color: #ffffff !important;
+    letter-spacing: 0.01em;
+}
+
+p, label, span, div {
+    color: var(--txt-soft);
+}
+
+.small-note {
+    color: var(--muted);
+    font-size: 0.88rem;
+}
+
+hr {
+    border: none;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.24), transparent);
+}
 </style>
 """
 st.markdown(APP_CSS, unsafe_allow_html=True)
