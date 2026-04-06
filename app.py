@@ -119,37 +119,39 @@ CUSTOM_HEADERS = [
 ASSAY_COLS = CUSTOM_HEADERS[28:-1]
 
 PLOT_TEMPLATE = "plotly_dark"
-PLOT_BG = "rgba(6, 10, 20, 0.10)"
-GRID = "rgba(151, 214, 255, 0.10)"
+PLOT_BG = "rgba(8, 14, 24, 0.22)"
+GRID = "rgba(151, 214, 255, 0.14)"
 ACCENT = "#56d8ff"
 ACCENT_2 = "#8fa8ff"
 ACCENT_3 = "#59f0d0"
 WARNING = "#ffb454"
 DANGER = "#ff5d8f"
 TEXT = "#f7fbff"
-MUTED = "rgba(231,240,252,0.90)"
+MUTED = "rgba(236,244,255,0.94)"
 
 APP_CSS = """
 <style>
 :root {
-    --bg-deep: #050916;
-    --bg-deeper: #08101f;
-    --bg-mid: #0c1728;
-    --glass: rgba(180, 214, 255, 0.08);
-    --glass-2: rgba(255, 255, 255, 0.06);
-    --glass-3: rgba(255, 255, 255, 0.14);
-    --line: rgba(189, 227, 255, 0.20);
+    --bg-deep: #040916;
+    --bg-deeper: #07101d;
+    --bg-mid: #0b1625;
+    --panel-dark: rgba(10, 18, 31, 0.82);
+    --glass: rgba(196, 226, 255, 0.08);
+    --glass-2: rgba(255, 255, 255, 0.055);
+    --glass-3: rgba(255, 255, 255, 0.16);
+    --line: rgba(189, 227, 255, 0.22);
     --line-soft: rgba(159, 211, 255, 0.10);
-    --txt: #f7fbff;
-    --txt-soft: rgba(242, 248, 255, 0.96);
-    --muted: rgba(208, 223, 242, 0.82);
-    --cyan: #59d8ff;
-    --cyan-2: #33b8ff;
-    --blue: #8da4ff;
-    --mint: #58f5d0;
+    --txt: #f8fbff;
+    --txt-strong: #ffffff;
+    --txt-soft: rgba(244, 249, 255, 0.98);
+    --muted: rgba(216, 230, 247, 0.86);
+    --cyan: #62dbff;
+    --cyan-2: #37bfff;
+    --blue: #90aaff;
+    --mint: #57f2d3;
     --amber: #ffbf57;
-    --shadow: rgba(0, 0, 0, 0.34);
-    --shadow-soft: rgba(2, 8, 18, 0.26);
+    --shadow: rgba(0, 0, 0, 0.40);
+    --shadow-soft: rgba(2, 8, 18, 0.30);
 }
 
 html, body, [class*="css"] {
@@ -158,11 +160,11 @@ html, body, [class*="css"] {
 
 .stApp {
     background:
-        radial-gradient(circle at 18% 18%, rgba(131, 215, 255, 0.14), transparent 16%),
+        radial-gradient(circle at 18% 18%, rgba(120, 211, 255, 0.14), transparent 16%),
         radial-gradient(circle at 74% 14%, rgba(255, 255, 255, 0.10), transparent 14%),
         radial-gradient(circle at 82% 72%, rgba(88, 245, 208, 0.08), transparent 18%),
         radial-gradient(circle at 30% 80%, rgba(141, 164, 255, 0.12), transparent 18%),
-        linear-gradient(180deg, #050915 0%, #09111f 18%, #0d1726 42%, #0a1320 70%, #050a14 100%);
+        linear-gradient(180deg, #030814 0%, #08101c 20%, #0b1522 45%, #09111c 74%, #040914 100%);
     background-attachment: fixed;
     color: var(--txt);
 }
@@ -173,7 +175,7 @@ html, body, [class*="css"] {
     inset: 0;
     pointer-events: none;
     background:
-        linear-gradient(180deg, rgba(255,255,255,0.04), transparent 22%, transparent 78%, rgba(255,255,255,0.02)),
+        linear-gradient(180deg, rgba(255,255,255,0.035), transparent 22%, transparent 78%, rgba(255,255,255,0.02)),
         radial-gradient(circle at 50% -10%, rgba(205, 233, 255, 0.13), transparent 26%),
         radial-gradient(circle at 50% 52%, rgba(120, 198, 255, 0.08), transparent 30%);
     z-index: 0;
@@ -188,13 +190,13 @@ html, body, [class*="css"] {
 }
 
 section[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.05) 100%);
-    backdrop-filter: blur(30px);
-    -webkit-backdrop-filter: blur(30px);
-    border-right: 1px solid rgba(173, 220, 255, 0.16);
+    background: linear-gradient(180deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.045) 100%);
+    backdrop-filter: blur(32px);
+    -webkit-backdrop-filter: blur(32px);
+    border-right: 1px solid rgba(173, 220, 255, 0.18);
     box-shadow:
         inset 1px 1px 0 rgba(255,255,255,0.12),
-        16px 0 36px rgba(0, 0, 0, 0.22);
+        16px 0 36px rgba(0, 0, 0, 0.24);
 }
 
 section[data-testid="stSidebar"] > div {
@@ -209,108 +211,46 @@ section[data-testid="stSidebar"] label,
 section[data-testid="stSidebar"] p,
 section[data-testid="stSidebar"] span,
 section[data-testid="stSidebar"] div {
-    color: #eef7ff !important;
+    color: var(--txt-strong) !important;
     text-shadow:
-        0 0 6px rgba(255,255,255,0.14),
-        0 0 16px rgba(89,216,255,0.12),
-        0 1px 8px rgba(0,0,0,0.45) !important;
+        0 0 6px rgba(255,255,255,0.20),
+        0 0 14px rgba(89,216,255,0.18),
+        0 1px 10px rgba(0,0,0,0.55) !important;
 }
 
 section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
-    line-height: 1.4;
-}
-
-.sidebar-top-card {
-    position: relative;
-    overflow: hidden;
-    padding: 1.05rem 1rem 1rem 1rem;
-    border-radius: 24px;
-    margin-bottom: 0.85rem;
-    background: linear-gradient(180deg, rgba(198, 224, 255, 0.10), rgba(255,255,255,0.05));
-    border: 1px solid rgba(188, 226, 255, 0.18);
-    box-shadow:
-        0 16px 34px rgba(0, 0, 0, 0.18),
-        inset 0 1px 0 rgba(255,255,255,0.16),
-        0 0 26px rgba(89,216,255,0.06);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-}
-
-.sidebar-top-card::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    background: linear-gradient(130deg, rgba(255,255,255,0.12), transparent 30%, rgba(89,216,255,0.06) 70%, transparent 100%);
-}
-
-.sidebar-top-card h3 {
-    margin: 0 0 0.25rem 0;
-    font-size: 1rem;
-    color: #ffffff;
-    font-weight: 700;
-}
-
-.sidebar-top-card p {
-    margin: 0;
-    font-size: 0.84rem;
-    color: rgba(242,248,255,0.82);
-}
-
-.sidebar-pill {
-    margin-top: 0.7rem;
-    display: inline-block;
-    padding: 0.34rem 0.82rem;
-    border-radius: 999px;
-    font-size: 0.72rem;
-    color: #f8fdff;
-    background: linear-gradient(180deg, rgba(89,216,255,0.28), rgba(51,184,255,0.16));
-    border: 1px solid rgba(186, 229, 255, 0.22);
-    box-shadow:
-        inset 0 1px 0 rgba(255,255,255,0.18),
-        0 0 18px rgba(89,216,255,0.10);
+    line-height: 1.42;
 }
 
 section[data-testid="stSidebar"] .stTextInput input,
+section[data-testid="stSidebar"] .stNumberInput input,
+section[data-testid="stSidebar"] .stDateInput input,
+section[data-testid="stSidebar"] .stTextArea textarea,
 section[data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] > div,
 section[data-testid="stSidebar"] .stMultiSelect div[data-baseweb="select"] > div,
-section[data-testid="stSidebar"] .stFileUploader section,
-.stTextInput input,
-.stNumberInput input,
-.stDateInput input,
-.stTextArea textarea,
-.stSelectbox div[data-baseweb="select"] > div,
-.stMultiSelect div[data-baseweb="select"] > div {
-    background: rgba(11, 20, 35, 0.42) !important;
-    border: 1px solid rgba(186, 229, 255, 0.16) !important;
+section[data-testid="stSidebar"] .stFileUploader {
+    background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.045)) !important;
+    border: 1px solid rgba(186, 229, 255, 0.18) !important;
     border-radius: 18px !important;
-    color: #f6fbff !important;
     box-shadow:
-        inset 0 1px 0 rgba(255,255,255,0.08),
-        0 0 0 1px rgba(89,216,255,0.02),
-        0 10px 24px rgba(0,0,0,0.10);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-}
-
-.stTextInput input::placeholder,
-.stTextArea textarea::placeholder {
-    color: rgba(228, 239, 252, 0.62) !important;
+        inset 0 1px 0 rgba(255,255,255,0.14),
+        0 8px 18px rgba(0, 0, 0, 0.14);
 }
 
 .hero {
     position: relative;
     overflow: hidden;
-    padding: 1.55rem 1.7rem;
+    padding: 1.5rem 1.8rem;
     border-radius: 30px;
-    border: 1px solid rgba(194, 230, 255, 0.16);
-    background: linear-gradient(180deg, rgba(198, 224, 255, 0.10) 0%, rgba(255,255,255,0.04) 100%);
-    backdrop-filter: blur(28px);
-    -webkit-backdrop-filter: blur(28px);
+    border: 1px solid rgba(196, 229, 255, 0.18);
+    background:
+        linear-gradient(180deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.05) 100%);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
     box-shadow:
-        0 18px 38px rgba(0, 0, 0, 0.20),
-        inset 0 1px 0 rgba(255,255,255,0.14),
-        0 0 26px rgba(89,216,255,0.05);
+        0 18px 42px rgba(0, 0, 0, 0.22),
+        inset 0 1px 0 rgba(255,255,255,0.16),
+        inset 0 -1px 0 rgba(255,255,255,0.04);
     margin-bottom: 1rem;
 }
 
@@ -319,8 +259,8 @@ section[data-testid="stSidebar"] .stFileUploader section,
     position: absolute;
     inset: 0;
     background:
-        radial-gradient(circle at 18% 12%, rgba(255,255,255,0.14), transparent 16%),
-        linear-gradient(120deg, rgba(89,216,255,0.06), transparent 38%, rgba(141,164,255,0.05) 80%, transparent 100%);
+        radial-gradient(circle at 20% 12%, rgba(255,255,255,0.16), transparent 16%),
+        linear-gradient(120deg, rgba(98,219,255,0.08), transparent 38%, rgba(144,170,255,0.06) 80%, transparent 100%);
     pointer-events: none;
 }
 
@@ -330,35 +270,18 @@ section[data-testid="stSidebar"] .stFileUploader section,
     letter-spacing: 0.01em;
     color: #ffffff;
     text-shadow:
-        0 0 8px rgba(255,255,255,0.20),
-        0 0 22px rgba(89,216,255,0.16),
-        0 2px 12px rgba(0,0,0,0.35);
-}
-
-.hero p,
-.section-title,
-.map-note,
-.small-note,
-.metric-sub,
-.stCaptionContainer,
-[data-testid="stMarkdownContainer"] p,
-.stMarkdown p,
-label,
-span,
-div {
-    color: #eef7ff;
-    text-shadow:
-        0 0 4px rgba(255,255,255,0.10),
-        0 0 12px rgba(89,216,255,0.06),
-        0 1px 8px rgba(0,0,0,0.36);
+        0 0 10px rgba(255,255,255,0.18),
+        0 0 24px rgba(98,219,255,0.12),
+        0 2px 12px rgba(0,0,0,0.30);
 }
 
 .hero p {
-    margin: 0.42rem 0 0 0;
-    max-width: 64rem;
+    margin: 0.45rem 0 0 0;
+    color: var(--txt-soft);
     font-size: 1rem;
-    font-weight: 500;
-    color: rgba(238,247,255,0.94);
+    text-shadow:
+        0 0 6px rgba(255,255,255,0.10),
+        0 1px 8px rgba(0,0,0,0.32);
 }
 
 .badge-row {
@@ -369,171 +292,199 @@ div {
 }
 
 .badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    padding: 0.36rem 0.84rem;
+    padding: 0.35rem 0.8rem;
     border-radius: 999px;
-    font-size: 0.76rem;
-    color: #f7fbff;
-    background: linear-gradient(180deg, rgba(89,216,255,0.18), rgba(255,255,255,0.04));
-    border: 1px solid rgba(186, 229, 255, 0.18);
-    box-shadow:
-        inset 0 1px 0 rgba(255,255,255,0.12),
-        0 0 16px rgba(89,216,255,0.07);
+    font-size: 0.77rem;
+    color: #f8fbff;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(186,229,255,0.20);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.14);
 }
 
 .metric-shell,
-div[data-testid="stMetric"],
-.map-shell,
-div[data-testid="stDataFrame"],
-div[data-testid="stTable"],
-div[data-testid="stPlotlyChart"] {
+div[data-testid="stMetric"] {
+    position: relative;
+    overflow: hidden;
     border-radius: 26px;
-    border: 1px solid rgba(186, 229, 255, 0.16) !important;
-    background: linear-gradient(180deg, rgba(13, 22, 36, 0.56), rgba(8, 14, 26, 0.42)) !important;
-    backdrop-filter: blur(22px);
-    -webkit-backdrop-filter: blur(22px);
+    background: linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.05));
+    border: 1px solid rgba(188,228,255,0.16);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
     box-shadow:
-        0 16px 36px rgba(0, 0, 0, 0.24),
-        inset 0 1px 0 rgba(255,255,255,0.10),
-        0 0 24px rgba(89,216,255,0.05) !important;
+        0 12px 28px rgba(0, 0, 0, 0.18),
+        inset 0 1px 0 rgba(255,255,255,0.14),
+        inset 0 -1px 0 rgba(255,255,255,0.04);
 }
 
 .metric-shell {
-    position: relative;
-    overflow: hidden;
     padding: 1rem 1rem;
     min-height: 118px;
 }
 
+div[data-testid="stMetric"] {
+    padding: 0.9rem 1rem;
+}
+
 .metric-shell::before,
-.map-shell::before {
+div[data-testid="stMetric"]::before {
     content: "";
     position: absolute;
     inset: 0;
     pointer-events: none;
-    background: radial-gradient(circle at top left, rgba(255,255,255,0.08), transparent 24%);
+    background: radial-gradient(circle at top left, rgba(255,255,255,0.10), transparent 26%);
 }
 
 .metric-label {
     font-size: 0.78rem;
-    color: rgba(223,236,252,0.82);
+    color: var(--txt-soft);
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    text-shadow: 0 0 10px rgba(89,216,255,0.10);
+    text-shadow: 0 0 8px rgba(98,219,255,0.10), 0 1px 8px rgba(0,0,0,0.30);
 }
 
 .metric-value {
-    font-size: 1.95rem;
+    font-size: 1.96rem;
     font-weight: 700;
     margin-top: 0.2rem;
     color: #ffffff;
     text-shadow:
-        0 0 8px rgba(255,255,255,0.18),
-        0 0 18px rgba(89,216,255,0.14),
-        0 2px 12px rgba(0,0,0,0.30);
+        0 0 8px rgba(255,255,255,0.16),
+        0 0 18px rgba(98,219,255,0.08),
+        0 2px 12px rgba(0,0,0,0.24);
 }
 
 .metric-sub {
-    margin-top: 0.18rem;
+    margin-top: 0.2rem;
     font-size: 0.86rem;
-    color: rgba(233,243,253,0.90) !important;
-}
-
-.metric-orb {
-    position: absolute;
-    top: 16px;
-    right: 16px;
-    width: 58px;
-    height: 58px;
-    border-radius: 50%;
-    background: radial-gradient(circle at 35% 35%, rgba(255,255,255,0.28), rgba(89,216,255,0.12) 40%, rgba(89,216,255,0.02) 70%);
-    box-shadow: 0 0 20px rgba(89,216,255,0.08);
-    border: 1px solid rgba(186,229,255,0.14);
+    color: var(--txt-soft);
+    text-shadow: 0 0 6px rgba(255,255,255,0.08), 0 1px 8px rgba(0,0,0,0.28);
 }
 
 .stTabs [data-baseweb="tab-list"] {
-    gap: 0.52rem;
-    padding: 0.28rem;
-    background: rgba(255,255,255,0.04);
+    gap: 0.55rem;
+    padding: 0.25rem;
+    background: rgba(255,255,255,0.05);
     border-radius: 18px;
     border: 1px solid rgba(186,229,255,0.12);
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
 }
 
 .stTabs [data-baseweb="tab"] {
     border-radius: 14px;
-    background: rgba(255,255,255,0.04);
-    color: rgba(236,246,255,0.86);
-    padding: 0.48rem 0.92rem;
+    background: rgba(255,255,255,0.05);
+    padding: 0.5rem 0.95rem;
+    color: #f5fbff;
     border: 1px solid transparent;
-    transition: all 0.18s ease;
+    transition: all 0.2s ease;
+    text-shadow: 0 0 8px rgba(89,216,255,0.10), 0 1px 6px rgba(0,0,0,0.30);
 }
 
 .stTabs [data-baseweb="tab"]:hover {
-    background: rgba(89,216,255,0.10);
+    background: rgba(255,255,255,0.10);
     border: 1px solid rgba(186,229,255,0.18);
-    box-shadow: 0 0 14px rgba(89,216,255,0.06);
 }
 
 .stTabs [aria-selected="true"] {
-    background: linear-gradient(180deg, rgba(89,216,255,0.18), rgba(51,184,255,0.10)) !important;
-    border: 1px solid rgba(186,229,255,0.22) !important;
-    color: #ffffff !important;
+    background: linear-gradient(180deg, rgba(98,219,255,0.18), rgba(55,191,255,0.10)) !important;
+    border: 1px solid rgba(120, 221, 255, 0.34) !important;
     box-shadow:
-        0 0 22px rgba(89,216,255,0.10),
-        inset 0 1px 0 rgba(255,255,255,0.14) !important;
+        0 0 18px rgba(98,219,255,0.10),
+        inset 0 1px 0 rgba(255,255,255,0.18) !important;
+    color: #ffffff !important;
+}
+
+div[data-testid="stDataFrame"],
+div[data-testid="stTable"],
+div[data-testid="stExpander"] {
+    border-radius: 24px;
+    overflow: hidden;
+    border: 1px solid rgba(188,228,255,0.14);
+    background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.04));
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    box-shadow:
+        0 10px 24px rgba(0, 0, 0, 0.18),
+        inset 0 1px 0 rgba(255,255,255,0.10);
+}
+
+div[data-testid="stPlotlyChart"] {
+    border-radius: 28px;
+    overflow: hidden;
+    background: linear-gradient(180deg, rgba(10, 19, 33, 0.64), rgba(10, 19, 33, 0.42));
+    border: 1px solid rgba(188,228,255,0.12);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    padding: 0.35rem;
+    box-shadow:
+        0 12px 28px rgba(0, 0, 0, 0.22),
+        inset 0 1px 0 rgba(255,255,255,0.10);
 }
 
 .stButton > button,
 .stDownloadButton > button {
     border-radius: 16px;
-    border: 1px solid rgba(186,229,255,0.18);
-    background: linear-gradient(180deg, rgba(89,216,255,0.24), rgba(51,184,255,0.12));
-    color: #ffffff;
+    border: 1px solid rgba(120, 221, 255, 0.28);
+    background: linear-gradient(180deg, rgba(98,219,255,0.20), rgba(55,191,255,0.10));
+    color: white;
     font-weight: 600;
     box-shadow:
-        0 0 18px rgba(89,216,255,0.10),
-        inset 0 1px 0 rgba(255,255,255,0.14);
-    transition: all 0.18s ease;
+        0 0 16px rgba(98,219,255,0.08),
+        inset 0 1px 0 rgba(255,255,255,0.16);
+    transition: all 0.2s ease;
+    text-shadow: 0 0 8px rgba(255,255,255,0.12), 0 1px 6px rgba(0,0,0,0.24);
 }
 
 .stButton > button:hover,
 .stDownloadButton > button:hover {
     transform: translateY(-1px);
-    border-color: rgba(186,229,255,0.26);
+    border-color: rgba(166,236,255,0.42);
     box-shadow:
-        0 0 24px rgba(89,216,255,0.16),
-        inset 0 1px 0 rgba(255,255,255,0.18);
+        0 0 22px rgba(98,219,255,0.12),
+        inset 0 1px 0 rgba(255,255,255,0.20);
 }
 
-.section-title,
+.stTextInput input,
+.stNumberInput input,
+.stDateInput input,
+.stTextArea textarea,
+.stSelectbox div[data-baseweb="select"] > div,
+.stMultiSelect div[data-baseweb="select"] > div {
+    background: rgba(255,255,255,0.08) !important;
+    border: 1px solid rgba(188,228,255,0.14) !important;
+    border-radius: 16px !important;
+    color: #ffffff !important;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+}
+
+.stTextInput input::placeholder,
+.stTextArea textarea::placeholder {
+    color: rgba(245,249,255,0.60);
+}
+
 h1, h2, h3, h4, h5, h6 {
     color: #ffffff !important;
-    font-weight: 800 !important;
     letter-spacing: 0.01em;
     text-shadow:
-        0 0 8px rgba(255,255,255,0.16),
-        0 0 22px rgba(89,216,255,0.12),
-        0 2px 10px rgba(0,0,0,0.32) !important;
+        0 0 8px rgba(255,255,255,0.18),
+        0 0 20px rgba(98,219,255,0.10),
+        0 2px 10px rgba(0,0,0,0.30);
 }
 
-.map-shell {
-    position: relative;
-    overflow: hidden;
-    padding: 1rem 1rem 0.65rem 1rem;
+p, label, span, div {
+    color: var(--txt-soft);
 }
 
-.map-note {
-    color: rgba(232,243,253,0.88) !important;
-    margin-bottom: 0.65rem;
-}
-
-.small-note {
-    color: rgba(224,236,250,0.84) !important;
-    font-size: 0.88rem;
+[data-testid="stMarkdownContainer"] p,
+.small-note,
+li {
+    color: var(--txt-soft) !important;
+    text-shadow:
+        0 0 5px rgba(255,255,255,0.10),
+        0 1px 8px rgba(0,0,0,0.34);
 }
 
 hr {
@@ -543,7 +494,7 @@ hr {
 }
 
 .js-plotly-plot .plotly .main-svg {
-    filter: drop-shadow(0 0 10px rgba(89,216,255,0.05));
+    filter: drop-shadow(0 0 12px rgba(89,216,255,0.05));
 }
 </style>
 """
@@ -556,7 +507,7 @@ def glow_layout(fig: go.Figure, height: int = 420, title_size: int = 18) -> go.F
         height=height,
         paper_bgcolor=PLOT_BG,
         plot_bgcolor=PLOT_BG,
-        margin=dict(l=18, r=18, t=78, b=18),
+        margin=dict(l=18, r=18, t=82, b=18),
         legend=dict(
             orientation="h",
             yanchor="bottom",
@@ -1008,6 +959,115 @@ def _make_matplotlib_scatter(df: pd.DataFrame, x_col: str, y_col: str, title: st
     return buf
 
 
+
+
+def _make_matplotlib_donut(series: pd.Series, title: str, max_slices: int = 4):
+    if not MATPLOTLIB_AVAILABLE or series is None:
+        return None
+    dist = compress_value_distribution(series, max_slices=max_slices)
+    if dist.empty:
+        return None
+    fig, ax = plt.subplots(figsize=(4.2, 3.5))
+    colors_used = ["#56d8ff", "#8fa8ff", "#59f0d0", "#ffb454", "#cfd8e6"][: len(dist)]
+    wedges, texts, autotexts = ax.pie(
+        dist["Count"],
+        labels=None,
+        autopct=lambda pct: f"{pct:.1f}%" if pct >= 5 else "",
+        startangle=90,
+        counterclock=False,
+        colors=colors_used,
+        wedgeprops=dict(width=0.36, edgecolor="white", linewidth=0.8),
+        textprops=dict(color="black", fontsize=8),
+    )
+    total = int(dist["Count"].sum())
+    ax.text(0, 0.04, f"{total:,}", ha="center", va="center", fontsize=13, fontweight="bold")
+    ax.text(0, -0.12, "assets", ha="center", va="center", fontsize=8)
+    ax.set_title(title, fontsize=11)
+    ax.legend(wedges, dist["Label"], loc="lower center", bbox_to_anchor=(0.5, -0.22), ncol=2, fontsize=7, frameon=False)
+    fig.tight_layout()
+    buf = BytesIO()
+    fig.savefig(buf, format="png", dpi=180, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    buf.seek(0)
+    return buf
+
+
+def build_machine_config_summary_tables(filtered_df: pd.DataFrame) -> tuple[pd.DataFrame, list[BytesIO], pd.DataFrame]:
+    cfg_cols = [c for c in filtered_df.columns if c.startswith('CFG::') and int(filtered_df[c].notna().sum()) > 0]
+    summary_rows = []
+    chart_buffers = []
+    detail_rows = []
+    ordered_cfg = sorted(cfg_cols, key=lambda c: int(filtered_df[c].notna().sum()), reverse=True)
+    for cfg_col in ordered_cfg:
+        field_name = cfg_col.replace('CFG::', '')
+        item_series = filtered_df[cfg_col].dropna().astype(str).str.strip()
+        item_series = item_series[item_series.ne('')]
+        if item_series.empty:
+            continue
+        dist = item_series.value_counts().reset_index()
+        dist.columns = ['Value', 'Count']
+        top = dist.iloc[0]
+        summary_rows.append({
+            'Config field': field_name,
+            'Assets with value': int(item_series.shape[0]),
+            'Unique values': int(dist.shape[0]),
+            'Top value': str(top['Value'])[:90],
+            'Top count': int(top['Count']),
+        })
+        for _, row in dist.head(5).iterrows():
+            detail_rows.append({
+                'Config field': field_name,
+                'Value': str(row['Value'])[:100],
+                'Count': int(row['Count']),
+                'Share %': round(float(row['Count']) / float(item_series.shape[0]) * 100, 1) if item_series.shape[0] else 0,
+            })
+    for cfg_col in ordered_cfg[:6]:
+        field_name = cfg_col.replace('CFG::', '')
+        item_series = filtered_df[cfg_col].dropna().astype(str).str.strip()
+        item_series = item_series[item_series.ne('')]
+        buf = _make_matplotlib_donut(item_series, field_name, max_slices=4)
+        if buf is not None:
+            chart_buffers.append(buf)
+    summary_df = pd.DataFrame(summary_rows)
+    detail_df = pd.DataFrame(detail_rows)
+    return summary_df, chart_buffers, detail_df
+
+
+def build_executive_insights(filtered_df: pd.DataFrame, stock_context: dict | None = None) -> list[str]:
+    insights = []
+    total_records = len(filtered_df)
+    if total_records == 0:
+        return ["No records are available for the current filter selection."]
+
+    top_country = filtered_df['Country'].fillna('No informado').value_counts()
+    if not top_country.empty:
+        insights.append(f"The installed base is currently concentrated in {top_country.index[0]} with {int(top_country.iloc[0]):,} filtered assets.")
+
+    status_counts = filtered_df['Operational status grouped'].fillna('No informado').value_counts()
+    if not status_counts.empty:
+        insights.append(f"The dominant operational status is {status_counts.index[0]} representing {round(float(status_counts.iloc[0]) / total_records * 100, 1)}% of the filtered base.")
+
+    if 'Operating System' in filtered_df.columns:
+        legacy_mask = filtered_df['Operating System'].isin(['Windows XP', 'Windows Vista', 'Windows 7', 'Windows 2000'])
+        legacy_count = int(legacy_mask.sum())
+        if legacy_count > 0:
+            insights.append(f"A total of {legacy_count:,} assets still run on legacy operating systems and should be prioritized for remediation planning.")
+
+    cfg_assets = int(filtered_df['Machine Configurations'].notna().sum()) if 'Machine Configurations' in filtered_df.columns else 0
+    if cfg_assets > 0:
+        insights.append(f"Machine configuration data is available for {cfg_assets:,} assets, enabling detailed segmentation by software, hardware, and local setup fields.")
+
+    stock_context = stock_context or {}
+    if stock_context.get('available'):
+        missing = int(stock_context.get('missing_skus', 0) or 0)
+        low = int(stock_context.get('low_skus', 0) or 0)
+        cost = float(stock_context.get('option2_cost', 0) or 0)
+        currency = stock_context.get('currency', 'EUR')
+        insights.append(f"The spare-parts comparison identified {missing:,} missing SKUs and {low:,} low-stock SKUs, with an estimated replenishment exposure of {currency} {cost:,.2f} using option 2 pricing.")
+
+    return insights[:6]
+
+
 def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = None):
     sections = []
 
@@ -1025,13 +1085,26 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
     top_inst.columns = ['Instrument', 'Count']
     state_counts = filtered_df['Operational status grouped'].fillna('No informado').value_counts().reset_index()
     state_counts.columns = ['State', 'Count']
+    age_df = filtered_df.copy()
+    if 'Age (years)' in age_df.columns:
+        age_df['Age bucket'] = pd.cut(
+            age_df['Age (years)'],
+            bins=[-1, 5, 8, 10, 100],
+            labels=['0-5 years', '5-8 years', '8-10 years', '10+ years'],
+        )
+        age_bucket = age_df['Age bucket'].value_counts().reset_index()
+        age_bucket.columns = ['Age bucket', 'Count']
+    else:
+        age_bucket = pd.DataFrame(columns=['Age bucket', 'Count'])
     sections.append({
         'title': 'Base Installed Overview',
+        'section_text': 'This section summarizes the filtered installed base and highlights the main concentration patterns by geography, instrument mix, age profile, and operational status.',
         'summary_pairs': base_pairs,
         'charts': [
             _make_matplotlib_barh(top_country, 'Country', 'Count', 'Top countries'),
             _make_matplotlib_barh(top_inst, 'Instrument', 'Count', 'Instrument mix'),
             _make_matplotlib_barh(state_counts, 'State', 'Count', 'Operational status mix'),
+            _make_matplotlib_barh(age_bucket, 'Age bucket', 'Count', 'Asset age profile'),
         ],
         'table_title': 'Top filtered records snapshot',
         'table_df': prepare_pdf_report_table(filtered_df),
@@ -1039,7 +1112,7 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
     })
 
     # Machine config
-    cfg_cols = [c for c in filtered_df.columns if c.startswith('CFG::')]
+    cfg_cols = [c for c in filtered_df.columns if c.startswith('CFG::') and int(filtered_df[c].notna().sum()) > 0]
     cfg_pairs = [
         ('Assets with machine configuration', f"{int(filtered_df['Machine Configurations'].notna().sum()):,}"),
         ('Active config fields', f"{sum(int(filtered_df[c].notna().sum()) > 0 for c in cfg_cols):,}"),
@@ -1048,17 +1121,29 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
     cfg_cov = pd.DataFrame([
         {'Field': c.replace('CFG::', ''), 'Count': int(filtered_df[c].notna().sum())} for c in cfg_cols if int(filtered_df[c].notna().sum()) > 0
     ]).sort_values('Count', ascending=False) if cfg_cols else pd.DataFrame(columns=['Field', 'Count'])
-    cfg_top_table = cfg_cov.head(12).rename(columns={'Field':'Config field', 'Count':'Populated assets'})
+    machine_summary_df, machine_donut_buffers, machine_detail_df = build_machine_config_summary_tables(filtered_df)
     sections.append({
         'title': 'Machine Configuration',
+        'section_text': 'This section consolidates the machine-configuration fields detected in the current filter scope, including the most populated fields and the dominant values used by the installed base.',
         'summary_pairs': cfg_pairs,
-        'charts': [
-            _make_matplotlib_barh(cfg_cov, 'Field', 'Count', 'Configuration field coverage'),
-        ],
-        'table_title': 'Most populated configuration fields',
-        'table_df': cfg_top_table,
-        'table_max_rows': 12,
+        'charts': [_make_matplotlib_barh(cfg_cov, 'Field', 'Count', 'Configuration field coverage')] + machine_donut_buffers,
+        'table_title': 'Machine configuration summary',
+        'table_df': machine_summary_df,
+        'table_max_rows': 20,
     })
+    if not machine_detail_df.empty:
+        sections.append({
+            'title': 'Machine Configuration Annex - Top Values',
+            'section_text': 'Top recurring values per machine-configuration field, based on the current filter selection.',
+            'summary_pairs': [
+                ('Rows included', f"{len(machine_detail_df):,}"),
+                ('Scope', 'Top five values for the most relevant machine-configuration fields'),
+            ],
+            'charts': [],
+            'table_title': 'Top values by configuration field',
+            'table_df': machine_detail_df,
+            'table_max_rows': max(len(machine_detail_df), 1),
+        })
 
     # OS
     os_df = filtered_df.copy()
@@ -1078,6 +1163,7 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
     urgent_table = os_df[os_df['Operating System'].isin(['Windows XP','Windows Vista','Windows 7','Windows 2000'])][['Country','Distributor name','Customer name','Instrument type','Serial number','Operating System']].copy()
     sections.append({
         'title': 'Operating System',
+        'section_text': 'Operating-system visibility is used to identify outdated environments, migration priorities, and data-quality gaps across the installed base.',
         'summary_pairs': os_pairs,
         'charts': [
             _make_matplotlib_barh(os_counts, 'Operating System', 'Count', 'OS distribution'),
@@ -1115,6 +1201,7 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
     tests_table = proc_df[['Country','Distributor name','Instrument type','Serial number','Number of tests per day','PM planner status']].copy().sort_values('Number of tests per day', ascending=False, na_position='last')
     sections.append({
         'title': 'Processing and PM Planner',
+        'section_text': 'Processing intensity and preventive-maintenance timing are shown together to support prioritization by utilization and maintenance exposure.',
         'summary_pairs': proc_pairs,
         'charts': [
             _make_matplotlib_scatter(proc_df[['Serial number','Number of tests per day']].dropna().sort_values('Number of tests per day', ascending=False), 'Serial number', 'Number of tests per day', 'Tests/day by serial'),
@@ -1158,6 +1245,7 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
         summary_table_df = stock_top_gap[['Required Part Number','Required Description','Required Qty','Uploaded Qty','Qty Gap','Status','Option 2 Estimated Cost','Currency']] if not stock_top_gap.empty else pd.DataFrame(columns=['Required Part Number','Required Description','Required Qty','Uploaded Qty','Qty Gap','Status','Option 2 Estimated Cost','Currency'])
         sections.append({
             'title': 'Spare Parts / Carstock Gap',
+            'section_text': 'When a spare-parts stock file is loaded, this section compares the uploaded stock against the selected master and quantifies the replenishment gap.',
             'summary_pairs': stock_pairs,
             'charts': [
                 _make_matplotlib_barh(stock_status, 'Status', 'Count', 'Carstock coverage status'),
@@ -1173,6 +1261,7 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
             full_table = full_comparison_df[full_cols].copy()
             sections.append({
                 'title': 'Spare Parts Annex - Full Comparison',
+                'section_text': 'Complete detail of the compared carstock, including coverage ratio, price reference, and estimated replenishment values.',
                 'summary_pairs': [
                     ('Rows included', f"{len(full_table):,}"),
                     ('Scope', 'Complete carstock comparison for all required SKUs'),
@@ -1189,6 +1278,7 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
             missing_low_table = missing_low_df[ml_cols].copy().sort_values(['Status','Qty Gap','Required Part Number'], ascending=[True, False, True])
             sections.append({
                 'title': 'Spare Parts Annex - Missing and LOW',
+                'section_text': 'Focused view of items that are either fully missing or below the requested stock threshold.',
                 'summary_pairs': [
                     ('Rows included', f"{len(missing_low_table):,}"),
                     ('Scope', 'Items with missing or insufficient stock'),
@@ -1204,6 +1294,7 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
             purchase_table = purchase_df[pur_cols].copy()
             sections.append({
                 'title': 'Spare Parts Annex - Purchase Suggestion',
+                'section_text': 'Suggested purchase list derived from the detected stock gap and the available price reference.',
                 'summary_pairs': [
                     ('Rows included', f"{len(purchase_table):,}"),
                     ('Scope', 'Suggested purchase to close current gap using option 2 pricing'),
@@ -1219,6 +1310,7 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
             extra_table = extra_df[ex_cols].copy()
             sections.append({
                 'title': 'Spare Parts Annex - Extra Items',
+                'section_text': 'These items were reported in the uploaded file but are not required by the selected stock master.',
                 'summary_pairs': [
                     ('Rows included', f"{len(extra_table):,}"),
                     ('Scope', 'Parts reported by the distributor that are not required by the selected carstock master'),
@@ -1231,6 +1323,7 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
     else:
         sections.append({
             'title': 'Spare Parts / Carstock Gap',
+            'section_text': 'No spare-parts comparison was loaded for the current session, so this section remains informational only.',
             'summary_pairs': [('Status', 'No spare parts comparison loaded in the current session.')],
             'charts': [],
             'table_title': 'Spare parts comparison',
@@ -1259,34 +1352,48 @@ def build_pdf_report(
         pagesize=landscape(A4),
         leftMargin=1.0 * inch,
         rightMargin=1.0 * inch,
-        topMargin=1.0 * inch,
-        bottomMargin=1.0 * inch,
+        topMargin=0.9 * inch,
+        bottomMargin=0.9 * inch,
         title=report_title,
         author=author_name,
     )
 
     styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name="APA_Title", parent=styles["Title"], fontName="Times-Bold", fontSize=16, leading=20, alignment=TA_CENTER, spaceAfter=10, textColor=colors.HexColor("#111111")))
-    styles.add(ParagraphStyle(name="APA_Subtitle", parent=styles["Normal"], fontName="Times-Roman", fontSize=12, leading=24, alignment=TA_CENTER, spaceAfter=6, textColor=colors.HexColor("#444444")))
-    styles.add(ParagraphStyle(name="APA_Heading", parent=styles["Heading2"], fontName="Times-Bold", fontSize=12, leading=16, alignment=TA_LEFT, spaceBefore=4, spaceAfter=6, textColor=colors.HexColor("#111111")))
-    styles.add(ParagraphStyle(name="APA_Body", parent=styles["BodyText"], fontName="Times-Roman", fontSize=12, leading=24, alignment=TA_JUSTIFY, spaceAfter=6))
+    styles.add(ParagraphStyle(name="APA_Title", parent=styles["Title"], fontName="Times-Bold", fontSize=18, leading=22, alignment=TA_CENTER, spaceAfter=10, textColor=colors.HexColor("#111111")))
+    styles.add(ParagraphStyle(name="APA_Subtitle", parent=styles["Normal"], fontName="Times-Roman", fontSize=12, leading=18, alignment=TA_CENTER, spaceAfter=6, textColor=colors.HexColor("#444444")))
+    styles.add(ParagraphStyle(name="APA_Heading", parent=styles["Heading2"], fontName="Times-Bold", fontSize=12, leading=16, alignment=TA_LEFT, spaceBefore=6, spaceAfter=6, textColor=colors.HexColor("#111111")))
+    styles.add(ParagraphStyle(name="APA_Body", parent=styles["BodyText"], fontName="Times-Roman", fontSize=12, leading=22, alignment=TA_JUSTIFY, spaceAfter=6))
     styles.add(ParagraphStyle(name="APA_Cell", parent=styles["BodyText"], fontName="Times-Roman", fontSize=8, leading=10, alignment=TA_LEFT, wordWrap='CJK'))
     styles.add(ParagraphStyle(name="APA_Cell_Header", parent=styles["BodyText"], fontName="Times-Bold", fontSize=8, leading=10, alignment=TA_LEFT, textColor=colors.white))
-    styles.add(ParagraphStyle(name="APA_Signature", parent=styles["BodyText"], fontName="Times-Roman", fontSize=12, leading=24, alignment=TA_LEFT, spaceAfter=3))
+    styles.add(ParagraphStyle(name="APA_Signature", parent=styles["BodyText"], fontName="Times-Roman", fontSize=12, leading=20, alignment=TA_LEFT, spaceAfter=3))
+    styles.add(ParagraphStyle(name="APA_Insight", parent=styles["BodyText"], fontName="Times-Roman", fontSize=11, leading=18, alignment=TA_LEFT, leftIndent=14, bulletIndent=0, spaceAfter=4))
 
     elements = []
     today_str = datetime.now().strftime("%Y-%m-%d %H:%M")
     short_title = re.sub(r"\s+", " ", report_title.strip() or "Dashboard Report")[:80]
 
-    elements.append(Spacer(1, 0.45 * inch))
+    # Title page
+    elements.append(Spacer(1, 1.0 * inch))
     elements.append(Paragraph(report_title, styles["APA_Title"]))
+    elements.append(Spacer(1, 0.2 * inch))
     elements.append(Paragraph(author_name, styles["APA_Subtitle"]))
     elements.append(Paragraph(author_role, styles["APA_Subtitle"]))
     elements.append(Paragraph(f"Generated on {today_str}", styles["APA_Subtitle"]))
-    elements.append(Spacer(1, 0.18 * inch))
-    elements.append(Paragraph("This report was generated from the active dashboard filters and includes executive summaries, charts, and supporting tables for the visible tabs in the dashboard, including spare parts when loaded in the current session.", styles["APA_Body"]))
+    elements.append(Paragraph("Records List Intelligence Dashboard", styles["APA_Subtitle"]))
+    elements.append(Spacer(1, 0.3 * inch))
+    elements.append(Paragraph(
+        "This APA-style report summarizes the currently filtered installed-base dashboard and compiles the visual analyses shown in the application, including the updated machine-configuration charts and, when available, the spare-parts comparison results.",
+        styles["APA_Body"],
+    ))
+    elements.append(PageBreak())
 
-    elements += _summary_table_from_pairs("Executive Summary", [
+    # Executive summary
+    elements.append(Paragraph("Executive Summary", styles["APA_Heading"]))
+    elements.append(Paragraph(
+        "The following summary provides a high-level view of the filtered installed base and serves as a management-ready snapshot of installed-base size, geographic concentration, operational status, configuration visibility, and maintenance or stock exposure.",
+        styles["APA_Body"],
+    ))
+    elements += _summary_table_from_pairs("Key Metrics", [
         ("Filtered records", f"{len(filtered_df):,}"),
         ("Countries", f"{filtered_df['Country'].nunique(dropna=True):,}"),
         ("Distributors", f"{filtered_df['Distributor name'].nunique(dropna=True):,}"),
@@ -1295,6 +1402,7 @@ def build_pdf_report(
     ], styles)
     elements.append(Spacer(1, 0.12 * inch))
 
+    elements.append(Paragraph("Active Filters", styles["APA_Heading"]))
     filters_table_data = [[Paragraph("<b>Filter</b>", styles["APA_Cell_Header"]), Paragraph("<b>Selected Value</b>", styles["APA_Cell_Header"])]]
     for key, value in filter_summary.items():
         filters_table_data.append([_paragraph_cell(key, styles["APA_Cell"]), _paragraph_cell(value, styles["APA_Cell"])])
@@ -1310,14 +1418,21 @@ def build_pdf_report(
         ("TOPPADDING", (0, 0), (-1, -1), 4),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
     ]))
-    elements.append(Paragraph("Active Filters", styles["APA_Heading"]))
     elements.append(filters_table)
+    elements.append(Spacer(1, 0.15 * inch))
+
+    insights = build_executive_insights(filtered_df, stock_context=stock_context)
+    elements.append(Paragraph("Executive Insights", styles["APA_Heading"]))
+    for insight in insights:
+        elements.append(Paragraph(_escape_pdf_text(insight), styles["APA_Insight"], bulletText="•"))
 
     from reportlab.platypus import Image
     sections = _build_pdf_sections(filtered_df, stock_context=stock_context)
     for section in sections:
         elements.append(PageBreak())
         elements.append(Paragraph(section['title'], styles['APA_Heading']))
+        if section.get('section_text'):
+            elements.append(Paragraph(_escape_pdf_text(section['section_text']), styles['APA_Body']))
         for block in _summary_table_from_pairs("Section Summary", section['summary_pairs'], styles):
             elements.append(block)
         charts = [c for c in section.get('charts', []) if c is not None]
@@ -1366,6 +1481,12 @@ def build_pdf_report(
             elements.append(Paragraph("No detailed rows are available for this section.", styles['APA_Body']))
 
     elements.append(PageBreak())
+    elements.append(Paragraph("Methodological Note", styles["APA_Heading"]))
+    elements.append(Paragraph(
+        "All metrics in this document are driven by the active dashboard filters at the time the report is generated. Machine-configuration charts are built from the parsed configuration fields available within the filtered records. Preventive-maintenance insights are derived from the next planned PM date when available. Spare-parts analysis appears only when a compatible stock file and master reference are loaded in the same dashboard session.",
+        styles["APA_Body"],
+    ))
+
     elements.append(Paragraph("References", styles["APA_Heading"]))
     references = [line.strip() for line in references_text.splitlines() if line.strip()]
     if references:
@@ -1382,6 +1503,7 @@ def build_pdf_report(
 
     doc.build(elements, onFirstPage=lambda canvas, doc: _pdf_header_footer(canvas, doc, short_title), onLaterPages=lambda canvas, doc: _pdf_header_footer(canvas, doc, short_title))
     return buffer.getvalue()
+
 
 def metric_card(label: str, value: str, subtitle: str = "") -> None:
     st.markdown(
