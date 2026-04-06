@@ -129,6 +129,10 @@ DANGER = "#ff5d8f"
 TEXT = "#f8fcff"
 MUTED = "rgba(238,245,255,0.92)"
 
+STRUCTURED_CONFIG_FIELDS = {
+    "In Blood Bank": "In Blood Bank",
+}
+
 CFG_LABEL_MAP = {
     "In Blood Bank": "Banco de sangre",
     "Operative System": "Sistema operativo",
@@ -1064,7 +1068,7 @@ def _build_machine_config_summary(filtered_df: pd.DataFrame):
         count_non_null = int(non_null.shape[0])
         if count_non_null <= 0:
             continue
-        field_name = col.replace('CFG::', '')
+        field_name = CFG_LABEL_MAP.get(col.replace('CFG::', ''), col.replace('CFG::', ''))
         vc = non_null.astype(str).str.strip()
         vc = vc[vc != '']
         if vc.empty:
@@ -1197,21 +1201,15 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
         'table_max_rows': max(len(filtered_df), 1),
     })
 
-    machine_cfg_base_count = int(
-        filtered_df["Machine Configurations"].fillna("").astype(str).str.strip().ne("").sum()
-    )
-    if "CFG::In Blood Bank" in filtered_df.columns:
-        machine_cfg_base_count = max(machine_cfg_base_count, int(filtered_df["CFG::In Blood Bank"].notna().sum()))
-
     cfg_pairs = [
-        ('Equipos con configuración', f"{machine_cfg_base_count:,}"),
+        ('Equipos con configuración', f"{max(int(filtered_df['Machine Configurations'].fillna('').astype(str).str.strip().ne('').sum()), int(filtered_df['CFG::In Blood Bank'].notna().sum()) if 'CFG::In Blood Bank' in filtered_df.columns else 0):,}"),
         ('Campos activos de configuración', f"{sum(int(filtered_df[c].notna().sum()) > 0 for c in filtered_df.columns if c.startswith('CFG::')):,}"),
         ('Promedio de campos poblados', f"{filtered_df.get('Machine config fields populated', pd.Series([0])).fillna(0).mean():.1f}"),
     ]
     cfg_cov, cfg_value_df, cfg_charts = _build_machine_config_summary(filtered_df)
     sections.append({
         'title': 'Configuración de equipo',
-        'intro': 'Se consolidan los campos detectados en Machine Configuration y también los campos estructurados del archivo maestro, como banco de sangre, mostrando las distribuciones de los ítems con mayor visibilidad en el filtro activo.',
+        'intro': 'Se consolidan los campos detectados en Machine Configuration y se muestran las distribuciones de los ítems con mayor visibilidad en el filtro activo.',
         'summary_pairs': cfg_pairs,
         'charts': [_make_pdf_barh(cfg_cov, 'Campo de configuración', 'Equipos con dato', 'Cobertura de campos de configuración', max_rows=10)] + cfg_charts,
         'table_title': 'Resumen de configuración de equipo',
@@ -2000,11 +1998,9 @@ def add_operating_system_columns(df: pd.DataFrame, config_cols: list[str]) -> pd
         df["Operating System Raw"] = pd.NA
         df["Operating System"] = pd.NA
 
-    structured_cfg_map = {
-        "In Blood Bank": "In Blood Bank",
-    }
+    normalized_config_cols = list(config_cols)
 
-    for source_col, cfg_name in structured_cfg_map.items():
+    for source_col, cfg_name in STRUCTURED_CONFIG_FIELDS.items():
         if source_col in df.columns:
             normalized = (
                 df[source_col]
@@ -2013,10 +2009,10 @@ def add_operating_system_columns(df: pd.DataFrame, config_cols: list[str]) -> pd
                 .replace({"": pd.NA, "nan": pd.NA, "None": pd.NA, "<NA>": pd.NA})
             )
             df[f"CFG::{cfg_name}"] = normalized
-            if cfg_name not in config_cols:
-                config_cols.append(cfg_name)
+            if cfg_name not in normalized_config_cols:
+                normalized_config_cols.append(cfg_name)
 
-    cfg_prefix_cols = [f"CFG::{c}" for c in config_cols if f"CFG::{c}" in df.columns]
+    cfg_prefix_cols = [f"CFG::{c}" for c in normalized_config_cols if f"CFG::{c}" in df.columns]
     df["Machine config fields populated"] = df[cfg_prefix_cols].notna().sum(axis=1) if cfg_prefix_cols else 0
     return df
 
@@ -2480,10 +2476,28 @@ def compare_stock(
 
 def active_config_fields(df: pd.DataFrame, config_keys: list[str]) -> list[str]:
     active = []
-    for key in config_keys:
+    seen = set()
+
+    for key in list(config_keys) + list(STRUCTURED_CONFIG_FIELDS.values()):
         col = f"CFG::{key}"
-        if col in df.columns and df[col].notna().any():
+        if col in df.columns:
+            series = df[col]
+            has_value = series.astype("string").str.strip().replace({"": pd.NA, "<NA>": pd.NA}).notna().any()
+            if has_value and key not in seen:
+                active.append(key)
+                seen.add(key)
+
+    extra_cfg_keys = sorted([c.replace("CFG::", "") for c in df.columns if c.startswith("CFG::")])
+    for key in extra_cfg_keys:
+        if key in seen:
+            continue
+        col = f"CFG::{key}"
+        series = df[col]
+        has_value = series.astype("string").str.strip().replace({"": pd.NA, "<NA>": pd.NA}).notna().any()
+        if has_value:
             active.append(key)
+            seen.add(key)
+
     return active
 
 
@@ -2849,31 +2863,22 @@ with machine_tab:
     if not cfg_cols_prefixed:
         st.info("No se detectaron campos aplicables dentro de Machine Configurations para el filtro actual.")
     else:
-        assets_with_cfg = int(
-            filtered["Machine Configurations"].fillna("").astype(str).str.strip().ne("").sum()
-        )
+        assets_with_cfg = int(filtered["Machine Configurations"].fillna("").astype(str).str.strip().ne("").sum())
         if "CFG::In Blood Bank" in filtered.columns:
             assets_with_cfg = max(assets_with_cfg, int(filtered["CFG::In Blood Bank"].notna().sum()))
-
         avg_cfg_fields = filtered["Machine config fields populated"].mean()
         unique_cfg_fields = len(applicable_fields)
 
         mc1, mc2, mc3 = st.columns(3)
         with mc1:
-            metric_card("Equipos con config", f"{assets_with_cfg:,}", "Incluye datos estructurados como banco de sangre")
+            metric_card("Equipos con config", f"{assets_with_cfg:,}", "Con información en Machine Configurations")
         with mc2:
             metric_card("Campos aplicables", f"{unique_cfg_fields}", "Solo ítems presentes en el filtro actual")
         with mc3:
             metric_card("Promedio de campos", f"{avg_cfg_fields:.1f}", "Campos poblados por equipo")
 
         coverage_df = pd.DataFrame(
-            [
-                {
-                    "Config field": CFG_LABEL_MAP.get(col.replace("CFG::", ""), col.replace("CFG::", "")),
-                    "Populated assets": int(filtered[col].notna().sum()),
-                }
-                for col in cfg_cols_prefixed
-            ]
+            [{"Config field": CFG_LABEL_MAP.get(col.replace("CFG::", ""), col.replace("CFG::", "")), "Populated assets": int(filtered[col].astype("string").str.strip().replace({"": pd.NA, "<NA>": pd.NA}).notna().sum())} for col in cfg_cols_prefixed]
         )
         coverage_df = coverage_df[coverage_df["Populated assets"] > 0].sort_values("Populated assets", ascending=False)
 
@@ -2899,27 +2904,23 @@ with machine_tab:
             unsafe_allow_html=True,
         )
 
-        donut_fields = coverage_df["Config field"].tolist()
-        reverse_label_map = {v: k for k, v in CFG_LABEL_MAP.items()}
-
+        donut_fields = applicable_fields
         if donut_fields:
             for idx in range(0, len(donut_fields), 3):
                 cols = st.columns(3)
                 for col_ui, field_name in zip(cols, donut_fields[idx:idx + 3]):
-                    raw_field_name = reverse_label_map.get(field_name, field_name)
-                    selected_cfg_col = f"CFG::{raw_field_name}"
+                    selected_cfg_col = f"CFG::{field_name}"
                     item_series = filtered[selected_cfg_col].dropna()
                     item_series = item_series.astype(str).str.strip()
                     item_series = item_series[item_series.ne("")]
                     total_assets = int(item_series.shape[0])
                     with col_ui:
-                        st.plotly_chart(build_config_donut(field_name, item_series, total_assets), use_container_width=True)
+                        st.plotly_chart(build_config_donut(CFG_LABEL_MAP.get(field_name, field_name), item_series, total_assets), use_container_width=True)
 
         st.markdown("### Top valores por ítem")
         detail_rows = []
         for field_name in donut_fields:
-            raw_field_name = reverse_label_map.get(field_name, field_name)
-            selected_cfg_col = f"CFG::{raw_field_name}"
+            selected_cfg_col = f"CFG::{field_name}"
             item_series = filtered[selected_cfg_col].dropna().astype(str).str.strip()
             item_series = item_series[item_series.ne("")]
             if item_series.empty:
@@ -2929,7 +2930,7 @@ with machine_tab:
             top_row = dist.iloc[0]
             detail_rows.append(
                 {
-                    "Config field": field_name,
+                    "Config field": CFG_LABEL_MAP.get(field_name, field_name),
                     "Top value": str(top_row["Value"]),
                     "Top count": int(top_row["Count"]),
                     "Unique values": int(dist.shape[0]),
@@ -2950,14 +2951,11 @@ with machine_tab:
                 "Serial number",
                 "Operating System",
                 "Operational status",
-            ] + [f"CFG::{reverse_label_map.get(field, field)}" for field in donut_fields]
-            machine_table = filtered[detail_columns].copy().rename(
-                columns={f"CFG::{reverse_label_map.get(field, field)}": field for field in donut_fields}
-            )
+            ] + [f"CFG::{field}" for field in donut_fields]
+            machine_table = filtered[detail_columns].copy().rename(columns={f"CFG::{field}": CFG_LABEL_MAP.get(field, field) for field in donut_fields})
             st.dataframe(machine_table, use_container_width=True, hide_index=True)
 
 with os_tab:
-
     st.subheader("Sistema operativo")
     st.caption("Vista diseñada para identificar instrumentos con sistemas operativos legacy y priorizar migraciones urgentes a Windows 10.")
     os_df = filtered.copy()
@@ -3748,7 +3746,7 @@ with detail_tab:
 with st.sidebar:
     st.subheader("📄 Informe PDF")
     st.caption("Formato ajustado con márgenes APA de 1 pulgada y estructura de informe técnico ejecutiva.")
-    pdf_title = st.text_input("Título del informe", value="Informe de base instalada")
+    pdf_title = st.text_input("Título del informe", value="Installed Base Dashboard Report")
     pdf_author = st.text_input("Nombre para firma", value="Javier Avellaneda")
     pdf_role = st.text_input("Cargo / título", value="Service Leader | Export LATAM")
     pdf_signature_date = st.text_input("Fecha de firma", value=datetime.now().strftime("%Y-%m-%d"))
