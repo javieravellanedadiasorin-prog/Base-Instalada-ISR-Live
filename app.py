@@ -119,36 +119,37 @@ CUSTOM_HEADERS = [
 ASSAY_COLS = CUSTOM_HEADERS[28:-1]
 
 PLOT_TEMPLATE = "plotly_white"
-PLOT_BG = "rgba(255,255,255,0)"
-GRID = "rgba(84, 107, 138, 0.16)"
+PLOT_BG = "rgba(255,255,255,0.03)"
+GRID = "rgba(95, 120, 150, 0.12)"
 ACCENT = "#61d7ff"
 ACCENT_2 = "#90a8ff"
 ACCENT_3 = "#6df2d2"
 WARNING = "#ffb454"
 DANGER = "#ff5d8f"
 TEXT = "#f7fbff"
-MUTED = "rgba(239,245,252,0.78)"
+MUTED = "rgba(242,247,252,0.82)"
 
 APP_CSS = """
 <style>
 :root {
-    --bg1: #dbe4ee;
-    --bg2: #c7d2df;
-    --bg3: #a8b6c8;
-    --glass: rgba(255, 255, 255, 0.16);
-    --glass-2: rgba(255, 255, 255, 0.10);
-    --glass-3: rgba(255, 255, 255, 0.24);
-    --line: rgba(255, 255, 255, 0.26);
-    --line-soft: rgba(255, 255, 255, 0.16);
+    --bg1: #dde6ef;
+    --bg2: #c6d2df;
+    --bg3: #aab9ca;
+    --glass: rgba(255, 255, 255, 0.18);
+    --glass-2: rgba(255, 255, 255, 0.11);
+    --glass-3: rgba(255, 255, 255, 0.28);
+    --line: rgba(255, 255, 255, 0.30);
+    --line-soft: rgba(255, 255, 255, 0.17);
     --txt: #f8fbff;
-    --txt-soft: rgba(248, 251, 255, 0.88);
-    --muted: rgba(236, 243, 252, 0.72);
-    --cyan: #69dbff;
-    --cyan-2: #4bbcff;
-    --blue: #7fb6ff;
-    --mint: #6bffd9;
-    --violet: #c0abff;
-    --shadow: rgba(33, 56, 86, 0.18);
+    --txt-soft: rgba(248, 251, 255, 0.92);
+    --muted: rgba(236, 243, 252, 0.76);
+    --cyan: #72dcff;
+    --cyan-2: #53c5ff;
+    --blue: #8fb8ff;
+    --mint: #75ffe0;
+    --violet: #cab6ff;
+    --shadow: rgba(33, 56, 86, 0.16);
+    --shadow-strong: rgba(31, 49, 73, 0.22);
 }
 
 html, body, [class*="css"] {
@@ -157,10 +158,11 @@ html, body, [class*="css"] {
 
 .stApp {
     background:
-        radial-gradient(circle at 14% 10%, rgba(255,255,255,0.32), transparent 18%),
-        radial-gradient(circle at 86% 12%, rgba(255,255,255,0.16), transparent 18%),
-        radial-gradient(circle at 78% 82%, rgba(105,219,255,0.14), transparent 20%),
-        linear-gradient(145deg, #8d9db0 0%, #8294a8 18%, #8fa1b5 36%, #9fb0c2 56%, #b9c7d5 78%, #d7e0e8 100%);
+        radial-gradient(circle at 12% 8%, rgba(255,255,255,0.34), transparent 16%),
+        radial-gradient(circle at 84% 10%, rgba(255,255,255,0.17), transparent 18%),
+        radial-gradient(circle at 80% 76%, rgba(114,220,255,0.12), transparent 20%),
+        radial-gradient(circle at 22% 72%, rgba(202,182,255,0.10), transparent 18%),
+        linear-gradient(145deg, #8fa0b3 0%, #8395a8 16%, #91a3b6 36%, #9fb0c1 56%, #bcc9d6 80%, #dde5ec 100%);
     background-attachment: fixed;
     color: var(--txt);
 }
@@ -171,32 +173,33 @@ html, body, [class*="css"] {
     inset: 0;
     pointer-events: none;
     background:
-        linear-gradient(180deg, rgba(255,255,255,0.08), transparent 28%, transparent 72%, rgba(255,255,255,0.05)),
-        radial-gradient(circle at 26% 18%, rgba(255,255,255,0.22), transparent 10%),
-        radial-gradient(circle at 72% 26%, rgba(255,255,255,0.10), transparent 16%);
+        linear-gradient(180deg, rgba(255,255,255,0.08), transparent 26%, transparent 74%, rgba(255,255,255,0.05)),
+        radial-gradient(circle at 28% 18%, rgba(255,255,255,0.22), transparent 11%),
+        radial-gradient(circle at 72% 24%, rgba(255,255,255,0.10), transparent 15%);
     z-index: 0;
 }
 
 .block-container {
     position: relative;
     z-index: 1;
-    padding-top: 1rem;
+    padding-top: 0.9rem;
     padding-bottom: 2rem;
-    max-width: 96rem;
+    max-width: 97rem;
 }
 
 section[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, rgba(255,255,255,0.13) 0%, rgba(255,255,255,0.10) 100%);
-    backdrop-filter: blur(26px);
-    -webkit-backdrop-filter: blur(26px);
-    border-right: 1px solid rgba(255,255,255,0.20);
+    background: linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.10) 100%);
+    backdrop-filter: blur(30px);
+    -webkit-backdrop-filter: blur(30px);
+    border-right: 1px solid rgba(255,255,255,0.22);
     box-shadow:
-        inset 1px 1px 0 rgba(255,255,255,0.22),
-        12px 0 28px rgba(36, 56, 84, 0.10);
+        inset 1px 1px 0 rgba(255,255,255,0.24),
+        10px 0 36px rgba(36, 56, 84, 0.10);
 }
 
 section[data-testid="stSidebar"] > div {
     background: transparent;
+    padding-top: 0.4rem;
 }
 
 section[data-testid="stSidebar"] h1,
@@ -209,26 +212,77 @@ section[data-testid="stSidebar"] div {
     color: var(--txt-soft) !important;
 }
 
+section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
+    line-height: 1.35;
+}
+
+.sidebar-top-card {
+    padding: 1rem 1rem 0.95rem 1rem;
+    border-radius: 24px;
+    margin-bottom: 0.75rem;
+    background: linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0.10));
+    border: 1px solid rgba(255,255,255,0.22);
+    box-shadow:
+        0 14px 30px rgba(31, 49, 73, 0.10),
+        inset 0 1px 0 rgba(255,255,255,0.22);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+}
+
+.sidebar-top-card h3 {
+    margin: 0 0 0.25rem 0;
+    font-size: 1rem;
+    color: #ffffff;
+}
+
+.sidebar-top-card p {
+    margin: 0;
+    font-size: 0.84rem;
+    color: rgba(248,251,255,0.78);
+}
+
+.sidebar-pill {
+    margin-top: 0.65rem;
+    display: inline-block;
+    padding: 0.34rem 0.75rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    color: #ffffff;
+    background: linear-gradient(180deg, rgba(114,220,255,0.30), rgba(83,197,255,0.18));
+    border: 1px solid rgba(255,255,255,0.22);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.24);
+}
+
 section[data-testid="stSidebar"] .stFileUploader,
 section[data-testid="stSidebar"] .stMultiSelect,
 section[data-testid="stSidebar"] .stSelectbox,
 section[data-testid="stSidebar"] .stTextInput {
-    border-radius: 18px;
+    border-radius: 20px;
+}
+
+section[data-testid="stSidebar"] .stTextInput input,
+section[data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] > div,
+section[data-testid="stSidebar"] .stMultiSelect div[data-baseweb="select"] > div,
+section[data-testid="stSidebar"] .stFileUploader section {
+    background: rgba(255,255,255,0.10) !important;
+    border: 1px solid rgba(255,255,255,0.16) !important;
+    border-radius: 18px !important;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.16);
 }
 
 .hero {
     position: relative;
     overflow: hidden;
-    padding: 1.45rem 1.7rem;
-    border-radius: 30px;
+    padding: 1.6rem 1.75rem;
+    border-radius: 32px;
     border: 1px solid var(--line);
-    background: linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.11) 100%);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
+    background: linear-gradient(180deg, rgba(255,255,255,0.19) 0%, rgba(255,255,255,0.10) 100%);
+    backdrop-filter: blur(28px);
+    -webkit-backdrop-filter: blur(28px);
     box-shadow:
-        0 18px 44px rgba(43, 61, 88, 0.14),
-        inset 0 1px 0 rgba(255,255,255,0.30),
-        inset 0 -1px 0 rgba(255,255,255,0.06);
+        0 20px 44px rgba(44, 65, 94, 0.16),
+        inset 0 1px 0 rgba(255,255,255,0.34),
+        inset 0 -1px 0 rgba(255,255,255,0.07);
     margin-bottom: 1rem;
 }
 
@@ -236,15 +290,15 @@ section[data-testid="stSidebar"] .stTextInput {
     content: "";
     position: absolute;
     inset: 0;
-    pointer-events: none;
     background:
-        radial-gradient(circle at 18% 14%, rgba(255,255,255,0.20), transparent 18%),
-        linear-gradient(120deg, rgba(105,219,255,0.08), transparent 36%, rgba(192,171,255,0.08) 82%, transparent 100%);
+        radial-gradient(circle at 20% 15%, rgba(255,255,255,0.28), transparent 18%),
+        linear-gradient(120deg, rgba(114,220,255,0.10), transparent 38%, rgba(202,182,255,0.08) 80%, transparent 100%);
+    pointer-events: none;
 }
 
 .hero h1 {
     margin: 0;
-    font-size: 2.2rem;
+    font-size: 2.25rem;
     letter-spacing: 0.01em;
     color: #ffffff;
     text-shadow: 0 0 14px rgba(255,255,255,0.10);
@@ -254,17 +308,18 @@ section[data-testid="stSidebar"] .stTextInput {
     margin: 0.45rem 0 0 0;
     color: var(--muted);
     font-size: 1rem;
+    max-width: 62rem;
 }
 
 .badge-row {
     display: flex;
     flex-wrap: wrap;
     gap: 0.55rem;
-    margin-top: 0.9rem;
+    margin-top: 0.95rem;
 }
 
 .badge {
-    padding: 0.36rem 0.82rem;
+    padding: 0.38rem 0.82rem;
     border-radius: 999px;
     font-size: 0.77rem;
     color: #f7fbff;
@@ -279,14 +334,14 @@ section[data-testid="stSidebar"] .stTextInput {
     position: relative;
     overflow: hidden;
     padding: 1rem 1rem;
-    border-radius: 26px;
-    background: linear-gradient(180deg, rgba(255,255,255,0.19), rgba(255,255,255,0.09));
+    border-radius: 28px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.21), rgba(255,255,255,0.11));
     border: 1px solid rgba(255,255,255,0.24);
     backdrop-filter: blur(22px);
     -webkit-backdrop-filter: blur(22px);
-    min-height: 118px;
+    min-height: 120px;
     box-shadow:
-        0 10px 28px rgba(38, 58, 86, 0.12),
+        0 12px 28px rgba(38, 58, 86, 0.12),
         inset 0 1px 0 rgba(255,255,255,0.28),
         inset 0 -1px 0 rgba(255,255,255,0.06);
 }
@@ -296,11 +351,22 @@ section[data-testid="stSidebar"] .stTextInput {
     position: absolute;
     inset: 0;
     pointer-events: none;
-    background: radial-gradient(circle at top left, rgba(255,255,255,0.18), transparent 26%);
+    background: radial-gradient(circle at top left, rgba(255,255,255,0.16), transparent 28%);
+}
+
+.metric-orb {
+    position: absolute;
+    right: 14px;
+    top: 12px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, rgba(255,255,255,0.95), rgba(114,220,255,0.85) 45%, rgba(83,197,255,0.22) 75%, transparent 100%);
+    box-shadow: 0 0 18px rgba(114,220,255,0.42);
 }
 
 .metric-label {
-    font-size: 0.78rem;
+    font-size: 0.76rem;
     color: var(--muted);
     text-transform: uppercase;
     letter-spacing: 0.08em;
@@ -309,42 +375,31 @@ section[data-testid="stSidebar"] .stTextInput {
 .metric-value {
     font-size: 1.95rem;
     font-weight: 700;
-    margin-top: 0.2rem;
+    margin-top: 0.22rem;
     color: #ffffff;
 }
 
 .metric-sub {
-    margin-top: 0.2rem;
+    margin-top: 0.22rem;
     font-size: 0.86rem;
     color: var(--txt-soft);
 }
 
-div[data-testid="stMetric"] {
-    background: linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0.08));
-    border: 1px solid rgba(255,255,255,0.22);
-    border-radius: 24px;
-    padding: 0.9rem 1rem;
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
-    box-shadow:
-        0 10px 24px rgba(40, 58, 84, 0.10),
-        inset 0 1px 0 rgba(255,255,255,0.24);
-}
-
 .stTabs [data-baseweb="tab-list"] {
     gap: 0.55rem;
-    padding: 0.25rem;
-    background: rgba(255,255,255,0.07);
-    border-radius: 18px;
-    border: 1px solid rgba(255,255,255,0.14);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
+    padding: 0.3rem;
+    background: rgba(255,255,255,0.08);
+    border-radius: 20px;
+    border: 1px solid rgba(255,255,255,0.16);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.14);
 }
 
 .stTabs [data-baseweb="tab"] {
-    border-radius: 14px;
+    border-radius: 16px;
     background: rgba(255,255,255,0.08);
-    padding: 0.5rem 0.95rem;
+    padding: 0.52rem 1rem;
     color: var(--txt-soft);
     border: 1px solid transparent;
     transition: all 0.2s ease;
@@ -356,7 +411,7 @@ div[data-testid="stMetric"] {
 }
 
 .stTabs [aria-selected="true"] {
-    background: linear-gradient(180deg, rgba(117,220,255,0.28), rgba(95,180,255,0.22)) !important;
+    background: linear-gradient(180deg, rgba(117,220,255,0.30), rgba(95,180,255,0.22)) !important;
     border: 1px solid rgba(147,223,255,0.44) !important;
     box-shadow:
         0 0 18px rgba(99,216,255,0.16),
@@ -366,35 +421,35 @@ div[data-testid="stMetric"] {
 
 div[data-testid="stDataFrame"],
 div[data-testid="stTable"] {
-    border-radius: 24px;
+    border-radius: 26px;
     overflow: hidden;
     border: 1px solid rgba(255,255,255,0.18);
-    background: rgba(255,255,255,0.10);
+    background: rgba(255,255,255,0.11);
     backdrop-filter: blur(18px);
     -webkit-backdrop-filter: blur(18px);
     box-shadow:
-        0 10px 26px rgba(39, 57, 82, 0.10),
+        0 12px 28px rgba(39, 57, 82, 0.10),
         inset 0 1px 0 rgba(255,255,255,0.18);
 }
 
 div[data-testid="stPlotlyChart"] {
-    border-radius: 26px;
+    border-radius: 28px;
     overflow: hidden;
-    background: linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.06));
-    border: 1px solid rgba(255,255,255,0.14);
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
-    padding: 0.25rem;
+    background: linear-gradient(180deg, rgba(255,255,255,0.14), rgba(255,255,255,0.06));
+    border: 1px solid rgba(255,255,255,0.16);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    padding: 0.3rem;
     box-shadow:
-        0 10px 26px rgba(40, 58, 84, 0.08),
-        inset 0 1px 0 rgba(255,255,255,0.12);
+        0 12px 28px rgba(40, 58, 84, 0.08),
+        inset 0 1px 0 rgba(255,255,255,0.14);
 }
 
 .stButton > button,
 .stDownloadButton > button {
-    border-radius: 16px;
+    border-radius: 17px;
     border: 1px solid rgba(146,225,255,0.34);
-    background: linear-gradient(180deg, rgba(98,214,255,0.35), rgba(72,173,255,0.28));
+    background: linear-gradient(180deg, rgba(98,214,255,0.36), rgba(72,173,255,0.28));
     color: white;
     font-weight: 600;
     box-shadow:
@@ -418,7 +473,7 @@ div[data-testid="stPlotlyChart"] {
 .stTextArea textarea,
 .stSelectbox div[data-baseweb="select"] > div,
 .stMultiSelect div[data-baseweb="select"] > div {
-    background: rgba(255,255,255,0.10) !important;
+    background: rgba(255,255,255,0.11) !important;
     border: 1px solid rgba(255,255,255,0.18) !important;
     border-radius: 16px !important;
     color: #ffffff !important;
@@ -428,7 +483,7 @@ div[data-testid="stPlotlyChart"] {
 
 .stTextInput input::placeholder,
 .stTextArea textarea::placeholder {
-    color: rgba(245,249,255,0.52);
+    color: rgba(245,249,255,0.50);
 }
 
 h1, h2, h3, h4, h5, h6 {
@@ -461,14 +516,25 @@ def glow_layout(fig: go.Figure, height: int = 420, title_size: int = 18) -> go.F
         height=height,
         paper_bgcolor=PLOT_BG,
         plot_bgcolor=PLOT_BG,
-        margin=dict(l=20, r=20, t=82, b=20),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        margin=dict(l=18, r=18, t=78, b=18),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            bgcolor="rgba(255,255,255,0.06)",
+            bordercolor="rgba(255,255,255,0.14)",
+            borderwidth=1,
+            font=dict(color=TEXT, size=11),
+        ),
         font=dict(color=TEXT),
-        title_font=dict(size=title_size),
+        title_font=dict(size=title_size, color=TEXT),
+        title=dict(x=0.02, xanchor="left"),
         hovermode="closest",
         hoverlabel=dict(
-            bgcolor="rgba(102, 126, 157, 0.92)",
-            bordercolor="rgba(255,255,255,0.20)",
+            bgcolor="rgba(116, 136, 163, 0.94)",
+            bordercolor="rgba(255,255,255,0.22)",
             font=dict(color=TEXT),
         ),
     )
@@ -1281,6 +1347,7 @@ def metric_card(label: str, value: str, subtitle: str = "") -> None:
     st.markdown(
         f"""
         <div class="metric-shell">
+            <div class="metric-orb"></div>
             <div class="metric-label">{label}</div>
             <div class="metric-value">{value}</div>
             <div class="metric-sub">{subtitle}</div>
@@ -2296,7 +2363,16 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.sidebar.title("⚙️ Filtros")
+st.sidebar.markdown(
+    """
+    <div class="sidebar-top-card">
+        <h3>⚙️ Control center</h3>
+        <p>Explora la base instalada, filtra la operación y navega el dashboard con una experiencia más ejecutiva y visual.</p>
+        <div class="sidebar-pill">Glass mode · active</div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 uploaded_file = st.sidebar.file_uploader("Sube el archivo Records List", type=["csv", "xlsx", "xls"])
 
 base_dir = Path(__file__).resolve().parent
@@ -2312,6 +2388,7 @@ if raw_df.empty:
 raw_df, CONFIG_KEYS = parse_machine_configuration(raw_df)
 raw_df = add_operating_system_columns(raw_df, CONFIG_KEYS)
 st.sidebar.caption(f"Fuente activa: {source_label}")
+st.sidebar.markdown('<div class="small-note">Usa los filtros como un panel de control para refinar región, país, distribuidor, instrumento y estado operativo.</div>', unsafe_allow_html=True)
 
 region_options = sorted(raw_df["Commercial Region"].dropna().unique().tolist())
 selected_regions = st.sidebar.multiselect("Región comercial", options=region_options, default=[], placeholder="Selecciona una o varias regiones")
