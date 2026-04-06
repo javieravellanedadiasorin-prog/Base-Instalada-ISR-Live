@@ -129,14 +129,14 @@ DANGER = "#ff5d8f"
 TEXT = "#f8fcff"
 MUTED = "rgba(238,245,255,0.92)"
 
-STRUCTURED_CONFIG_FIELDS = {
-    "In Blood Bank": "In Blood Bank",
-}
-
 CFG_LABEL_MAP = {
     "In Blood Bank": "Banco de sangre",
     "Operative System": "Sistema operativo",
     "PC Model": "Modelo de PC",
+}
+
+STRUCTURED_CFG_FIELDS = {
+    "In Blood Bank": "In Blood Bank",
 }
 
 APP_CSS = """
@@ -1068,7 +1068,7 @@ def _build_machine_config_summary(filtered_df: pd.DataFrame):
         count_non_null = int(non_null.shape[0])
         if count_non_null <= 0:
             continue
-        field_name = CFG_LABEL_MAP.get(col.replace('CFG::', ''), col.replace('CFG::', ''))
+        field_name = col.replace('CFG::', '')
         vc = non_null.astype(str).str.strip()
         vc = vc[vc != '']
         if vc.empty:
@@ -1202,14 +1202,18 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
     })
 
     cfg_pairs = [
-        ('Equipos con configuración', f"{max(int(filtered_df['Machine Configurations'].fillna('').astype(str).str.strip().ne('').sum()), int(filtered_df['CFG::In Blood Bank'].notna().sum()) if 'CFG::In Blood Bank' in filtered_df.columns else 0):,}"),
+        ('Equipos con configuración', f"{max([int(filtered_df[c].astype('string').str.strip().replace({'': pd.NA, 'nan': pd.NA, 'None': pd.NA, '<NA>': pd.NA}).notna().sum()) for c in filtered_df.columns if c.startswith('CFG::')] + [0]):,}"),
         ('Campos activos de configuración', f"{sum(int(filtered_df[c].notna().sum()) > 0 for c in filtered_df.columns if c.startswith('CFG::')):,}"),
         ('Promedio de campos poblados', f"{filtered_df.get('Machine config fields populated', pd.Series([0])).fillna(0).mean():.1f}"),
     ]
     cfg_cov, cfg_value_df, cfg_charts = _build_machine_config_summary(filtered_df)
+    if not cfg_cov.empty and 'Campo de configuración' in cfg_cov.columns:
+        cfg_cov['Campo de configuración'] = cfg_cov['Campo de configuración'].map(lambda x: CFG_LABEL_MAP.get(x, x))
+    if not cfg_value_df.empty and 'Campo de configuración' in cfg_value_df.columns:
+        cfg_value_df['Campo de configuración'] = cfg_value_df['Campo de configuración'].map(lambda x: CFG_LABEL_MAP.get(x, x))
     sections.append({
         'title': 'Configuración de equipo',
-        'intro': 'Se consolidan los campos detectados en Machine Configuration y se muestran las distribuciones de los ítems con mayor visibilidad en el filtro activo.',
+        'intro': 'Se consolidan los campos detectados en Machine Configuration y también los campos estructurados del archivo maestro, como banco de sangre, para mostrar la visibilidad real dentro del filtro activo.',
         'summary_pairs': cfg_pairs,
         'charts': [_make_pdf_barh(cfg_cov, 'Campo de configuración', 'Equipos con dato', 'Cobertura de campos de configuración', max_rows=10)] + cfg_charts,
         'table_title': 'Resumen de configuración de equipo',
@@ -1998,21 +2002,7 @@ def add_operating_system_columns(df: pd.DataFrame, config_cols: list[str]) -> pd
         df["Operating System Raw"] = pd.NA
         df["Operating System"] = pd.NA
 
-    normalized_config_cols = list(config_cols)
-
-    for source_col, cfg_name in STRUCTURED_CONFIG_FIELDS.items():
-        if source_col in df.columns:
-            normalized = (
-                df[source_col]
-                .astype("string")
-                .str.strip()
-                .replace({"": pd.NA, "nan": pd.NA, "None": pd.NA, "<NA>": pd.NA})
-            )
-            df[f"CFG::{cfg_name}"] = normalized
-            if cfg_name not in normalized_config_cols:
-                normalized_config_cols.append(cfg_name)
-
-    cfg_prefix_cols = [f"CFG::{c}" for c in normalized_config_cols if f"CFG::{c}" in df.columns]
+    cfg_prefix_cols = [f"CFG::{c}" for c in config_cols if f"CFG::{c}" in df.columns]
     df["Machine config fields populated"] = df[cfg_prefix_cols].notna().sum(axis=1) if cfg_prefix_cols else 0
     return df
 
@@ -2475,29 +2465,37 @@ def compare_stock(
 
 
 def active_config_fields(df: pd.DataFrame, config_keys: list[str]) -> list[str]:
-    active = []
-    seen = set()
+    ordered_fields = []
 
-    for key in list(config_keys) + list(STRUCTURED_CONFIG_FIELDS.values()):
+    for key in config_keys:
         col = f"CFG::{key}"
         if col in df.columns:
-            series = df[col]
-            has_value = series.astype("string").str.strip().replace({"": pd.NA, "<NA>": pd.NA}).notna().any()
-            if has_value and key not in seen:
-                active.append(key)
-                seen.add(key)
+            ordered_fields.append(key)
 
-    extra_cfg_keys = sorted([c.replace("CFG::", "") for c in df.columns if c.startswith("CFG::")])
-    for key in extra_cfg_keys:
-        if key in seen:
-            continue
+    for key in STRUCTURED_CFG_FIELDS.values():
         col = f"CFG::{key}"
+        if col in df.columns and key not in ordered_fields:
+            ordered_fields.append(key)
+
+    for col in df.columns:
+        if col.startswith("CFG::"):
+            key = col.replace("CFG::", "")
+            if key not in ordered_fields:
+                ordered_fields.append(key)
+
+    active = []
+    for key in ordered_fields:
+        col = f"CFG::{key}"
+        if col not in df.columns:
+            continue
         series = df[col]
-        has_value = series.astype("string").str.strip().replace({"": pd.NA, "<NA>": pd.NA}).notna().any()
+        has_value = (
+            series.notna()
+            & series.astype("string").str.strip().ne("")
+            & ~series.astype("string").str.strip().str.lower().isin(["nan", "none", "<na>"])
+        ).any()
         if has_value:
             active.append(key)
-            seen.add(key)
-
     return active
 
 
@@ -2857,30 +2855,42 @@ with base_tab:
 with machine_tab:
     st.subheader("Machine configuration")
     st.caption("Vista ejecutiva por ítem de configuración, con gráficas separadas para cada campo aplicable y mayor lectura visual del comportamiento de la base instalada.")
+
     applicable_fields = active_config_fields(filtered, CONFIG_KEYS)
-    cfg_cols_prefixed = [f"CFG::{col}" for col in applicable_fields]
+    cfg_cols_prefixed = [f"CFG::{col}" for col in applicable_fields if f"CFG::{col}" in filtered.columns]
 
     if not cfg_cols_prefixed:
         st.info("No se detectaron campos aplicables dentro de Machine Configurations para el filtro actual.")
     else:
-        assets_with_cfg = int(filtered["Machine Configurations"].fillna("").astype(str).str.strip().ne("").sum())
-        if "CFG::In Blood Bank" in filtered.columns:
-            assets_with_cfg = max(assets_with_cfg, int(filtered["CFG::In Blood Bank"].notna().sum()))
-        avg_cfg_fields = filtered["Machine config fields populated"].mean()
-        unique_cfg_fields = len(applicable_fields)
+        assets_with_cfg = 0
+        for col in cfg_cols_prefixed:
+            series = filtered[col].astype("string").str.strip()
+            assets_with_cfg = max(assets_with_cfg, int((series.ne("") & ~series.isin(["<NA>", "nan", "None"])).sum()))
+
+        avg_cfg_fields = filtered[ cfg_cols_prefixed ].astype("string").apply(lambda s: s.str.strip().replace({"": pd.NA, "nan": pd.NA, "None": pd.NA, "<NA>": pd.NA})).notna().sum(axis=1).mean() if cfg_cols_prefixed else 0
+        unique_cfg_fields = len(cfg_cols_prefixed)
 
         mc1, mc2, mc3 = st.columns(3)
         with mc1:
-            metric_card("Equipos con config", f"{assets_with_cfg:,}", "Con información en Machine Configurations")
+            metric_card("Equipos con config", f"{assets_with_cfg:,}", "Incluye campos estructurados como banco de sangre")
         with mc2:
-            metric_card("Campos aplicables", f"{unique_cfg_fields}", "Solo ítems presentes en el filtro actual")
+            metric_card("Campos aplicables", f"{unique_cfg_fields}", "Solo ítems con datos en el filtro actual")
         with mc3:
             metric_card("Promedio de campos", f"{avg_cfg_fields:.1f}", "Campos poblados por equipo")
 
-        coverage_df = pd.DataFrame(
-            [{"Config field": CFG_LABEL_MAP.get(col.replace("CFG::", ""), col.replace("CFG::", "")), "Populated assets": int(filtered[col].astype("string").str.strip().replace({"": pd.NA, "<NA>": pd.NA}).notna().sum())} for col in cfg_cols_prefixed]
-        )
-        coverage_df = coverage_df[coverage_df["Populated assets"] > 0].sort_values("Populated assets", ascending=False)
+        coverage_rows = []
+        for col in cfg_cols_prefixed:
+            series = filtered[col].astype("string").str.strip().replace({"": pd.NA, "nan": pd.NA, "None": pd.NA, "<NA>": pd.NA})
+            populated = int(series.notna().sum())
+            if populated > 0:
+                raw_name = col.replace("CFG::", "")
+                coverage_rows.append({
+                    "Config field": CFG_LABEL_MAP.get(raw_name, raw_name),
+                    "Raw field": raw_name,
+                    "Populated assets": populated,
+                })
+
+        coverage_df = pd.DataFrame(coverage_rows).sort_values("Populated assets", ascending=False)
 
         fig_cfg_fill = px.bar(
             coverage_df,
@@ -2904,15 +2914,13 @@ with machine_tab:
             unsafe_allow_html=True,
         )
 
-        donut_fields = applicable_fields
+        donut_fields = coverage_df["Raw field"].tolist()
         if donut_fields:
             for idx in range(0, len(donut_fields), 3):
                 cols = st.columns(3)
                 for col_ui, field_name in zip(cols, donut_fields[idx:idx + 3]):
                     selected_cfg_col = f"CFG::{field_name}"
-                    item_series = filtered[selected_cfg_col].dropna()
-                    item_series = item_series.astype(str).str.strip()
-                    item_series = item_series[item_series.ne("")]
+                    item_series = filtered[selected_cfg_col].astype("string").str.strip().replace({"": pd.NA, "nan": pd.NA, "None": pd.NA, "<NA>": pd.NA}).dropna()
                     total_assets = int(item_series.shape[0])
                     with col_ui:
                         st.plotly_chart(build_config_donut(CFG_LABEL_MAP.get(field_name, field_name), item_series, total_assets), use_container_width=True)
@@ -2921,8 +2929,7 @@ with machine_tab:
         detail_rows = []
         for field_name in donut_fields:
             selected_cfg_col = f"CFG::{field_name}"
-            item_series = filtered[selected_cfg_col].dropna().astype(str).str.strip()
-            item_series = item_series[item_series.ne("")]
+            item_series = filtered[selected_cfg_col].astype("string").str.strip().replace({"": pd.NA, "nan": pd.NA, "None": pd.NA, "<NA>": pd.NA}).dropna()
             if item_series.empty:
                 continue
             dist = item_series.value_counts().reset_index()
@@ -2952,7 +2959,8 @@ with machine_tab:
                 "Operating System",
                 "Operational status",
             ] + [f"CFG::{field}" for field in donut_fields]
-            machine_table = filtered[detail_columns].copy().rename(columns={f"CFG::{field}": CFG_LABEL_MAP.get(field, field) for field in donut_fields})
+            rename_map = {f"CFG::{field}": CFG_LABEL_MAP.get(field, field) for field in donut_fields}
+            machine_table = filtered[detail_columns].copy().rename(columns=rename_map)
             st.dataframe(machine_table, use_container_width=True, hide_index=True)
 
 with os_tab:
@@ -3733,7 +3741,7 @@ with detail_tab:
     applicable_row_fields = []
     for key in active_config_fields(detail_df.loc[[row.name]], CONFIG_KEYS):
         col = f"CFG::{key}"
-        applicable_row_fields.append({"Campo": key, "Valor": safe_text(row.get(col), "N/A")})
+        applicable_row_fields.append({"Campo": CFG_LABEL_MAP.get(key, key), "Valor": safe_text(row.get(col), "N/A")})
 
     if applicable_row_fields:
         st.markdown("### Machine configuration del equipo")
