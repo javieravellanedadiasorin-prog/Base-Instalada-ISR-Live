@@ -119,37 +119,40 @@ CUSTOM_HEADERS = [
 ASSAY_COLS = CUSTOM_HEADERS[28:-1]
 
 PLOT_TEMPLATE = "plotly_dark"
-PLOT_BG = "rgba(6, 10, 20, 0.10)"
-GRID = "rgba(151, 214, 255, 0.10)"
+PLOT_BG = "rgba(12, 19, 30, 0.02)"
+GRID = "rgba(170, 224, 255, 0.10)"
 ACCENT = "#56d8ff"
 ACCENT_2 = "#8fa8ff"
 ACCENT_3 = "#59f0d0"
 WARNING = "#ffb454"
 DANGER = "#ff5d8f"
-TEXT = "#f7fbff"
-MUTED = "rgba(231,240,252,0.90)"
+TEXT = "#f8fcff"
+MUTED = "rgba(238,245,255,0.92)"
 
 APP_CSS = """
 <style>
 :root {
-    --bg-1: #060b14;
-    --bg-2: #09101b;
-    --bg-3: #0d1624;
-    --panel: rgba(18, 28, 44, 0.62);
-    --panel-strong: rgba(20, 30, 48, 0.78);
-    --panel-soft: rgba(255, 255, 255, 0.05);
-    --stroke: rgba(189, 227, 255, 0.18);
-    --stroke-2: rgba(255, 255, 255, 0.12);
-    --txt: #f6fbff;
-    --txt-soft: rgba(234, 244, 255, 0.92);
-    --muted: rgba(198, 214, 232, 0.78);
-    --cyan: #69d9ff;
-    --cyan-2: #2fc1ff;
-    --blue: #88a5ff;
-    --mint: #52efcf;
-    --amber: #ffb84f;
-    --danger: #ff6b88;
-    --shadow: rgba(0, 0, 0, 0.34);
+    --bg-1: #050912;
+    --bg-2: #08111b;
+    --bg-3: #0a1622;
+    --panel: rgba(28, 42, 64, 0.34);
+    --panel-strong: rgba(34, 50, 76, 0.46);
+    --panel-soft: rgba(255, 255, 255, 0.06);
+    --glass-white: rgba(255,255,255,0.12);
+    --stroke: rgba(205, 232, 255, 0.22);
+    --stroke-2: rgba(255, 255, 255, 0.10);
+    --txt: #f8fcff;
+    --txt-strong: #ffffff;
+    --txt-soft: rgba(241, 248, 255, 0.96);
+    --muted: rgba(214, 228, 245, 0.82);
+    --cyan: #71e1ff;
+    --cyan-2: #35c8ff;
+    --cyan-3: #8de8ff;
+    --blue: #8ea9ff;
+    --mint: #58efd1;
+    --amber: #ffbe57;
+    --danger: #ff6a8c;
+    --shadow: rgba(0, 0, 0, 0.36);
 }
 
 html, body, [class*="css"] {
@@ -158,11 +161,11 @@ html, body, [class*="css"] {
 
 .stApp {
     background:
-        radial-gradient(circle at 15% 18%, rgba(116, 215, 255, 0.14), transparent 15%),
-        radial-gradient(circle at 80% 12%, rgba(255,255,255,0.08), transparent 14%),
-        radial-gradient(circle at 80% 72%, rgba(82,239,207,0.08), transparent 18%),
-        radial-gradient(circle at 26% 82%, rgba(136,165,255,0.10), transparent 18%),
-        linear-gradient(180deg, #060b14 0%, #09101b 18%, #0d1624 44%, #0a1220 72%, #070c15 100%);
+        radial-gradient(circle at 12% 18%, rgba(133, 214, 255, 0.16), transparent 16%),
+        radial-gradient(circle at 78% 10%, rgba(255,255,255,0.11), transparent 16%),
+        radial-gradient(circle at 80% 78%, rgba(103, 229, 255, 0.08), transparent 18%),
+        radial-gradient(circle at 30% 82%, rgba(122, 148, 255, 0.10), transparent 20%),
+        linear-gradient(180deg, #040912 0%, #07101a 18%, #0a1520 44%, #08111a 72%, #060b12 100%);
     background-attachment: fixed;
     color: var(--txt);
 }
@@ -173,130 +176,58 @@ html, body, [class*="css"] {
     inset: 0;
     pointer-events: none;
     background:
-        linear-gradient(180deg, rgba(255,255,255,0.03), transparent 25%, transparent 75%, rgba(255,255,255,0.02)),
-        radial-gradient(circle at 50% -5%, rgba(255,255,255,0.08), transparent 20%),
-        radial-gradient(circle at 50% 45%, rgba(105,217,255,0.05), transparent 26%);
+        linear-gradient(180deg, rgba(255,255,255,0.025), transparent 18%, transparent 82%, rgba(255,255,255,0.02)),
+        radial-gradient(circle at 50% 0%, rgba(255,255,255,0.08), transparent 18%),
+        radial-gradient(circle at 55% 45%, rgba(113,225,255,0.05), transparent 26%);
     z-index: 0;
 }
 
 .block-container {
     position: relative;
     z-index: 1;
-    padding-top: 0.9rem;
+    padding-top: 0.85rem;
     padding-bottom: 2rem;
     max-width: 98rem;
 }
 
 section[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.04) 100%);
-    border-right: 1px solid rgba(188, 226, 255, 0.14);
+    background:
+        linear-gradient(180deg, rgba(28, 42, 64, 0.28) 0%, rgba(20, 32, 50, 0.36) 100%);
+    border-right: 1px solid rgba(255,255,255,0.08);
+    backdrop-filter: blur(22px);
+    -webkit-backdrop-filter: blur(22px);
     box-shadow:
-        inset 1px 1px 0 rgba(255,255,255,0.08),
-        16px 0 36px rgba(0, 0, 0, 0.22);
-    backdrop-filter: blur(26px);
-    -webkit-backdrop-filter: blur(26px);
+        inset -1px 0 0 rgba(255,255,255,0.05),
+        10px 0 28px rgba(0, 0, 0, 0.18);
 }
 
 section[data-testid="stSidebar"] > div {
     background: transparent;
-    padding-top: 0.35rem;
 }
 
-section[data-testid="stSidebar"] h1,
-section[data-testid="stSidebar"] h2,
-section[data-testid="stSidebar"] h3,
-section[data-testid="stSidebar"] label,
+section[data-testid="stSidebar"] .stMarkdown,
 section[data-testid="stSidebar"] p,
+section[data-testid="stSidebar"] label,
 section[data-testid="stSidebar"] span,
 section[data-testid="stSidebar"] div {
-    color: var(--txt) !important;
-}
-
-.sidebar-top-card {
-    position: relative;
-    overflow: hidden;
-    padding: 1.1rem 1rem 1rem 1rem;
-    border-radius: 24px;
-    margin-bottom: 0.9rem;
-    background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03));
-    border: 1px solid rgba(188, 226, 255, 0.15);
-    box-shadow:
-        0 14px 32px rgba(0, 0, 0, 0.18),
-        inset 0 1px 0 rgba(255,255,255,0.12),
-        0 0 26px rgba(105,217,255,0.05);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-}
-
-.sidebar-top-card::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    background: linear-gradient(135deg, rgba(255,255,255,0.12), transparent 28%, rgba(105,217,255,0.08) 68%, transparent 100%);
-}
-
-.sidebar-top-card h3 {
-    margin: 0 0 0.3rem 0;
-    font-size: 1rem;
-    font-weight: 700;
-    color: #ffffff;
-    text-shadow: 0 0 12px rgba(105,217,255,0.18);
-}
-
-.sidebar-top-card p {
-    margin: 0;
-    font-size: 0.84rem;
-    color: var(--txt-soft);
-    line-height: 1.45;
-}
-
-.sidebar-pill {
-    margin-top: 0.72rem;
-    display: inline-block;
-    padding: 0.34rem 0.84rem;
-    border-radius: 999px;
-    font-size: 0.72rem;
-    color: #f9fdff;
-    background: linear-gradient(180deg, rgba(105,217,255,0.20), rgba(47,193,255,0.10));
-    border: 1px solid rgba(188, 226, 255, 0.18);
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.12), 0 0 16px rgba(105,217,255,0.08);
-}
-
-section[data-testid="stSidebar"] .stTextInput input,
-section[data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] > div,
-section[data-testid="stSidebar"] .stMultiSelect div[data-baseweb="select"] > div,
-section[data-testid="stSidebar"] .stFileUploader section,
-.stTextInput input,
-.stNumberInput input,
-.stDateInput input,
-.stTextArea textarea,
-.stSelectbox div[data-baseweb="select"] > div,
-.stMultiSelect div[data-baseweb="select"] > div {
-    background: rgba(12, 20, 33, 0.58) !important;
-    border: 1px solid rgba(188, 226, 255, 0.14) !important;
-    border-radius: 18px !important;
-    color: #f6fbff !important;
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 10px 24px rgba(0,0,0,0.10);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-}
-
-.stTextInput input::placeholder,
-.stTextArea textarea::placeholder {
-    color: rgba(230, 239, 250, 0.52) !important;
+    color: var(--txt-soft) !important;
+    text-shadow: 0 0 6px rgba(74, 203, 255, 0.08);
 }
 
 .hero {
     position: relative;
     overflow: hidden;
-    padding: 1.35rem 1.55rem 1.2rem 1.55rem;
-    border-radius: 30px;
-    border: 1px solid rgba(194, 230, 255, 0.15);
-    background: linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.03) 100%);
-    backdrop-filter: blur(26px);
-    -webkit-backdrop-filter: blur(26px);
-    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255,255,255,0.12), 0 0 28px rgba(105,217,255,0.04);
+    padding: 1.2rem 1.45rem;
+    border-radius: 28px;
+    border: 1px solid rgba(255,255,255,0.16);
+    background:
+        linear-gradient(180deg, rgba(198, 223, 255, 0.13) 0%, rgba(72, 101, 145, 0.10) 18%, rgba(25, 38, 58, 0.18) 100%);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    box-shadow:
+        0 16px 40px rgba(0, 0, 0, 0.24),
+        inset 0 1px 0 rgba(255,255,255,0.22),
+        inset 0 -1px 0 rgba(255,255,255,0.03);
     margin-bottom: 1rem;
 }
 
@@ -306,193 +237,266 @@ section[data-testid="stSidebar"] .stFileUploader section,
     inset: 0;
     pointer-events: none;
     background:
-        radial-gradient(circle at 16% 14%, rgba(255,255,255,0.10), transparent 14%),
-        linear-gradient(125deg, rgba(105,217,255,0.06), transparent 36%, rgba(136,165,255,0.05) 78%, transparent 100%);
-}
-
-.hero-top {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-    margin-bottom: 0.75rem;
-}
-
-.hero-brand {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-}
-
-.brand-chip {
-    padding: 0.5rem 0.9rem;
-    border-radius: 16px;
-    border: 1px solid rgba(188, 226, 255, 0.14);
-    background: rgba(255,255,255,0.04);
-    font-weight: 700;
-    letter-spacing: 0.16em;
-    color: #dff7ff;
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 0 20px rgba(105,217,255,0.06);
-}
-
-.workspace-chip {
-    padding: 0.55rem 0.95rem;
-    border-radius: 16px;
-    border: 1px solid rgba(188, 226, 255, 0.12);
-    background: rgba(255,255,255,0.04);
-    color: var(--txt-soft);
-    font-size: 0.86rem;
+        linear-gradient(180deg, rgba(255,255,255,0.10), transparent 28%),
+        radial-gradient(circle at 18% 12%, rgba(255,255,255,0.18), transparent 16%),
+        radial-gradient(circle at 72% 12%, rgba(113,225,255,0.08), transparent 20%);
 }
 
 .hero h1 {
     margin: 0;
-    font-size: 2.15rem;
-    letter-spacing: 0.01em;
-    color: #ffffff;
-    text-shadow: 0 0 6px rgba(255,255,255,0.16), 0 0 18px rgba(105,217,255,0.14), 0 2px 12px rgba(0,0,0,0.35);
-}
-
-.hero p,
-.section-title,
-.map-note,
-.small-note,
-.metric-sub,
-.stCaptionContainer,
-[data-testid="stMarkdownContainer"] p,
-.stMarkdown p,
-label,
-span,
-div {
-    color: var(--txt-soft);
+    font-size: 2.2rem;
+    line-height: 1.05;
+    letter-spacing: 0.02em;
+    color: #f9fdff !important;
+    text-shadow:
+        0 0 6px rgba(146, 235, 255, 0.34),
+        0 0 18px rgba(58, 199, 255, 0.18);
 }
 
 .hero p {
-    margin: 0.42rem 0 0 0;
-    max-width: 64rem;
-    font-size: 0.98rem;
-    font-weight: 500;
+    margin: 0.45rem 0 0 0;
+    color: rgba(239,247,255,0.88) !important;
+    font-size: 1rem;
+    text-shadow: 0 0 8px rgba(83, 205, 255, 0.12);
 }
 
 .badge-row {
     display: flex;
     flex-wrap: wrap;
     gap: 0.55rem;
-    margin-top: 0.9rem;
+    margin-top: 0.85rem;
 }
 
 .badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    padding: 0.36rem 0.84rem;
+    padding: 0.35rem 0.75rem;
     border-radius: 999px;
-    font-size: 0.76rem;
-    color: #f7fbff;
-    background: linear-gradient(180deg, rgba(105,217,255,0.14), rgba(255,255,255,0.03));
-    border: 1px solid rgba(188, 226, 255, 0.14);
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 0 14px rgba(105,217,255,0.05);
+    font-size: 0.77rem;
+    color: #f8fcff;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.14);
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.14),
+        0 0 12px rgba(83,205,255,0.08);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
 }
 
 .metric-shell,
-div[data-testid="stMetric"],
-.map-shell,
-div[data-testid="stDataFrame"],
-div[data-testid="stTable"],
-div[data-testid="stPlotlyChart"] {
-    border-radius: 26px;
+div[data-testid="stMetric"] {
+    position: relative;
     overflow: hidden;
-    background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03));
-    border: 1px solid rgba(188, 226, 255, 0.12);
-    box-shadow: 0 14px 32px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255,255,255,0.10);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
+    border-radius: 22px !important;
+    background:
+        linear-gradient(180deg, rgba(181, 214, 255, 0.12) 0%, rgba(25, 38, 58, 0.22) 20%, rgba(18, 28, 44, 0.28) 100%) !important;
+    border: 1px solid rgba(255,255,255,0.14) !important;
+    backdrop-filter: blur(22px);
+    -webkit-backdrop-filter: blur(22px);
+    box-shadow:
+        0 12px 28px rgba(0,0,0,0.22),
+        inset 0 1px 0 rgba(255,255,255,0.18);
 }
 
 .metric-shell {
     padding: 0.95rem 1rem;
-    min-height: 116px;
+    min-height: 118px;
+}
+
+.metric-shell::before,
+div[data-testid="stMetric"]::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+        linear-gradient(180deg, rgba(255,255,255,0.08), transparent 24%),
+        radial-gradient(circle at 18% 0%, rgba(255,255,255,0.12), transparent 18%);
 }
 
 .metric-label {
     font-size: 0.78rem;
-    color: rgba(219, 233, 249, 0.75);
     text-transform: uppercase;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.1em;
+    color: rgba(229,243,255,0.78) !important;
+    text-shadow: 0 0 8px rgba(77, 204, 255, 0.10);
 }
 
 .metric-value {
     font-size: 1.95rem;
     font-weight: 700;
-    margin-top: 0.2rem;
-    color: #ffffff;
-    text-shadow: 0 0 16px rgba(105,217,255,0.10);
+    margin-top: 0.22rem;
+    color: #ffffff !important;
+    text-shadow:
+        0 0 8px rgba(115,228,255,0.24),
+        0 0 18px rgba(53,200,255,0.14);
 }
 
 .metric-sub {
-    margin-top: 0.25rem;
+    margin-top: 0.2rem;
     font-size: 0.86rem;
-    color: var(--txt-soft);
+    color: rgba(235,245,255,0.88) !important;
 }
 
 .stTabs [data-baseweb="tab-list"] {
     gap: 0.55rem;
-    padding: 0.22rem;
-    background: rgba(255,255,255,0.05);
+    padding: 0.28rem;
+    background: rgba(255,255,255,0.04);
     border-radius: 18px;
-    border: 1px solid rgba(188, 226, 255, 0.12);
+    border: 1px solid rgba(255,255,255,0.10);
     backdrop-filter: blur(14px);
     -webkit-backdrop-filter: blur(14px);
 }
 
 .stTabs [data-baseweb="tab"] {
     border-radius: 14px;
-    background: rgba(255,255,255,0.03);
     padding: 0.52rem 0.92rem;
-    color: var(--txt-soft);
+    background: rgba(255,255,255,0.03);
+    color: rgba(238,247,255,0.88);
     border: 1px solid transparent;
+    transition: all 0.2s ease;
+    text-shadow: 0 0 8px rgba(53,200,255,0.10);
 }
 
 .stTabs [data-baseweb="tab"]:hover {
     background: rgba(255,255,255,0.07);
-    border-color: rgba(188, 226, 255, 0.12);
+    border-color: rgba(255,255,255,0.10);
 }
 
 .stTabs [aria-selected="true"] {
-    background: linear-gradient(180deg, rgba(105,217,255,0.20), rgba(47,193,255,0.10)) !important;
-    border: 1px solid rgba(188, 226, 255, 0.18) !important;
+    background:
+        linear-gradient(180deg, rgba(129, 212, 255, 0.18), rgba(54, 93, 150, 0.14)) !important;
+    border: 1px solid rgba(119, 221, 255, 0.36) !important;
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.18),
+        0 0 18px rgba(53,200,255,0.16) !important;
     color: #ffffff !important;
-    box-shadow: 0 0 16px rgba(105,217,255,0.08), inset 0 1px 0 rgba(255,255,255,0.10);
+    text-shadow:
+        0 0 8px rgba(136,234,255,0.34),
+        0 0 16px rgba(53,200,255,0.18);
+}
+
+div[data-testid="stPlotlyChart"],
+div[data-testid="stDataFrame"],
+div[data-testid="stTable"],
+div[data-testid="stExpander"],
+div[data-testid="stForm"] {
+    border-radius: 26px;
+    overflow: hidden;
+    background:
+        linear-gradient(180deg, rgba(193, 221, 255, 0.10) 0%, rgba(24, 36, 54, 0.18) 18%, rgba(17, 27, 42, 0.24) 100%);
+    border: 1px solid rgba(255,255,255,0.12);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    box-shadow:
+        0 12px 30px rgba(0,0,0,0.20),
+        inset 0 1px 0 rgba(255,255,255,0.12);
+}
+
+div[data-testid="stPlotlyChart"] {
+    padding: 0.24rem;
+}
+
+div[data-testid="stDataFrame"] table,
+div[data-testid="stTable"] table {
+    color: #f8fcff !important;
 }
 
 .stButton > button,
 .stDownloadButton > button {
     border-radius: 16px;
-    border: 1px solid rgba(188, 226, 255, 0.16);
-    background: linear-gradient(180deg, rgba(105,217,255,0.22), rgba(47,193,255,0.10));
-    color: white;
+    border: 1px solid rgba(137, 228, 255, 0.34);
+    background:
+        linear-gradient(180deg, rgba(114, 214, 255, 0.20), rgba(52, 94, 145, 0.18));
+    color: #ffffff !important;
     font-weight: 600;
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 0 18px rgba(105,217,255,0.08);
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.18),
+        0 0 18px rgba(53,200,255,0.12);
+    text-shadow: 0 0 8px rgba(110, 227, 255, 0.22);
 }
 
 .stButton > button:hover,
 .stDownloadButton > button:hover {
-    border-color: rgba(188, 226, 255, 0.22);
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.12), 0 0 22px rgba(105,217,255,0.10);
+    border-color: rgba(160, 237, 255, 0.44);
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.22),
+        0 0 22px rgba(53,200,255,0.18);
+    transform: translateY(-1px);
 }
 
-h1, h2, h3, h4, h5, h6 {
+.stTextInput input,
+.stNumberInput input,
+.stDateInput input,
+.stTextArea textarea,
+.stSelectbox div[data-baseweb="select"] > div,
+.stMultiSelect div[data-baseweb="select"] > div {
+    background: rgba(255,255,255,0.08) !important;
+    border: 1px solid rgba(255,255,255,0.12) !important;
+    border-radius: 15px !important;
     color: #ffffff !important;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
 }
 
-.small-note {
-    color: var(--muted);
-    font-size: 0.88rem;
+.stTextInput input::placeholder,
+.stTextArea textarea::placeholder {
+    color: rgba(235,245,255,0.54) !important;
+}
+
+h1, h2, h3, h4, h5, h6,
+div[data-testid="stMarkdownContainer"] h1,
+div[data-testid="stMarkdownContainer"] h2,
+div[data-testid="stMarkdownContainer"] h3,
+div[data-testid="stMarkdownContainer"] h4 {
+    color: #fbfdff !important;
+    letter-spacing: 0.01em;
+    text-shadow:
+        0 0 8px rgba(140, 235, 255, 0.30),
+        0 0 20px rgba(53,200,255,0.14);
+}
+
+h2 {
+    font-size: 1.9rem !important;
+    font-weight: 700 !important;
+}
+
+h3 {
+    font-size: 1.35rem !important;
+    font-weight: 700 !important;
+}
+
+p, label, span, div {
+    color: var(--txt-soft);
+}
+
+div[data-testid="stCaptionContainer"],
+.small-note,
+.stCaption,
+small {
+    color: rgba(231,243,255,0.84) !important;
+    text-shadow: 0 0 8px rgba(53,200,255,0.08);
 }
 
 hr {
     border: none;
     height: 1px;
-    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.14), transparent);
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.18), transparent);
+}
+
+[data-testid="stSidebar"] .stFileUploader,
+[data-testid="stSidebar"] .stSelectbox,
+[data-testid="stSidebar"] .stMultiSelect {
+    background: rgba(255,255,255,0.04);
+    border-radius: 18px;
+}
+
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h1,
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h2,
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h3 {
+    color: #fafdff !important;
+    text-shadow:
+        0 0 8px rgba(140,235,255,0.30),
+        0 0 18px rgba(53,200,255,0.16);
 }
 </style>
 """
