@@ -126,8 +126,8 @@ ACCENT_2 = "#90a8ff"
 ACCENT_3 = "#6df2d2"
 WARNING = "#ffb454"
 DANGER = "#ff5d8f"
-TEXT = "#f7fbff"
-MUTED = "rgba(242,247,252,0.82)"
+TEXT = "#ffffff"
+MUTED = "rgba(255,255,255,0.92)"
 
 APP_CSS = """
 <style>
@@ -301,13 +301,15 @@ section[data-testid="stSidebar"] .stFileUploader section {
     font-size: 2.25rem;
     letter-spacing: 0.01em;
     color: #ffffff;
-    text-shadow: 0 0 14px rgba(255,255,255,0.10);
+    text-shadow: 0 2px 10px rgba(33,56,86,0.22), 0 0 18px rgba(255,255,255,0.14);
 }
 
 .hero p {
     margin: 0.45rem 0 0 0;
-    color: var(--muted);
+    color: rgba(255,255,255,0.97);
     font-size: 1rem;
+    font-weight: 500;
+    text-shadow: 0 1px 8px rgba(35,55,82,0.18);
     max-width: 62rem;
 }
 
@@ -367,9 +369,10 @@ section[data-testid="stSidebar"] .stFileUploader section {
 
 .metric-label {
     font-size: 0.76rem;
-    color: var(--muted);
+    color: rgba(255,255,255,0.90);
     text-transform: uppercase;
     letter-spacing: 0.08em;
+    text-shadow: 0 1px 6px rgba(35,55,82,0.16);
 }
 
 .metric-value {
@@ -382,7 +385,8 @@ section[data-testid="stSidebar"] .stFileUploader section {
 .metric-sub {
     margin-top: 0.22rem;
     font-size: 0.86rem;
-    color: var(--txt-soft);
+    color: rgba(255,255,255,0.94);
+    text-shadow: 0 1px 6px rgba(35,55,82,0.16);
 }
 
 .stTabs [data-baseweb="tab-list"] {
@@ -492,12 +496,14 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 p, label, span, div {
-    color: var(--txt-soft);
+    color: rgba(255,255,255,0.96);
 }
 
 .small-note {
-    color: var(--muted);
+    color: rgba(255,255,255,0.96);
     font-size: 0.88rem;
+    font-weight: 500;
+    text-shadow: 0 1px 6px rgba(35,55,82,0.16);
 }
 
 hr {
@@ -521,14 +527,17 @@ hr {
 
 .section-title {
     font-size: 1.05rem;
-    font-weight: 700;
+    font-weight: 800;
     color: #ffffff;
+    text-shadow: 0 1px 8px rgba(33,56,86,0.18);
     margin-bottom: 0.2rem;
 }
 
 .section-subtitle {
     font-size: 0.88rem;
-    color: rgba(245,249,255,0.72);
+    color: rgba(255,255,255,0.94);
+    font-weight: 500;
+    text-shadow: 0 1px 6px rgba(35,55,82,0.16);
     margin-bottom: 0.65rem;
 }
 
@@ -548,13 +557,17 @@ hr {
 .map-note {
     margin-top: -0.1rem;
     margin-bottom: 0.6rem;
-    color: rgba(245,249,255,0.72);
+    color: rgba(255,255,255,0.95);
     font-size: 0.84rem;
+    font-weight: 500;
+    text-shadow: 0 1px 6px rgba(35,55,82,0.16);
 }
 
 .config-grid-note {
-    color: rgba(245,249,255,0.72);
+    color: rgba(255,255,255,0.95);
     font-size: 0.86rem;
+    font-weight: 500;
+    text-shadow: 0 1px 6px rgba(35,55,82,0.16);
     margin-bottom: 0.8rem;
 }
 
@@ -579,7 +592,7 @@ def glow_layout(fig: go.Figure, height: int = 420, title_size: int = 18) -> go.F
             bgcolor="rgba(255,255,255,0.06)",
             bordercolor="rgba(255,255,255,0.14)",
             borderwidth=1,
-            font=dict(color=TEXT, size=11),
+            font=dict(color=TEXT, size=12),
         ),
         font=dict(color=TEXT),
         title_font=dict(size=title_size, color=TEXT),
@@ -2559,8 +2572,8 @@ with base_tab:
         )
         fig_geo.update_geos(
             projection_type="mollweide",
-            projection_scale=0.96,
-            center=dict(lat=4, lon=-52),
+            projection_scale=0.90,
+            center=dict(lat=8, lon=0),
             showframe=False,
             bgcolor="rgba(255,255,255,0)",
             showocean=True,
@@ -2581,7 +2594,7 @@ with base_tab:
             lonaxis_gridcolor="rgba(255,255,255,0.05)",
             lataxis_dtick=15,
             lonaxis_dtick=30,
-            domain=dict(x=[0.06, 0.94], y=[0.12, 0.88]),
+            domain=dict(x=[0.10, 0.90], y=[0.14, 0.86]),
         )
         fig_geo.update_layout(
             paper_bgcolor=PLOT_BG,
