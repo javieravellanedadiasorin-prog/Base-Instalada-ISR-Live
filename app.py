@@ -119,15 +119,15 @@ CUSTOM_HEADERS = [
 ASSAY_COLS = CUSTOM_HEADERS[28:-1]
 
 PLOT_TEMPLATE = "plotly_white"
-PLOT_BG = "rgba(255,255,255,0.03)"
-GRID = "rgba(95, 120, 150, 0.12)"
+PLOT_BG = "rgba(10, 20, 36, 0.12)"
+GRID = "rgba(175, 215, 255, 0.12)"
 ACCENT = "#61d7ff"
 ACCENT_2 = "#90a8ff"
 ACCENT_3 = "#6df2d2"
 WARNING = "#ffb454"
 DANGER = "#ff5d8f"
 TEXT = "#ffffff"
-MUTED = "rgba(255,255,255,0.92)"
+MUTED = "rgba(245,250,255,0.96)"
 
 APP_CSS = """
 <style>
@@ -571,6 +571,81 @@ hr {
     margin-bottom: 0.8rem;
 }
 
+
+.hero h1, h1, h2, h3, h4, h5, h6, .section-title, .metric-value, .metric-label, .metric-sub, .map-note, .small-note,
+section[data-testid="stSidebar"] label,
+section[data-testid="stSidebar"] p,
+section[data-testid="stSidebar"] span,
+section[data-testid="stSidebar"] div,
+.stMarkdown p,
+.stCaptionContainer,
+[data-testid="stMarkdownContainer"] p {
+    color: #fdfefe !important;
+    text-shadow:
+        0 0 8px rgba(255,255,255,0.22),
+        0 0 18px rgba(111,220,255,0.14),
+        0 2px 10px rgba(20,35,54,0.24) !important;
+}
+
+.hero h1, .section-title, h1, h2, h3 {
+    letter-spacing: 0.01em;
+}
+
+.section-title {
+    color: #ffffff !important;
+    font-weight: 800 !important;
+}
+
+.map-note, .small-note, .hero p, .metric-sub {
+    color: rgba(249,252,255,0.96) !important;
+}
+
+section[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, rgba(255,255,255,0.20) 0%, rgba(255,255,255,0.10) 100%) !important;
+}
+
+.sidebar-top-card {
+    background: linear-gradient(180deg, rgba(255,255,255,0.22), rgba(255,255,255,0.12)) !important;
+    box-shadow:
+        0 16px 34px rgba(31, 49, 73, 0.12),
+        inset 0 1px 0 rgba(255,255,255,0.28),
+        0 0 22px rgba(114,220,255,0.08) !important;
+}
+
+.sidebar-pill, .badge {
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.30),
+        0 0 16px rgba(95,205,255,0.12) !important;
+}
+
+.metric-shell, div[data-testid="stMetric"], .map-shell, div[data-testid="stDataFrame"], div[data-testid="stTable"], div[data-testid="stPlotlyChart"] {
+    border: 1px solid rgba(185,235,255,0.24) !important;
+    box-shadow:
+        0 14px 34px rgba(40, 58, 84, 0.12),
+        inset 0 1px 0 rgba(255,255,255,0.18),
+        0 0 26px rgba(95,205,255,0.07) !important;
+}
+
+div[data-testid="stPlotlyChart"] {
+    background: linear-gradient(180deg, rgba(14,24,40,0.10), rgba(255,255,255,0.08)) !important;
+}
+
+.stTabs [aria-selected="true"] {
+    box-shadow:
+        0 0 22px rgba(99,216,255,0.20),
+        inset 0 1px 0 rgba(255,255,255,0.28) !important;
+}
+
+.stButton > button,
+.stDownloadButton > button {
+    box-shadow:
+        0 0 18px rgba(95, 204, 255, 0.24),
+        inset 0 1px 0 rgba(255,255,255,0.32) !important;
+}
+
+.js-plotly-plot .plotly .main-svg {
+    filter: drop-shadow(0 0 10px rgba(100,220,255,0.05));
+}
 </style>
 """
 st.markdown(APP_CSS, unsafe_allow_html=True)
@@ -589,17 +664,17 @@ def glow_layout(fig: go.Figure, height: int = 420, title_size: int = 18) -> go.F
             y=1.02,
             xanchor="right",
             x=1,
-            bgcolor="rgba(255,255,255,0.06)",
-            bordercolor="rgba(255,255,255,0.14)",
+            bgcolor="rgba(16, 28, 46, 0.42)",
+            bordercolor="rgba(124,221,255,0.26)",
             borderwidth=1,
-            font=dict(color=TEXT, size=12),
+            font=dict(color="#f8fbff", size=12),
         ),
         font=dict(color=TEXT),
         title_font=dict(size=title_size, color=TEXT),
         title=dict(x=0.02, xanchor="left"),
         hovermode="closest",
         hoverlabel=dict(
-            bgcolor="rgba(116, 136, 163, 0.94)",
+            bgcolor="rgba(13, 24, 42, 0.96)",
             bordercolor="rgba(255,255,255,0.22)",
             font=dict(color=TEXT),
         ),
@@ -673,7 +748,7 @@ def build_config_donut(field_name: str, series: pd.Series, total_assets: int) ->
             sort=False,
             marker=dict(colors=palette[:len(dist)], line=dict(color="rgba(255,255,255,0.18)", width=1.2)),
             textinfo="percent",
-            textfont=dict(color="#ffffff", size=12),
+            textfont=dict(color="#ffffff", size=13),
             hovertemplate="Valor: %{label}<br>Equipos: %{value}<br>Participación: %{percent}<extra></extra>",
         )
     )
@@ -684,12 +759,12 @@ def build_config_donut(field_name: str, series: pd.Series, total_assets: int) ->
         xref="paper",
         yref="paper",
         showarrow=False,
-        font=dict(color=TEXT, size=16),
+        font=dict(color='#ffffff', size=18),
     )
     fig.update_layout(
         title=field_name,
         showlegend=True,
-        legend=dict(orientation="h", yanchor="bottom", y=-0.15, xanchor="center", x=0.5),
+        legend=dict(orientation="h", yanchor="bottom", y=-0.18, xanchor="center", x=0.5, bgcolor="rgba(14,26,42,0.36)", bordercolor="rgba(124,221,255,0.22)", borderwidth=1, font=dict(color="#f8fbff", size=11)),
     )
     return glow_layout(fig, 340, 15)
 
@@ -2555,10 +2630,10 @@ with base_tab:
         )
         fig_geo.update_traces(
             marker=dict(
-                size=6.5,
+                size=7.0,
                 color=ACCENT,
-                opacity=0.95,
-                line=dict(color="rgba(255,255,255,0.86)", width=1.0),
+                opacity=0.98,
+                line=dict(color="rgba(255,255,255,0.96)", width=1.25),
             ),
             hovertemplate=(
                 "<b>%{hovertext}</b><br>"
@@ -2572,26 +2647,26 @@ with base_tab:
         )
         fig_geo.update_geos(
             projection_type="mollweide",
-            projection_scale=0.90,
+            projection_scale=0.92,
             center=dict(lat=8, lon=0),
             showframe=False,
             bgcolor="rgba(255,255,255,0)",
             showocean=True,
-            oceancolor="rgba(230,240,250,0.14)",
+            oceancolor="rgba(14,28,46,0.18)",
             showland=True,
-            landcolor="rgba(248,251,255,0.10)",
+            landcolor="rgba(255,255,255,0.14)",
             showcountries=True,
-            countrycolor="rgba(255,255,255,0.24)",
+            countrycolor="rgba(190,235,255,0.28)",
             countrywidth=0.7,
             showcoastlines=True,
-            coastlinecolor="rgba(255,255,255,0.18)",
+            coastlinecolor="rgba(190,235,255,0.22)",
             coastlinewidth=0.7,
             showlakes=True,
-            lakecolor="rgba(230,240,250,0.08)",
+            lakecolor="rgba(30,52,80,0.12)",
             lataxis_showgrid=True,
             lonaxis_showgrid=True,
-            lataxis_gridcolor="rgba(255,255,255,0.05)",
-            lonaxis_gridcolor="rgba(255,255,255,0.05)",
+            lataxis_gridcolor="rgba(190,235,255,0.06)",
+            lonaxis_gridcolor="rgba(190,235,255,0.06)",
             lataxis_dtick=15,
             lonaxis_dtick=30,
             domain=dict(x=[0.10, 0.90], y=[0.14, 0.86]),
