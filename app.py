@@ -1058,52 +1058,61 @@ def _build_machine_config_summary(filtered_df: pd.DataFrame):
         field_name = col.replace('CFG::', '')
 
         if col == "CFG::In Blood Bank":
-            vc = filtered_df[col].fillna("").astype(str).str.strip()
-            vc = vc[vc.str.lower().eq("yes")]
-            display_name = "Banco de sangre"
+            non_null = filtered_df[col].fillna("").astype(str).str.strip()
+            non_null = non_null[non_null.str.lower().eq("yes")]
+            display_field_name = "Banco de sangre"
         else:
-            non_null = filtered_df[col].dropna()
-            vc = non_null.astype(str).str.strip()
-            vc = vc[vc != '']
-            display_name = field_name
+            non_null = filtered_df[col].dropna().astype(str).str.strip()
+            non_null = non_null[non_null != ""]
+            display_field_name = field_name
 
-        count_non_null = int(vc.shape[0])
+        count_non_null = int(non_null.shape[0])
         if count_non_null <= 0:
             continue
 
-        counts = vc.value_counts().reset_index()
+        counts = non_null.value_counts().reset_index()
         counts.columns = ['Value', 'Count']
         counts['Share %'] = counts['Count'].map(lambda x: _safe_share_pct(x, counts['Count'].sum()))
         top_value = safe_text(counts.iloc[0]['Value'])
         top_count = int(counts.iloc[0]['Count'])
 
-        cfg_cov_rows.append({'Campo de configuración': display_name, 'Equipos con dato': count_non_null})
+        cfg_cov_rows.append({'Campo de configuración': display_field_name, 'Equipos con dato': count_non_null})
         value_summary_rows.append({
-            'Campo de configuración': display_name,
+            'Campo de configuración': display_field_name,
             'Equipos con dato': count_non_null,
             'Valores únicos': int(counts.shape[0]),
             'Valor principal': top_value,
             'Conteo principal': top_count,
         })
+
         for _, row in counts.head(5).iterrows():
             value_summary_rows.append({
-                'Campo de configuración': f"{display_name} — valor",
+                'Campo de configuración': f"{display_field_name} — valor",
                 'Equipos con dato': '',
                 'Valores únicos': '',
                 'Valor principal': safe_text(row['Value']),
                 'Conteo principal': f"{int(row['Count'])} ({row['Share %']:.1f}%)",
             })
+
         if counts.shape[0] <= 5 and counts.iloc[0]['Count'] / counts['Count'].sum() < 0.86:
-            chart = _make_pdf_donut(counts.rename(columns={'Value': 'Categoría'}), 'Categoría', 'Count', display_name, max_rows=5)
+            chart = _make_pdf_donut(counts.rename(columns={'Value': 'Categoría'}), 'Categoría', 'Count', display_field_name, max_rows=5)
         else:
-            chart = _make_pdf_barh(counts.rename(columns={'Value': 'Categoría'}), 'Categoría', 'Count', display_name, xlabel='Equipos', max_rows=6, color='#1f77b4')
+            chart = _make_pdf_barh(
+                counts.rename(columns={'Value': 'Categoría'}),
+                'Categoría',
+                'Count',
+                display_field_name,
+                xlabel='Equipos',
+                max_rows=6,
+                color='#1f77b4'
+            )
+
         chart_buffers.append((count_non_null, chart))
 
     cov_df = pd.DataFrame(cfg_cov_rows).sort_values('Equipos con dato', ascending=False) if cfg_cov_rows else pd.DataFrame(columns=['Campo de configuración', 'Equipos con dato'])
     value_df = pd.DataFrame(value_summary_rows)
     charts = [c for _, c in sorted(chart_buffers, key=lambda x: x[0], reverse=True)[:6]]
     return cov_df, value_df, charts
-
 
 
 def _build_executive_insights(filtered_df: pd.DataFrame, stock_context: dict | None = None) -> tuple[list[str], list[str]]:
@@ -1202,15 +1211,24 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
         'table_max_rows': max(len(filtered_df), 1),
     })
 
-    cfg_machine_text = filtered_df["Machine Configurations"].fillna("").astype(str).str.strip().ne("")
-    cfg_blood_bank_yes = (
+    machine_cfg_text = filtered_df["Machine Configurations"].fillna("").astype(str).str.strip().ne("")
+    blood_bank_yes = (
         filtered_df["CFG::In Blood Bank"].fillna("").astype(str).str.strip().str.lower().eq("yes")
         if "CFG::In Blood Bank" in filtered_df.columns
         else pd.Series(False, index=filtered_df.index)
     )
+    active_cfg_fields_count = 0
+    for c in [c for c in filtered_df.columns if c.startswith('CFG::')]:
+        if c == "CFG::In Blood Bank":
+            if int(filtered_df[c].fillna("").astype(str).str.strip().str.lower().eq("yes").sum()) > 0:
+                active_cfg_fields_count += 1
+        else:
+            if int(filtered_df[c].notna().sum()) > 0:
+                active_cfg_fields_count += 1
+
     cfg_pairs = [
-        ('Equipos con configuración', f"{int((cfg_machine_text | cfg_blood_bank_yes).sum()):,}"),
-        ('Campos activos de configuración', f"{sum(int(filtered_df[c].notna().sum()) > 0 for c in filtered_df.columns if c.startswith('CFG::') and c != 'CFG::In Blood Bank') + int(cfg_blood_bank_yes.sum() > 0):,}"),
+        ('Equipos con configuración', f"{int((machine_cfg_text | blood_bank_yes).sum()):,}"),
+        ('Campos activos de configuración', f"{active_cfg_fields_count:,}"),
         ('Promedio de campos poblados', f"{filtered_df.get('Machine config fields populated', pd.Series([0])).fillna(0).mean():.1f}"),
     ]
     cfg_cov, cfg_value_df, cfg_charts = _build_machine_config_summary(filtered_df)
@@ -1972,6 +1990,7 @@ def parse_machine_configuration(df: pd.DataFrame) -> tuple[pd.DataFrame, list[st
 def normalize_blood_bank_value(value):
     if pd.isna(value):
         return pd.NA
+
     text = str(value).strip()
     if not text:
         return pd.NA
@@ -1986,6 +2005,8 @@ def normalize_blood_bank_value(value):
         return pd.NA
 
     return pd.NA
+
+
 @st.cache_data(show_spinner=False)
 def add_operating_system_columns(df: pd.DataFrame, config_cols: list[str]) -> pd.DataFrame:
     os_candidates = ["CFG::Operative System", "CFG::ETI-Max 3000 Operative System", "CFG::LQS PC OS"]
@@ -2050,6 +2071,8 @@ def add_operating_system_columns(df: pd.DataFrame, config_cols: list[str]) -> pd
 
     df["Machine config fields populated"] = populated_counts
     return df
+
+
 @st.cache_data(show_spinner=False)
 def to_csv_download(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode("utf-8-sig")
@@ -2888,6 +2911,7 @@ with base_tab:
 with machine_tab:
     st.subheader("Machine configuration")
     st.caption("Vista ejecutiva por ítem de configuración, con gráficas separadas para cada campo aplicable y mayor lectura visual del comportamiento de la base instalada.")
+
     applicable_fields = active_config_fields(filtered, CONFIG_KEYS)
     cfg_cols_prefixed = [f"CFG::{col}" for col in applicable_fields]
 
@@ -2924,10 +2948,15 @@ with machine_tab:
                 populated_assets = int(filtered[col].notna().sum())
                 display_name = field_name
 
-            coverage_rows.append({"Config field": display_name, "Populated assets": populated_assets})
+            if populated_assets > 0:
+                coverage_rows.append(
+                    {
+                        "Config field": display_name,
+                        "Populated assets": populated_assets,
+                    }
+                )
 
-        coverage_df = pd.DataFrame(coverage_rows)
-        coverage_df = coverage_df[coverage_df["Populated assets"] > 0].sort_values("Populated assets", ascending=False)
+        coverage_df = pd.DataFrame(coverage_rows).sort_values("Populated assets", ascending=False)
 
         fig_cfg_fill = px.bar(
             coverage_df,
@@ -2968,6 +2997,7 @@ with machine_tab:
                         chart_title = field_name
 
                     total_assets = int(item_series.shape[0])
+
                     with col_ui:
                         st.plotly_chart(build_config_donut(chart_title, item_series, total_assets), use_container_width=True)
 
@@ -2991,6 +3021,7 @@ with machine_tab:
             dist = item_series.value_counts().reset_index()
             dist.columns = ["Value", "Count"]
             top_row = dist.iloc[0]
+
             detail_rows.append(
                 {
                     "Config field": display_name,
@@ -3015,15 +3046,9 @@ with machine_tab:
                 "Operating System",
                 "Operational status",
             ] + [f"CFG::{field}" for field in donut_fields]
+
             machine_table = filtered[detail_columns].copy()
-
-            rename_map = {}
-            for field in donut_fields:
-                if field == "In Blood Bank":
-                    rename_map[f"CFG::{field}"] = "Banco de sangre"
-                else:
-                    rename_map[f"CFG::{field}"] = field
-
+            rename_map = {f"CFG::{field}": ("Banco de sangre" if field == "In Blood Bank" else field) for field in donut_fields}
             machine_table = machine_table.rename(columns=rename_map)
 
             if "Banco de sangre" in machine_table.columns:
