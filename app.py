@@ -891,16 +891,18 @@ def _df_to_wrapped_table(df: pd.DataFrame, styles, col_widths=None, max_rows=Non
     return table
 
 
-def _summary_table_from_pairs(title: str, pairs: list[tuple[str, str]], styles):
-    data = [[Paragraph("<b>Metric</b>", styles["APA_Cell_Header"]), Paragraph("<b>Value</b>", styles["APA_Cell_Header"])]]
+
+def _summary_table_from_pairs(title: str, pairs: list[tuple[str, str]], styles, col1='Métrica', col2='Valor'):
+    data = [[Paragraph(f"<b>{_escape_pdf_text(col1)}</b>", styles["APA_Cell_Header"]), Paragraph(f"<b>{_escape_pdf_text(col2)}</b>", styles["APA_Cell_Header"])]]
     for k, v in pairs:
         data.append([_paragraph_cell(k, styles["APA_Cell"]), _paragraph_cell(v, styles["APA_Cell"])])
-    table = Table(data, colWidths=[2.8 * inch, 2.1 * inch], repeatRows=1)
+    table = Table(data, colWidths=[2.8 * inch, 2.8 * inch], repeatRows=1)
     table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f4e79")),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f3b64")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#C8D6E5")),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.HexColor("#F7F9FB")]),
+        ("LINEBELOW", (0, 0), (-1, 0), 0.8, colors.HexColor("#1f3b64")),
+        ("LINEABOVE", (0, 1), (-1, -1), 0.25, colors.HexColor("#D9D9D9")),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F6F8FB")]),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("LEFTPADDING", (0, 0), (-1, -1), 5),
         ("RIGHTPADDING", (0, 0), (-1, -1), 5),
@@ -910,288 +912,479 @@ def _summary_table_from_pairs(title: str, pairs: list[tuple[str, str]], styles):
     return [Paragraph(title, styles["APA_Heading"]), table]
 
 
-def _make_matplotlib_barh(df: pd.DataFrame, label_col: str, value_col: str, title: str, max_rows: int = 10):
-    if not MATPLOTLIB_AVAILABLE or df is None or df.empty:
-        return None
-    work = df[[label_col, value_col]].copy().dropna().head(max_rows)
-    if work.empty:
-        return None
-    work = work.sort_values(value_col, ascending=True)
-    fig, ax = plt.subplots(figsize=(8.4, 3.8))
-    ax.barh(work[label_col].astype(str), work[value_col].astype(float))
-    ax.set_title(title, fontsize=11)
-    ax.set_xlabel("Count")
-    ax.tick_params(axis="y", labelsize=8)
-    ax.tick_params(axis="x", labelsize=8)
-    ax.grid(axis="x", alpha=0.25)
-    fig.tight_layout()
-    buf = BytesIO()
-    fig.savefig(buf, format="png", dpi=180, bbox_inches="tight")
-    plt.close(fig)
-    buf.seek(0)
-    return buf
+def _wrap_label(text_value, max_chars: int = 28) -> str:
+    text_value = safe_text(text_value, "No informado")
+    words = str(text_value).split()
+    lines, current = [], ""
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        if len(candidate) <= max_chars:
+            current = candidate
+        else:
+            if current:
+                lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return "\n".join(lines[:3])
 
 
-def _make_matplotlib_scatter(df: pd.DataFrame, x_col: str, y_col: str, title: str, max_rows: int = 200):
-    if not MATPLOTLIB_AVAILABLE or df is None or df.empty or x_col not in df.columns or y_col not in df.columns:
+def _clean_spare_qty(series: pd.Series) -> pd.Series:
+    vals = pd.to_numeric(series, errors="coerce").fillna(0.0)
+    vals = vals.clip(lower=0.0)
+    return vals
+
+
+def _safe_share_pct(part, total) -> float:
+    try:
+        total = float(total)
+        part = float(part)
+        if total <= 0:
+            return 0.0
+        return round(part * 100.0 / total, 1)
+    except Exception:
+        return 0.0
+
+
+def _make_pdf_barh(df: pd.DataFrame, label_col: str, value_col: str, title: str, xlabel: str = "Cantidad", max_rows: int = 10, color: str = "#2F80ED"):
+    if not MATPLOTLIB_AVAILABLE or df is None or df.empty or label_col not in df.columns or value_col not in df.columns:
         return None
-    work = df[[x_col, y_col]].copy().dropna().head(max_rows)
+    work = df[[label_col, value_col]].copy().dropna()
     if work.empty:
         return None
-    work[y_col] = pd.to_numeric(work[y_col], errors="coerce")
+    work[value_col] = pd.to_numeric(work[value_col], errors="coerce")
     work = work.dropna()
     if work.empty:
         return None
-    fig, ax = plt.subplots(figsize=(8.4, 3.8))
-    ax.scatter(range(len(work)), work[y_col].astype(float))
-    ax.set_title(title, fontsize=11)
-    ax.set_xlabel(x_col)
-    ax.set_ylabel(y_col)
-    step = max(1, len(work) // 10)
-    idx = list(range(0, len(work), step))
-    ax.set_xticks(idx)
-    ax.set_xticklabels([str(work.iloc[i][x_col])[:14] for i in idx], rotation=45, ha="right", fontsize=7)
-    ax.tick_params(axis="y", labelsize=8)
-    ax.grid(alpha=0.25)
+    work = work.sort_values(value_col, ascending=False).head(max_rows).sort_values(value_col, ascending=True)
+    work[label_col] = work[label_col].map(lambda x: _wrap_label(x, 30))
+    height = max(2.8, 0.48 * len(work) + 1.25)
+    fig, ax = plt.subplots(figsize=(8.6, height))
+    bars = ax.barh(work[label_col].astype(str), work[value_col].astype(float), color=color)
+    ax.set_title(title, fontsize=12, fontweight='bold')
+    ax.set_xlabel(xlabel, fontsize=9)
+    ax.tick_params(axis='y', labelsize=8)
+    ax.tick_params(axis='x', labelsize=8)
+    ax.grid(axis='x', alpha=0.22)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    for bar in bars:
+        value = bar.get_width()
+        ax.text(value + max(work[value_col].max() * 0.01, 0.1), bar.get_y() + bar.get_height()/2, safe_number_text(value, '0'), va='center', fontsize=8)
     fig.tight_layout()
     buf = BytesIO()
-    fig.savefig(buf, format="png", dpi=180, bbox_inches="tight")
+    fig.savefig(buf, format='png', dpi=180, bbox_inches='tight', facecolor='white')
     plt.close(fig)
     buf.seek(0)
     return buf
+
+
+def _make_pdf_donut(df: pd.DataFrame, label_col: str, value_col: str, title: str, max_rows: int = 5):
+    if not MATPLOTLIB_AVAILABLE or df is None or df.empty or label_col not in df.columns or value_col not in df.columns:
+        return None
+    work = df[[label_col, value_col]].copy().dropna()
+    if work.empty:
+        return None
+    work[value_col] = pd.to_numeric(work[value_col], errors='coerce')
+    work = work.dropna()
+    work = work[work[value_col] > 0]
+    if work.empty:
+        return None
+    work = work.sort_values(value_col, ascending=False)
+    if len(work) > max_rows:
+        top = work.head(max_rows - 1).copy()
+        others = work.iloc[max_rows - 1:][value_col].sum()
+        top = pd.concat([top, pd.DataFrame({label_col: ['Otros'], value_col: [others]})], ignore_index=True)
+        work = top
+    labels = work[label_col].astype(str).map(lambda x: _wrap_label(x, 22)).tolist()
+    values = work[value_col].astype(float).tolist()
+    total = sum(values)
+    colors_list = ['#2F80ED', '#56CCF2', '#27AE60', '#F2C94C', '#EB5757', '#9B51E0']
+    fig, ax = plt.subplots(figsize=(4.8, 3.6))
+    wedges, texts, autotexts = ax.pie(
+        values,
+        labels=None,
+        colors=colors_list[:len(values)],
+        startangle=90,
+        counterclock=False,
+        wedgeprops=dict(width=0.35, edgecolor='white'),
+        autopct=lambda pct: f'{pct:.1f}%' if pct >= 8 else ''
+    )
+    ax.text(0, 0.05, safe_number_text(total, '0'), ha='center', va='center', fontsize=16, fontweight='bold')
+    ax.text(0, -0.15, 'equipos', ha='center', va='center', fontsize=9)
+    ax.set_title(title, fontsize=11, fontweight='bold', pad=12)
+    ax.legend(wedges, labels, loc='lower center', bbox_to_anchor=(0.5, -0.20), ncol=2, fontsize=7, frameon=False)
+    fig.tight_layout()
+    buf = BytesIO()
+    fig.savefig(buf, format='png', dpi=180, bbox_inches='tight', facecolor='white')
+    plt.close(fig)
+    buf.seek(0)
+    return buf
+
+
+def _make_pdf_hist_categories(df: pd.DataFrame, label_col: str, order: list[str], title: str, xlabel: str = 'Cantidad'):
+    counts = df[label_col].fillna('No informado').astype(str).value_counts()
+    chart_df = pd.DataFrame({label_col: order, 'Count': [int(counts.get(v, 0)) for v in order]})
+    chart_df = chart_df[chart_df['Count'] > 0]
+    return _make_pdf_barh(chart_df, label_col, 'Count', title, xlabel=xlabel, max_rows=len(chart_df))
+
+
+def _pdf_image_flowables(image_buffers: list, max_per_row: int = 2, image_width: float = 4.7 * inch, image_height: float = 2.9 * inch):
+    from reportlab.platypus import Image
+    flowables = []
+    valid = [img for img in image_buffers if img is not None]
+    if not valid:
+        return flowables
+    for idx in range(0, len(valid), max_per_row):
+        row = valid[idx:idx + max_per_row]
+        imgs = [Image(img, width=image_width, height=image_height) for img in row]
+        if len(imgs) == 1:
+            flowables.append(imgs[0])
+        else:
+            tbl = Table([[imgs[0], imgs[1]]], colWidths=[image_width, image_width])
+            tbl.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'TOP'), ('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 8)]))
+            flowables.append(tbl)
+        flowables.append(Spacer(1, 0.10 * inch))
+    return flowables
+
+
+def _build_machine_config_summary(filtered_df: pd.DataFrame):
+    cfg_cols = [c for c in filtered_df.columns if c.startswith('CFG::')]
+    cfg_cov_rows = []
+    value_summary_rows = []
+    chart_buffers = []
+    for col in cfg_cols:
+        non_null = filtered_df[col].dropna()
+        count_non_null = int(non_null.shape[0])
+        if count_non_null <= 0:
+            continue
+        field_name = col.replace('CFG::', '')
+        vc = non_null.astype(str).str.strip()
+        vc = vc[vc != '']
+        if vc.empty:
+            continue
+        counts = vc.value_counts().reset_index()
+        counts.columns = ['Value', 'Count']
+        counts['Share %'] = counts['Count'].map(lambda x: _safe_share_pct(x, counts['Count'].sum()))
+        top_value = safe_text(counts.iloc[0]['Value'])
+        top_count = int(counts.iloc[0]['Count'])
+        cfg_cov_rows.append({'Campo de configuración': field_name, 'Equipos con dato': count_non_null})
+        value_summary_rows.append({
+            'Campo de configuración': field_name,
+            'Equipos con dato': count_non_null,
+            'Valores únicos': int(counts.shape[0]),
+            'Valor principal': top_value,
+            'Conteo principal': top_count,
+        })
+        for _, row in counts.head(5).iterrows():
+            value_summary_rows.append({
+                'Campo de configuración': f"{field_name} — valor",
+                'Equipos con dato': '',
+                'Valores únicos': '',
+                'Valor principal': safe_text(row['Value']),
+                'Conteo principal': f"{int(row['Count'])} ({row['Share %']:.1f}%)",
+            })
+        if counts.shape[0] <= 5 and counts.iloc[0]['Count'] / counts['Count'].sum() < 0.86:
+            chart = _make_pdf_donut(counts.rename(columns={'Value': 'Categoría'}), 'Categoría', 'Count', field_name, max_rows=5)
+        else:
+            chart = _make_pdf_barh(counts.rename(columns={'Value': 'Categoría'}), 'Categoría', 'Count', field_name, xlabel='Equipos', max_rows=6, color='#1f77b4')
+        chart_buffers.append((count_non_null, chart))
+    cov_df = pd.DataFrame(cfg_cov_rows).sort_values('Equipos con dato', ascending=False) if cfg_cov_rows else pd.DataFrame(columns=['Campo de configuración', 'Equipos con dato'])
+    value_df = pd.DataFrame(value_summary_rows)
+    charts = [c for _, c in sorted(chart_buffers, key=lambda x: x[0], reverse=True)[:6]]
+    return cov_df, value_df, charts
+
+
+def _build_executive_insights(filtered_df: pd.DataFrame, stock_context: dict | None = None) -> tuple[list[str], list[str]]:
+    insights = []
+    recommendations = []
+    total_records = len(filtered_df)
+    countries = filtered_df['Country'].fillna('No informado').value_counts()
+    if not countries.empty:
+        top_country = countries.index[0]
+        top_country_pct = _safe_share_pct(countries.iloc[0], total_records)
+        insights.append(f"La base instalada filtrada contiene {total_records} equipos y se concentra principalmente en {top_country} ({top_country_pct}%).")
+    routine_assets = int(filtered_df.get('Is in routine', pd.Series(dtype=bool)).sum())
+    insights.append(f"Se identificaron {routine_assets} equipos en rutina dentro del universo filtrado.")
+    os_series = filtered_df.get('Operating System', pd.Series(dtype=object)).fillna('No informado').astype(str)
+    legacy_count = int(os_series.isin(['Windows XP', 'Windows Vista', 'Windows 7', 'Windows 2000']).sum())
+    unknown_os = int(os_series.isin(['Unknown', 'No informado', 'Not installed']).sum())
+    if legacy_count > 0:
+        insights.append(f"Existen {legacy_count} equipos con sistemas operativos legados que deben priorizarse en el plan de actualización.")
+    if unknown_os > 0:
+        insights.append(f"Hay {unknown_os} equipos sin visibilidad clara del sistema operativo, lo que limita la planeación técnica.")
+    if 'PM next date' in filtered_df.columns:
+        pm_next = pd.to_datetime(filtered_df['PM next date'], errors='coerce')
+        overdue_pm = int((pm_next < pd.Timestamp.today().normalize()).fillna(False).sum())
+        if overdue_pm > 0:
+            insights.append(f"Se detectaron {overdue_pm} mantenimientos preventivos vencidos en la vista actual.")
+    if stock_context and stock_context.get('available'):
+        missing = int(stock_context.get('missing_skus', 0))
+        low = int(stock_context.get('low_skus', 0))
+        cost = float(stock_context.get('option2_cost', 0) or 0)
+        insights.append(f"La revisión de carstock identificó {missing} SKUs faltantes y {low} SKUs en nivel bajo, con una exposición estimada de EUR {cost:,.2f}.")
+
+        if missing > 0:
+            recommendations.append('Priorizar la compra de repuestos faltantes y de bajo stock con base en el costo estimado y la criticidad operativa.')
+    if legacy_count > 0:
+        recommendations.append('Ejecutar un plan de migración para equipos con Windows Vista/XP/7 y validar de inmediato los activos sin dato de sistema operativo.')
+    if unknown_os > 0:
+        recommendations.append('Completar los campos vacíos de sistema operativo y configuración de equipo para mejorar la trazabilidad del parque instalado.')
+    if 'PM next date' in filtered_df.columns:
+        pm_next = pd.to_datetime(filtered_df['PM next date'], errors='coerce')
+        overdue_pm = int((pm_next < pd.Timestamp.today().normalize()).fillna(False).sum())
+        if overdue_pm > 0:
+            recommendations.append('Reprogramar los mantenimientos preventivos vencidos y ordenar la ejecución por volumen de pruebas y criticidad del cliente.')
+    recommendations.append('Usar este informe como base para una revisión ejecutiva del distribuidor, combinando base instalada, OS, PM y cobertura de repuestos.')
+    return insights[:6], recommendations[:5]
 
 
 def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = None):
     sections = []
+    annexes = []
 
-    # Base installed
     base_pairs = [
-        ("Filtered records", f"{len(filtered_df):,}"),
-        ("Countries", f"{filtered_df['Country'].nunique(dropna=True):,}"),
-        ("Distributors", f"{filtered_df['Distributor name'].nunique(dropna=True):,}"),
-        ("Instrument types", f"{filtered_df['Instrument type'].nunique(dropna=True):,}"),
-        ("Routine assets", f"{int(filtered_df.get('Is in routine', pd.Series(dtype=bool)).sum()):,}"),
+        ('Registros filtrados', f"{len(filtered_df):,}"),
+        ('Países', f"{filtered_df['Country'].nunique(dropna=True):,}"),
+        ('Distribuidores', f"{filtered_df['Distributor name'].nunique(dropna=True):,}"),
+        ('Tipos de instrumento', f"{filtered_df['Instrument type'].nunique(dropna=True):,}"),
+        ('Equipos en rutina', f"{int(filtered_df.get('Is in routine', pd.Series(dtype=bool)).sum()):,}"),
     ]
     top_country = filtered_df['Country'].fillna('No informado').value_counts().reset_index()
-    top_country.columns = ['Country', 'Count']
+    top_country.columns = ['País', 'Cantidad']
     top_inst = filtered_df['Instrument type'].fillna('No informado').value_counts().reset_index()
-    top_inst.columns = ['Instrument', 'Count']
+    top_inst.columns = ['Instrumento', 'Cantidad']
     state_counts = filtered_df['Operational status grouped'].fillna('No informado').value_counts().reset_index()
-    state_counts.columns = ['State', 'Count']
+    state_counts.columns = ['Estado', 'Cantidad']
+    age_df = filtered_df.copy()
+    age_df['Rango de antigüedad'] = pd.cut(
+        pd.to_numeric(age_df.get('Age (years)', pd.Series(dtype=float)), errors='coerce'),
+        bins=[-1, 5, 8, 10, 100],
+        labels=['0-5 años', '5-8 años', '8-10 años', '10+ años']
+    )
+    age_counts = age_df['Rango de antigüedad'].value_counts().reset_index()
+    age_counts.columns = ['Rango', 'Cantidad']
+    age_counts['Rango'] = pd.Categorical(age_counts['Rango'], categories=['0-5 años', '5-8 años', '8-10 años', '10+ años'], ordered=True)
+    age_counts = age_counts.sort_values('Rango')
+
     sections.append({
-        'title': 'Base Installed Overview',
+        'title': 'Resumen de base instalada',
+        'intro': 'Esta sección resume la base instalada filtrada y destaca la concentración geográfica, el mix de instrumentos, el estado operativo y el perfil de antigüedad.',
         'summary_pairs': base_pairs,
         'charts': [
-            _make_matplotlib_barh(top_country, 'Country', 'Count', 'Top countries'),
-            _make_matplotlib_barh(top_inst, 'Instrument', 'Count', 'Instrument mix'),
-            _make_matplotlib_barh(state_counts, 'State', 'Count', 'Operational status mix'),
+            _make_pdf_barh(top_country, 'País', 'Cantidad', 'Países con mayor concentración', max_rows=10),
+            _make_pdf_barh(top_inst, 'Instrumento', 'Cantidad', 'Mix de instrumentos', max_rows=10),
+            _make_pdf_barh(state_counts, 'Estado', 'Cantidad', 'Distribución por estado operativo', max_rows=10),
+            _make_pdf_barh(age_counts, 'Rango', 'Cantidad', 'Perfil de antigüedad', max_rows=4),
         ],
-        'table_title': 'Top filtered records snapshot',
+        'table_title': 'Muestra resumida de equipos filtrados',
         'table_df': prepare_pdf_report_table(filtered_df),
-        'table_max_rows': 35,
+        'table_max_rows': 10,
+    })
+    annexes.append({
+        'title': 'Anexo A. Base instalada detallada',
+        'intro': 'Detalle tabular de la base instalada filtrada.',
+        'summary_pairs': [('Filas incluidas', f"{len(filtered_df):,}"), ('Alcance', 'Detalle completo de la base instalada filtrada')],
+        'charts': [],
+        'table_title': 'Detalle completo de equipos filtrados',
+        'table_df': prepare_pdf_report_table(filtered_df),
+        'table_max_rows': max(len(filtered_df), 1),
     })
 
-    # Machine config
-    cfg_cols = [c for c in filtered_df.columns if c.startswith('CFG::')]
     cfg_pairs = [
-        ('Assets with machine configuration', f"{int(filtered_df['Machine Configurations'].notna().sum()):,}"),
-        ('Active config fields', f"{sum(int(filtered_df[c].notna().sum()) > 0 for c in cfg_cols):,}"),
-        ('Average populated config fields', f"{filtered_df.get('Machine config fields populated', pd.Series([0])).fillna(0).mean():.1f}"),
+        ('Equipos con configuración', f"{int(filtered_df['Machine Configurations'].notna().sum()):,}"),
+        ('Campos activos de configuración', f"{sum(int(filtered_df[c].notna().sum()) > 0 for c in filtered_df.columns if c.startswith('CFG::')):,}"),
+        ('Promedio de campos poblados', f"{filtered_df.get('Machine config fields populated', pd.Series([0])).fillna(0).mean():.1f}"),
     ]
-    cfg_cov = pd.DataFrame([
-        {'Field': c.replace('CFG::', ''), 'Count': int(filtered_df[c].notna().sum())} for c in cfg_cols if int(filtered_df[c].notna().sum()) > 0
-    ]).sort_values('Count', ascending=False) if cfg_cols else pd.DataFrame(columns=['Field', 'Count'])
-    cfg_top_table = cfg_cov.head(12).rename(columns={'Field':'Config field', 'Count':'Populated assets'})
+    cfg_cov, cfg_value_df, cfg_charts = _build_machine_config_summary(filtered_df)
     sections.append({
-        'title': 'Machine Configuration',
+        'title': 'Configuración de equipo',
+        'intro': 'Se consolidan los campos detectados en Machine Configuration y se muestran las distribuciones de los ítems con mayor visibilidad en el filtro activo.',
         'summary_pairs': cfg_pairs,
-        'charts': [
-            _make_matplotlib_barh(cfg_cov, 'Field', 'Count', 'Configuration field coverage'),
-        ],
-        'table_title': 'Most populated configuration fields',
-        'table_df': cfg_top_table,
+        'charts': [_make_pdf_barh(cfg_cov, 'Campo de configuración', 'Equipos con dato', 'Cobertura de campos de configuración', max_rows=10)] + cfg_charts,
+        'table_title': 'Resumen de configuración de equipo',
+        'table_df': cfg_value_df,
         'table_max_rows': 12,
     })
+    if not cfg_value_df.empty:
+        annexes.append({
+            'title': 'Anexo B. Valores de configuración',
+            'intro': 'Valores principales por campo de configuración.',
+            'summary_pairs': [('Filas incluidas', f"{len(cfg_value_df):,}"), ('Alcance', 'Resumen ampliado de campos y valores de configuración')],
+            'charts': [],
+            'table_title': 'Valores principales por campo',
+            'table_df': cfg_value_df,
+            'table_max_rows': max(len(cfg_value_df), 1),
+        })
 
-    # OS
     os_df = filtered_df.copy()
     os_df['Operating System'] = os_df['Operating System'].fillna('No informado')
-    os_df['OS Upgrade Bucket'] = os_df['Operating System'].map(os_upgrade_bucket)
-    urgent_count = int(os_df['Operating System'].isin(['Windows XP','Windows Vista','Windows 7','Windows 2000']).sum())
+    os_df['Bucket de actualización'] = os_df['Operating System'].map(os_upgrade_bucket).replace({
+        'Windows 10 / OK': 'Windows 10 / OK',
+        'Legacy / urgente migrar': 'Legado / migración urgente',
+        'Revisar campo OS': 'Revisar campo OS',
+        'Otro OS / validar': 'Otro OS / validar',
+    })
+    urgent_table = os_df[os_df['Operating System'].isin(['Windows XP', 'Windows Vista', 'Windows 7', 'Windows 2000'])][['Country','Distributor name','Customer name','Instrument type','Serial number','Operating System']].copy()
+    urgent_table.columns = ['País', 'Distribuidor', 'Cliente', 'Instrumento', 'Serial', 'Sistema operativo']
     os_pairs = [
-        ('Assets with OS identified', f"{int(filtered_df['Operating System'].notna().sum()):,}"),
-        ('Unique OS values', f"{filtered_df['Operating System'].nunique(dropna=True):,}"),
-        ('Legacy OS / urgent migration', f"{urgent_count:,}"),
-        ('Unknown / not informed', f"{int(os_df['Operating System'].isin(['Unknown','No informado']).sum()):,}"),
+        ('Equipos con OS identificado', f"{int(filtered_df['Operating System'].notna().sum()):,}"),
+        ('Valores únicos de OS', f"{filtered_df['Operating System'].nunique(dropna=True):,}"),
+        ('OS legado / migración urgente', f"{int(os_df['Operating System'].isin(['Windows XP','Windows Vista','Windows 7','Windows 2000']).sum()):,}"),
+        ('OS no informado', f"{int(os_df['Operating System'].isin(['Unknown','No informado','Not installed']).sum()):,}"),
     ]
     os_counts = os_df['Operating System'].value_counts().reset_index()
-    os_counts.columns = ['Operating System', 'Count']
-    os_bucket = os_df['OS Upgrade Bucket'].value_counts().reset_index()
-    os_bucket.columns = ['Bucket', 'Count']
-    urgent_table = os_df[os_df['Operating System'].isin(['Windows XP','Windows Vista','Windows 7','Windows 2000'])][['Country','Distributor name','Customer name','Instrument type','Serial number','Operating System']].copy()
+    os_counts.columns = ['Sistema operativo', 'Cantidad']
+    os_bucket = os_df['Bucket de actualización'].value_counts().reset_index()
+    os_bucket.columns = ['Prioridad', 'Cantidad']
     sections.append({
-        'title': 'Operating System',
+        'title': 'Sistema operativo',
+        'intro': 'Esta sección identifica equipos con sistemas operativos legados, visibilidad incompleta y prioridades de actualización.',
         'summary_pairs': os_pairs,
         'charts': [
-            _make_matplotlib_barh(os_counts, 'Operating System', 'Count', 'OS distribution'),
-            _make_matplotlib_barh(os_bucket, 'Bucket', 'Count', 'Upgrade prioritization'),
+            _make_pdf_barh(os_counts, 'Sistema operativo', 'Cantidad', 'Distribución de sistema operativo', max_rows=10),
+            _make_pdf_barh(os_bucket, 'Prioridad', 'Cantidad', 'Priorización de actualización', max_rows=10, color='#1f77b4'),
         ],
-        'table_title': 'Assets requiring Windows upgrade',
+        'table_title': 'Equipos que requieren actualización de Windows',
         'table_df': urgent_table,
-        'table_max_rows': 30,
+        'table_max_rows': 10,
     })
+    if not urgent_table.empty:
+        annexes.append({
+            'title': 'Anexo C. Equipos con OS legado',
+            'intro': 'Detalle de equipos con sistema operativo legado.',
+            'summary_pairs': [('Filas incluidas', f"{len(urgent_table):,}"), ('Alcance', 'Equipos con Windows XP/Vista/7/2000')],
+            'charts': [],
+            'table_title': 'Detalle de equipos con OS legado',
+            'table_df': urgent_table,
+            'table_max_rows': max(len(urgent_table), 1),
+        })
 
-    # Processing / PM
     proc_df = filtered_df.copy()
-    proc_df['Number of tests per day'] = pd.to_numeric(proc_df['Number of tests per day'], errors='coerce')
+    proc_df['Pruebas por día'] = pd.to_numeric(proc_df['Number of tests per day'], errors='coerce').fillna(0)
     today = pd.Timestamp.today().normalize()
     if 'PM next date' in proc_df.columns:
         pm_next = pd.to_datetime(proc_df['PM next date'], errors='coerce')
-        proc_df['PM planner status'] = np.where(pm_next < today, 'Overdue', np.where(pm_next <= today + pd.Timedelta(days=90), 'Next 90 days', 'Planned later'))
+        proc_df['Estado PM'] = np.where(pm_next < today, 'Vencido', np.where(pm_next <= today + pd.Timedelta(days=90), 'Próximos 90 días', 'Planificado más adelante'))
     else:
-        proc_df['PM planner status'] = 'No informado'
-    product_lines = []
-    for value in proc_df['Product Line'].fillna('').astype(str):
-        for part in [p.strip() for p in re.split(r'[|;,/]', value) if p.strip()]:
-            product_lines.append(part)
-    product_df = pd.Series(product_lines, name='Product line').value_counts().reset_index() if product_lines else pd.DataFrame(columns=['Product line','count'])
-    if not product_df.empty:
-        product_df.columns=['Product line','Count']
-    pm_status = proc_df['PM planner status'].value_counts().reset_index()
-    pm_status.columns = ['PM status','Count']
+        proc_df['Estado PM'] = 'No informado'
+    pm_status = proc_df['Estado PM'].value_counts().reset_index()
+    pm_status.columns = ['Estado PM', 'Cantidad']
+    top_tests = proc_df[['Serial number', 'Pruebas por día', 'Instrument type']].copy()
+    top_tests = top_tests.sort_values('Pruebas por día', ascending=False).head(10)
+    top_tests['Equipo'] = top_tests['Serial number'].astype(str) + ' | ' + top_tests['Instrument type'].astype(str)
     proc_pairs = [
-        ('Average tests per day', safe_number_text(proc_df['Number of tests per day'].dropna().mean() if proc_df['Number of tests per day'].notna().any() else pd.NA, '0')),
-        ('Max tests per day', safe_number_text(proc_df['Number of tests per day'].dropna().max() if proc_df['Number of tests per day'].notna().any() else pd.NA, '0')),
-        ('Upcoming PM in next 90 days', f"{int((proc_df['PM planner status'] == 'Next 90 days').sum()):,}"),
-        ('Overdue PM', f"{int((proc_df['PM planner status'] == 'Overdue').sum()):,}"),
+        ('Promedio de pruebas por día', safe_number_text(proc_df['Pruebas por día'].mean(), '0')),
+        ('Máximo de pruebas por día', safe_number_text(proc_df['Pruebas por día'].max(), '0')),
+        ('PM próximos 90 días', f"{int((proc_df['Estado PM'] == 'Próximos 90 días').sum()):,}"),
+        ('PM vencidos', f"{int((proc_df['Estado PM'] == 'Vencido').sum()):,}"),
     ]
-    tests_table = proc_df[['Country','Distributor name','Instrument type','Serial number','Number of tests per day','PM planner status']].copy().sort_values('Number of tests per day', ascending=False, na_position='last')
+    proc_table = proc_df[['Country', 'Distributor name', 'Instrument type', 'Serial number', 'Pruebas por día', 'Estado PM']].copy()
+    proc_table.columns = ['País', 'Distribuidor', 'Instrumento', 'Serial', 'Pruebas por día', 'Estado PM']
     sections.append({
-        'title': 'Processing and PM Planner',
+        'title': 'Procesamiento y planificación de PM',
+        'intro': 'Se prioriza la carga operativa y el estado del mantenimiento preventivo mediante visuales ejecutivas más legibles.',
         'summary_pairs': proc_pairs,
         'charts': [
-            _make_matplotlib_scatter(proc_df[['Serial number','Number of tests per day']].dropna().sort_values('Number of tests per day', ascending=False), 'Serial number', 'Number of tests per day', 'Tests/day by serial'),
-            _make_matplotlib_barh(product_df, 'Product line', 'Count', 'Top product lines'),
-            _make_matplotlib_barh(pm_status, 'PM status', 'Count', 'PM planner status'),
+            _make_pdf_barh(top_tests.rename(columns={'Equipo': 'Equipo'}), 'Equipo', 'Pruebas por día', 'Top 10 equipos por pruebas por día', xlabel='Pruebas/día', max_rows=10),
+            _make_pdf_barh(pm_status, 'Estado PM', 'Cantidad', 'Estado del plan de mantenimiento preventivo', max_rows=10, color='#2D9CDB'),
         ],
-        'table_title': 'Processing and PM snapshot',
-        'table_df': tests_table,
-        'table_max_rows': 30,
+        'table_title': 'Resumen de equipos con mayor volumen y estado PM',
+        'table_df': proc_table.sort_values('Pruebas por día', ascending=False),
+        'table_max_rows': 10,
+    })
+    annexes.append({
+        'title': 'Anexo D. Detalle de procesamiento y PM',
+        'intro': 'Detalle ampliado de pruebas por día y estado de PM.',
+        'summary_pairs': [('Filas incluidas', f"{len(proc_table):,}"), ('Alcance', 'Detalle ampliado de procesamiento y mantenimiento preventivo')],
+        'charts': [],
+        'table_title': 'Detalle ampliado de procesamiento y PM',
+        'table_df': proc_table.sort_values('Pruebas por día', ascending=False),
+        'table_max_rows': max(len(proc_table), 1),
     })
 
-    # Stock / spare parts
     stock_context = stock_context or {}
     if stock_context.get('available'):
+        full_comparison_df = stock_context.get('full_comparison_df', pd.DataFrame()).copy()
+        purchase_df = stock_context.get('purchase_df', pd.DataFrame()).copy()
+        extra_df = stock_context.get('extra_df', pd.DataFrame()).copy()
+        stock_top_gap = stock_context.get('top_gap_df', pd.DataFrame()).copy()
+        for df_ in [full_comparison_df, purchase_df, extra_df, stock_top_gap]:
+            if df_ is not None and not df_.empty:
+                if 'Uploaded Qty' in df_.columns:
+                    df_['Uploaded Qty'] = _clean_spare_qty(df_['Uploaded Qty'])
+                if 'Coverage %' in df_.columns:
+                    df_['Coverage %'] = pd.to_numeric(df_['Coverage %'], errors='coerce').fillna(0.0).clip(lower=0.0, upper=999.0)
+        main_status = pd.DataFrame({'Estado': ['OK', 'LOW', 'Missing'], 'Cantidad': [int(stock_context.get('ok_skus', 0)), int(stock_context.get('low_skus', 0)), int(stock_context.get('missing_skus', 0))]})
+        extras_status = pd.DataFrame({'Estado': ['Extras'], 'Cantidad': [int(stock_context.get('extra_skus', 0))]})
         stock_pairs = [
-            ('Detected distributor', stock_context.get('detected_distributor', 'N/A')),
-            ('Families compared', ', '.join(stock_context.get('families', [])) or 'N/A'),
-            ('Required SKUs', f"{stock_context.get('required_skus', 0):,}"),
-            ('OK SKUs', f"{stock_context.get('ok_skus', 0):,}"),
-            ('LOW SKUs', f"{stock_context.get('low_skus', 0):,}"),
-            ('Missing SKUs', f"{stock_context.get('missing_skus', 0):,}"),
-            ('Extra SKUs', f"{stock_context.get('extra_skus', 0):,}"),
-            ('Gap total qty', safe_number_text(stock_context.get('gap_total', 0), '0')),
-            ('Option 2 estimated cost', f"{stock_context.get('currency','EUR')} {float(stock_context.get('option2_cost', 0) or 0):,.2f}"),
+            ('Distribuidor detectado', stock_context.get('detected_distributor', 'N/A')),
+            ('Familias comparadas', ', '.join(stock_context.get('families', [])) or 'N/A'),
+            ('SKUs requeridos', f"{stock_context.get('required_skus', 0):,}"),
+            ('SKUs OK', f"{stock_context.get('ok_skus', 0):,}"),
+            ('SKUs LOW', f"{stock_context.get('low_skus', 0):,}"),
+            ('SKUs faltantes', f"{stock_context.get('missing_skus', 0):,}"),
+            ('Costo estimado opción 2', f"EUR {float(stock_context.get('option2_cost', 0) or 0):,.2f}"),
         ]
-        stock_status = pd.DataFrame({
-            'Status': ['OK','LOW','Missing','Extras'],
-            'Count': [stock_context.get('ok_skus',0), stock_context.get('low_skus',0), stock_context.get('missing_skus',0), stock_context.get('extra_skus',0)]
-        })
-        stock_top_gap = stock_context.get('top_gap_df', pd.DataFrame())
-        full_comparison_df = stock_context.get('full_comparison_df', pd.DataFrame())
-        purchase_df = stock_context.get('purchase_df', pd.DataFrame())
-        extra_df = stock_context.get('extra_df', pd.DataFrame())
-        if full_comparison_df is None:
-            full_comparison_df = pd.DataFrame()
-        if purchase_df is None:
-            purchase_df = pd.DataFrame()
-        if extra_df is None:
-            extra_df = pd.DataFrame()
-
-        summary_table_df = stock_top_gap[['Required Part Number','Required Description','Required Qty','Uploaded Qty','Qty Gap','Status','Option 2 Estimated Cost','Currency']] if not stock_top_gap.empty else pd.DataFrame(columns=['Required Part Number','Required Description','Required Qty','Uploaded Qty','Qty Gap','Status','Option 2 Estimated Cost','Currency'])
+        if not stock_top_gap.empty:
+            stock_top_gap = stock_top_gap.copy()
+            stock_top_gap['Parte'] = stock_top_gap['Required Part Number'].astype(str) + ' | ' + stock_top_gap['Required Description'].fillna('').astype(str).str.slice(0, 28)
+        gap_table = pd.DataFrame()
+        if not stock_top_gap.empty:
+            gap_table = stock_top_gap[[c for c in ['Required Part Number','Required Description','Required Qty','Uploaded Qty','Qty Gap','Status','Option 2 Estimated Cost','Currency'] if c in stock_top_gap.columns]].copy()
+            gap_table.columns = ['Parte requerida', 'Descripción', 'Cant. requerida', 'Cant. cargada', 'Brecha', 'Estado', 'Costo estimado opción 2', 'Moneda']
         sections.append({
-            'title': 'Spare Parts / Carstock Gap',
+            'title': 'Repuestos y brecha de carstock',
+            'intro': 'Se resume la cobertura del stock requerido y la brecha estimada de compra. Los ítems extra se muestran por separado para no distorsionar la lectura principal del gap.',
             'summary_pairs': stock_pairs,
             'charts': [
-                _make_matplotlib_barh(stock_status, 'Status', 'Count', 'Carstock coverage status'),
-                _make_matplotlib_barh(stock_top_gap.rename(columns={'Required Part Number':'Part number','Qty Gap':'Gap qty'}), 'Part number', 'Gap qty', 'Top missing parts'),
+                _make_pdf_barh(main_status, 'Estado', 'Cantidad', 'Cobertura del carstock requerido', max_rows=3, color='#2F80ED'),
+                _make_pdf_barh(extras_status, 'Estado', 'Cantidad', 'Ítems extra no requeridos por el maestro', max_rows=1, color='#56CCF2') if int(stock_context.get('extra_skus', 0)) > 0 else None,
+                _make_pdf_barh(stock_top_gap.rename(columns={'Parte': 'Parte', 'Qty Gap': 'Brecha'}), 'Parte', 'Brecha', 'Principales repuestos faltantes', xlabel='Brecha de cantidad', max_rows=10, color='#EB5757') if not stock_top_gap.empty else None,
             ],
-            'table_title': 'Top spare parts gaps',
-            'table_df': summary_table_df,
-            'table_max_rows': 25,
+            'table_title': 'Principales brechas de repuestos',
+            'table_df': gap_table,
+            'table_max_rows': 10,
         })
-
         if not full_comparison_df.empty:
-            full_cols = [c for c in ['Required Part Number','Required Description','Required Qty','Uploaded Qty','Qty Gap','Coverage %','Status','Option 2 Unit Price','Option 2 Estimated Cost','Currency'] if c in full_comparison_df.columns]
-            full_table = full_comparison_df[full_cols].copy()
-            sections.append({
-                'title': 'Spare Parts Annex - Full Comparison',
-                'summary_pairs': [
-                    ('Rows included', f"{len(full_table):,}"),
-                    ('Scope', 'Complete carstock comparison for all required SKUs'),
-                ],
+            annex_table = full_comparison_df[[c for c in ['Required Part Number','Required Description','Required Qty','Uploaded Qty','Qty Gap','Coverage %','Status','Option 2 Unit Price','Option 2 Estimated Cost','Currency'] if c in full_comparison_df.columns]].copy()
+            annex_table.columns = ['Parte requerida', 'Descripción', 'Cant. requerida', 'Cant. cargada', 'Brecha', 'Cobertura %', 'Estado', 'Precio unitario opción 2', 'Costo estimado opción 2', 'Moneda']
+            annexes.append({
+                'title': 'Anexo E. Comparación completa de repuestos',
+                'intro': 'Comparación completa entre el maestro de carstock y el stock cargado por el distribuidor.',
+                'summary_pairs': [('Filas incluidas', f"{len(annex_table):,}"), ('Alcance', 'Comparación completa de repuestos')],
                 'charts': [],
-                'table_title': 'Complete spare parts comparison',
-                'table_df': full_table,
-                'table_max_rows': max(len(full_table), 1),
+                'table_title': 'Comparación completa de repuestos',
+                'table_df': annex_table,
+                'table_max_rows': max(len(annex_table), 1),
             })
-
-        missing_low_df = full_comparison_df[full_comparison_df['Status'].isin(['Missing','LOW'])].copy() if not full_comparison_df.empty and 'Status' in full_comparison_df.columns else pd.DataFrame()
-        if not missing_low_df.empty:
-            ml_cols = [c for c in ['Required Part Number','Required Description','Required Qty','Uploaded Qty','Qty Gap','Coverage %','Status','Option 2 Unit Price','Option 2 Estimated Cost','Currency'] if c in missing_low_df.columns]
-            missing_low_table = missing_low_df[ml_cols].copy().sort_values(['Status','Qty Gap','Required Part Number'], ascending=[True, False, True])
-            sections.append({
-                'title': 'Spare Parts Annex - Missing and LOW',
-                'summary_pairs': [
-                    ('Rows included', f"{len(missing_low_table):,}"),
-                    ('Scope', 'Items with missing or insufficient stock'),
-                ],
-                'charts': [],
-                'table_title': 'Missing and LOW items',
-                'table_df': missing_low_table,
-                'table_max_rows': max(len(missing_low_table), 1),
-            })
-
         if not purchase_df.empty:
             pur_cols = [c for c in ['Required Part Number','Required Description','Qty Gap','Option 2 Unit Price','Option 2 Estimated Cost','Currency','Status'] if c in purchase_df.columns]
-            purchase_table = purchase_df[pur_cols].copy()
-            sections.append({
-                'title': 'Spare Parts Annex - Purchase Suggestion',
-                'summary_pairs': [
-                    ('Rows included', f"{len(purchase_table):,}"),
-                    ('Scope', 'Suggested purchase to close current gap using option 2 pricing'),
-                ],
+            pur_table = purchase_df[pur_cols].copy()
+            pur_table.columns = ['Parte requerida', 'Descripción', 'Brecha', 'Precio unitario opción 2', 'Costo estimado opción 2', 'Moneda', 'Estado']
+            annexes.append({
+                'title': 'Anexo F. Lista sugerida de compra',
+                'intro': 'Compra sugerida para cerrar la brecha actual de carstock.',
+                'summary_pairs': [('Filas incluidas', f"{len(pur_table):,}"), ('Alcance', 'Lista sugerida de compra basada en opción 2')],
                 'charts': [],
-                'table_title': 'Suggested purchase list',
-                'table_df': purchase_table,
-                'table_max_rows': max(len(purchase_table), 1),
+                'table_title': 'Lista sugerida de compra',
+                'table_df': pur_table,
+                'table_max_rows': max(len(pur_table), 1),
             })
-
         if not extra_df.empty:
             ex_cols = [c for c in ['Uploaded Part Number','Uploaded Description','Uploaded Qty','Status'] if c in extra_df.columns]
-            extra_table = extra_df[ex_cols].copy()
-            sections.append({
-                'title': 'Spare Parts Annex - Extra Items',
-                'summary_pairs': [
-                    ('Rows included', f"{len(extra_table):,}"),
-                    ('Scope', 'Parts reported by the distributor that are not required by the selected carstock master'),
-                ],
+            ex_table = extra_df[ex_cols].copy()
+            ex_table.columns = ['Parte cargada', 'Descripción cargada', 'Cantidad cargada', 'Estado']
+            annexes.append({
+                'title': 'Anexo G. Ítems extra no requeridos',
+                'intro': 'Repuestos reportados por el distribuidor que no pertenecen al maestro de carstock seleccionado.',
+                'summary_pairs': [('Filas incluidas', f"{len(ex_table):,}"), ('Alcance', 'Ítems extra no requeridos por el maestro')],
                 'charts': [],
-                'table_title': 'Extra items not required by master',
-                'table_df': extra_table,
-                'table_max_rows': max(len(extra_table), 1),
+                'table_title': 'Ítems extra no requeridos',
+                'table_df': ex_table,
+                'table_max_rows': max(len(ex_table), 1),
             })
-    else:
-        sections.append({
-            'title': 'Spare Parts / Carstock Gap',
-            'summary_pairs': [('Status', 'No spare parts comparison loaded in the current session.')],
-            'charts': [],
-            'table_title': 'Spare parts comparison',
-            'table_df': pd.DataFrame(columns=['Info']),
-            'table_max_rows': 1,
-        })
-
-    return sections
+    return sections, annexes
 
 
 def build_pdf_report(
@@ -1210,130 +1403,127 @@ def build_pdf_report(
     doc = SimpleDocTemplate(
         buffer,
         pagesize=landscape(A4),
-        leftMargin=1.0 * inch,
-        rightMargin=1.0 * inch,
-        topMargin=1.0 * inch,
-        bottomMargin=1.0 * inch,
+        leftMargin=0.85 * inch,
+        rightMargin=0.85 * inch,
+        topMargin=0.8 * inch,
+        bottomMargin=0.65 * inch,
         title=report_title,
         author=author_name,
     )
 
     styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name="APA_Title", parent=styles["Title"], fontName="Times-Bold", fontSize=16, leading=20, alignment=TA_CENTER, spaceAfter=10, textColor=colors.HexColor("#111111")))
-    styles.add(ParagraphStyle(name="APA_Subtitle", parent=styles["Normal"], fontName="Times-Roman", fontSize=12, leading=24, alignment=TA_CENTER, spaceAfter=6, textColor=colors.HexColor("#444444")))
-    styles.add(ParagraphStyle(name="APA_Heading", parent=styles["Heading2"], fontName="Times-Bold", fontSize=12, leading=16, alignment=TA_LEFT, spaceBefore=4, spaceAfter=6, textColor=colors.HexColor("#111111")))
-    styles.add(ParagraphStyle(name="APA_Body", parent=styles["BodyText"], fontName="Times-Roman", fontSize=12, leading=24, alignment=TA_JUSTIFY, spaceAfter=6))
+    styles.add(ParagraphStyle(name="APA_Title", parent=styles["Title"], fontName="Times-Bold", fontSize=18, leading=24, alignment=TA_CENTER, spaceAfter=12, textColor=colors.HexColor("#111111")))
+    styles.add(ParagraphStyle(name="APA_Subtitle", parent=styles["Normal"], fontName="Times-Roman", fontSize=12, leading=16, alignment=TA_CENTER, spaceAfter=6, textColor=colors.HexColor("#222222")))
+    styles.add(ParagraphStyle(name="APA_Heading", parent=styles["Heading2"], fontName="Times-Bold", fontSize=13, leading=16, alignment=TA_LEFT, spaceBefore=4, spaceAfter=6, textColor=colors.HexColor("#111111")))
+    styles.add(ParagraphStyle(name="APA_Body", parent=styles["BodyText"], fontName="Times-Roman", fontSize=11, leading=16, alignment=TA_JUSTIFY, spaceAfter=6))
     styles.add(ParagraphStyle(name="APA_Cell", parent=styles["BodyText"], fontName="Times-Roman", fontSize=8, leading=10, alignment=TA_LEFT, wordWrap='CJK'))
     styles.add(ParagraphStyle(name="APA_Cell_Header", parent=styles["BodyText"], fontName="Times-Bold", fontSize=8, leading=10, alignment=TA_LEFT, textColor=colors.white))
-    styles.add(ParagraphStyle(name="APA_Signature", parent=styles["BodyText"], fontName="Times-Roman", fontSize=12, leading=24, alignment=TA_LEFT, spaceAfter=3))
+    styles.add(ParagraphStyle(name="APA_Signature", parent=styles["BodyText"], fontName="Times-Roman", fontSize=11, leading=16, alignment=TA_LEFT, spaceAfter=3))
 
     elements = []
-    today_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-    short_title = re.sub(r"\s+", " ", report_title.strip() or "Dashboard Report")[:80]
+    short_title = re.sub(r"\s+", " ", (report_title.strip() or "Informe de base instalada"))[:80]
+    generated_date = datetime.now().strftime("%Y-%m-%d %H:%M")
+    org_name = "DiaSorin S.p.A."
+    title_for_cover = report_title or "Informe de base instalada"
 
-    elements.append(Spacer(1, 0.45 * inch))
-    elements.append(Paragraph(report_title, styles["APA_Title"]))
+    def page_header_footer(canvas, doc):
+        canvas.saveState()
+        width, height = landscape(A4)
+        canvas.setFont("Helvetica", 8)
+        canvas.setFillColor(colors.HexColor("#555555"))
+        canvas.drawString(doc.leftMargin, height - 24, short_title)
+        canvas.drawRightString(width - doc.rightMargin, height - 24, f"Página {doc.page}")
+        canvas.setStrokeColor(colors.HexColor("#D7D7D7"))
+        canvas.setLineWidth(0.5)
+        canvas.line(doc.leftMargin, height - 30, width - doc.rightMargin, height - 30)
+        canvas.line(doc.leftMargin, 24, width - doc.rightMargin, 24)
+        canvas.drawString(doc.leftMargin, 12, generated_date)
+        canvas.drawRightString(width - doc.rightMargin, 12, "Informe ejecutivo en formato APA")
+        canvas.restoreState()
+
+    elements.append(Spacer(1, 1.3 * inch))
+    elements.append(Paragraph(title_for_cover, styles["APA_Title"]))
+    elements.append(Spacer(1, 0.18 * inch))
     elements.append(Paragraph(author_name, styles["APA_Subtitle"]))
     elements.append(Paragraph(author_role, styles["APA_Subtitle"]))
-    elements.append(Paragraph(f"Generated on {today_str}", styles["APA_Subtitle"]))
-    elements.append(Spacer(1, 0.18 * inch))
-    elements.append(Paragraph("This report was generated from the active dashboard filters and includes executive summaries, charts, and supporting tables for the visible tabs in the dashboard, including spare parts when loaded in the current session.", styles["APA_Body"]))
+    elements.append(Paragraph(org_name, styles["APA_Subtitle"]))
+    elements.append(Paragraph(signature_date, styles["APA_Subtitle"]))
+    elements.append(PageBreak())
 
-    elements += _summary_table_from_pairs("Executive Summary", [
-        ("Filtered records", f"{len(filtered_df):,}"),
-        ("Countries", f"{filtered_df['Country'].nunique(dropna=True):,}"),
-        ("Distributors", f"{filtered_df['Distributor name'].nunique(dropna=True):,}"),
-        ("Instrument types", f"{filtered_df['Instrument type'].nunique(dropna=True):,}"),
-        ("Routine assets", f"{int(filtered_df.get('Is in routine', pd.Series(dtype=bool)).sum()):,}"),
-    ], styles)
-    elements.append(Spacer(1, 0.12 * inch))
+    insights, recommendations = _build_executive_insights(filtered_df, stock_context=stock_context)
+    elements.append(Paragraph("Resumen ejecutivo", styles["APA_Heading"]))
+    elements.append(Paragraph(
+        "Este informe consolida la información visible en el dashboard filtrado y resume la base instalada, la configuración de equipo, el sistema operativo, la planificación de mantenimiento preventivo y la cobertura de repuestos del distribuidor seleccionado.",
+        styles["APA_Body"],
+    ))
+    for text_line in insights:
+        elements.append(Paragraph(f"• {_escape_pdf_text(text_line)}", styles["APA_Body"]))
+    elements.append(Spacer(1, 0.06 * inch))
+    elements.append(Paragraph("Acciones recomendadas", styles["APA_Heading"]))
+    for text_line in recommendations:
+        elements.append(Paragraph(f"• {_escape_pdf_text(text_line)}", styles["APA_Body"]))
 
-    filters_table_data = [[Paragraph("<b>Filter</b>", styles["APA_Cell_Header"]), Paragraph("<b>Selected Value</b>", styles["APA_Cell_Header"])]]
-    for key, value in filter_summary.items():
-        filters_table_data.append([_paragraph_cell(key, styles["APA_Cell"]), _paragraph_cell(value, styles["APA_Cell"])])
-    filters_table = Table(filters_table_data, colWidths=[2.2 * inch, 7.2 * inch], repeatRows=1)
-    filters_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f4e79")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#C8D6E5")),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.HexColor("#F7F9FB")]),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 5),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-    ]))
-    elements.append(Paragraph("Active Filters", styles["APA_Heading"]))
-    elements.append(filters_table)
+    elements.append(Spacer(1, 0.08 * inch))
+    filters_pairs = [(k, v) for k, v in filter_summary.items()]
+    for block in _summary_table_from_pairs("Filtros aplicados", filters_pairs, styles):
+        elements.append(block)
 
+    sections, annexes = _build_pdf_sections(filtered_df, stock_context=stock_context)
     from reportlab.platypus import Image
-    sections = _build_pdf_sections(filtered_df, stock_context=stock_context)
     for section in sections:
         elements.append(PageBreak())
         elements.append(Paragraph(section['title'], styles['APA_Heading']))
-        for block in _summary_table_from_pairs("Section Summary", section['summary_pairs'], styles):
+        if section.get('intro'):
+            elements.append(Paragraph(section['intro'], styles['APA_Body']))
+        for block in _summary_table_from_pairs("Resumen de la sección", section['summary_pairs'], styles):
             elements.append(block)
         charts = [c for c in section.get('charts', []) if c is not None]
         if charts:
-            elements.append(Spacer(1, 0.08 * inch))
-            for chart in charts:
-                elements.append(Image(chart, width=7.8 * inch, height=3.5 * inch))
-                elements.append(Spacer(1, 0.08 * inch))
-        elif not MATPLOTLIB_AVAILABLE:
-            elements.append(Paragraph("Chart rendering is unavailable because matplotlib is not installed in the environment.", styles['APA_Body']))
-
+            elements.append(Spacer(1, 0.05 * inch))
+            for fl in _pdf_image_flowables(charts, max_per_row=2):
+                elements.append(fl)
         table_df = section.get('table_df', pd.DataFrame())
-        elements.append(Paragraph(section.get('table_title', 'Supporting Table'), styles['APA_Heading']))
         if table_df is not None and not table_df.empty:
-            if section['title'] == 'Base Installed Overview':
-                width_map = {
-                    'Region': 0.9 * inch, 'Country': 0.9 * inch, 'Distributor': 1.2 * inch, 'Customer': 1.3 * inch,
-                    'Instrument': 1.0 * inch, 'Serial': 0.95 * inch, 'State': 0.8 * inch, 'Raw Status': 1.0 * inch,
-                    'OS': 0.85 * inch, 'Asset': 0.75 * inch, 'Install Date': 0.9 * inch, 'Contract': 1.2 * inch,
-                }
-                col_widths = [width_map.get(c, 0.95 * inch) for c in table_df.columns]
-            elif section['title'].startswith('Spare Parts Annex') or section['title'] == 'Spare Parts / Carstock Gap':
-                spare_width_map = {
-                    'Required Part Number': 1.15 * inch,
-                    'Required Description': 2.45 * inch,
-                    'Required Qty': 0.65 * inch,
-                    'Uploaded Qty': 0.7 * inch,
-                    'Qty Gap': 0.65 * inch,
-                    'Coverage %': 0.7 * inch,
-                    'Status': 0.7 * inch,
-                    'Option 2 Unit Price': 0.9 * inch,
-                    'Option 2 Estimated Cost': 1.05 * inch,
-                    'Currency': 0.55 * inch,
-                    'Uploaded Part Number': 1.15 * inch,
-                    'Uploaded Description': 2.6 * inch,
-                    'Purchase Qty Option 2': 0.9 * inch,
-                }
-                col_widths = [spare_width_map.get(c, 0.9 * inch) for c in table_df.columns]
-            else:
-                col_widths = None
+            elements.append(Paragraph(section.get('table_title', 'Tabla de apoyo'), styles['APA_Heading']))
+            col_widths = None
+            if section['title'] == 'Resumen de base instalada':
+                width_map = {'Region': 0.8 * inch, 'Country': 0.85 * inch, 'Distributor': 1.15 * inch, 'Customer': 1.2 * inch, 'Instrument': 0.95 * inch, 'Serial': 0.9 * inch, 'State': 0.8 * inch, 'Raw Status': 0.9 * inch, 'OS': 0.85 * inch, 'Asset': 0.7 * inch, 'Install Date': 0.85 * inch, 'Contract': 1.15 * inch}
+                col_widths = [width_map.get(c, 0.9 * inch) for c in table_df.columns]
             max_rows = section.get('table_max_rows', len(table_df))
             elements.append(_df_to_wrapped_table(table_df, styles, col_widths=col_widths, max_rows=max_rows))
             if isinstance(max_rows, int) and len(table_df) > max_rows:
-                elements.append(Paragraph(f"Note. Only the first {max_rows} rows are displayed in this section to preserve readability.", styles['APA_Body']))
-        else:
-            elements.append(Paragraph("No detailed rows are available for this section.", styles['APA_Body']))
+                elements.append(Paragraph(f"Nota. En el cuerpo principal solo se muestran las primeras {max_rows} filas. El detalle completo se encuentra en los anexos.", styles['APA_Body']))
 
     elements.append(PageBreak())
-    elements.append(Paragraph("References", styles["APA_Heading"]))
-    references = [line.strip() for line in references_text.splitlines() if line.strip()]
-    if references:
-        for ref in references:
-            elements.append(Paragraph(_escape_pdf_text(ref), styles["APA_Body"]))
-    else:
-        elements.append(Paragraph("No external bibliographic references were provided. This document is based on the operational data loaded in the dashboard and, when available, on the spare parts comparison loaded in the current session.", styles["APA_Body"]))
-
-    elements.append(Spacer(1, 0.14 * inch))
-    elements.append(Paragraph("Signature", styles["APA_Heading"]))
+    elements.append(Paragraph("Conclusiones", styles["APA_Heading"]))
+    for text_line in insights[:4]:
+        elements.append(Paragraph(f"• {_escape_pdf_text(text_line)}", styles["APA_Body"]))
+    elements.append(Spacer(1, 0.06 * inch))
+    elements.append(Paragraph("Fuente de datos", styles["APA_Heading"]))
+    elements.append(Paragraph("Fuente de datos: registros filtrados del dashboard y, cuando aplica, archivo de stock cargado en la sesión actual.", styles["APA_Body"]))
+    elements.append(Spacer(1, 0.08 * inch))
+    elements.append(Paragraph("Firma", styles["APA_Heading"]))
     elements.append(Paragraph(_escape_pdf_text(author_name), styles["APA_Signature"]))
     elements.append(Paragraph(_escape_pdf_text(author_role), styles["APA_Signature"]))
-    elements.append(Paragraph(f"Signature date: {_escape_pdf_text(signature_date)}", styles["APA_Signature"]))
+    elements.append(Paragraph(_escape_pdf_text(org_name), styles["APA_Signature"]))
+    elements.append(Paragraph(f"Fecha: {_escape_pdf_text(signature_date)}", styles["APA_Signature"]))
 
-    doc.build(elements, onFirstPage=lambda canvas, doc: _pdf_header_footer(canvas, doc, short_title), onLaterPages=lambda canvas, doc: _pdf_header_footer(canvas, doc, short_title))
+    for annex in annexes:
+        elements.append(PageBreak())
+        elements.append(Paragraph(annex['title'], styles['APA_Heading']))
+        if annex.get('intro'):
+            elements.append(Paragraph(annex['intro'], styles['APA_Body']))
+        for block in _summary_table_from_pairs("Resumen del anexo", annex['summary_pairs'], styles):
+            elements.append(block)
+        if annex.get('charts'):
+            for fl in _pdf_image_flowables(annex['charts'], max_per_row=2):
+                elements.append(fl)
+        table_df = annex.get('table_df', pd.DataFrame())
+        if table_df is not None and not table_df.empty:
+            elements.append(Paragraph(annex.get('table_title', 'Tabla del anexo'), styles['APA_Heading']))
+            elements.append(_df_to_wrapped_table(table_df, styles, max_rows=annex.get('table_max_rows', len(table_df))))
+
+    doc.build(elements, onFirstPage=page_header_footer, onLaterPages=page_header_footer)
     return buffer.getvalue()
 
 def metric_card(label: str, value: str, subtitle: str = "") -> None:
