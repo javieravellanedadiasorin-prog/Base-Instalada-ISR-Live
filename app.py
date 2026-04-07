@@ -4,6 +4,7 @@ from pathlib import Path
 from datetime import date, datetime
 from io import BytesIO, StringIO
 import re
+import textwrap
 import hashlib
 import csv
 import math
@@ -1664,20 +1665,21 @@ def normalize_search_text(value) -> str:
 def shorten_distributor_name(name: str, max_len: int = 22) -> str:
     text_name = safe_text(name, "No informado")
     exact_map = {
-        "Annar Diagnostica Import sas": "Annar",
-        "Laboratorios Cienvar S.A.": "Cienvar",
-        "WM Argentina S.A.": "WM Argentina",
-        "Grupo Bios": "Grupo Bios",
-        "Bio-Nuclear": "Bio-Nuclear",
-        "Diagnostico UAL": "Diag. UAL",
-        "Biotec del Paraguay, S.R.L.": "Biotec Paraguay",
-        "Biotec del Paraguay": "Biotec Paraguay",
-        "IslaLab Products LLC": "IslaLab",
-        "Capris Médica": "Capris",
-        "Dimex Medica": "Dimex",
-        "Caribbean Medical Supplies inc.": "Caribbean Medical",
-        "Simed Ecuador": "Simed Ecuador",
-        "Simed (Ecuador)": "Simed Ecuador",
+        "annar diagnostica import sas": "Annar",
+        "laboratorios cienvar s a": "Cienvar",
+        "wm argentina s a": "WM Argentina",
+        "grupo bios": "Grupo Bios",
+        "bio nuclear": "Bio-Nuclear",
+        "diagnostico ual": "Diag. UAL",
+        "biotec del paraguay s r l": "Biotec Paraguay",
+        "biotec del paraguay": "Biotec Paraguay",
+        "islalab products llc": "IslaLab",
+        "capris médica": "Capris",
+        "capris medica": "Capris",
+        "dimex medica": "Dimex",
+        "caribbean medical supplies inc": "Caribbean Medical",
+        "simed ecuador": "Simed Ecuador",
+        "simed ecuador": "Simed Ecuador",
     }
     if text_name in exact_map:
         short = exact_map[text_name]
