@@ -621,57 +621,6 @@ def build_config_donut(field_name: str, series: pd.Series, total_assets: int) ->
     return glow_layout(fig, 340, 15)
 
 
-def build_blood_bank_ratio_donut(yes_count: int, total_assets: int) -> go.Figure:
-    no_count = max(int(total_assets) - int(yes_count), 0)
-    fig = go.Figure()
-
-    values = [int(yes_count), int(no_count)]
-    labels = ["Banco de sangre", "Resto de equipos"]
-    colors = [ACCENT, "rgba(255,255,255,0.18)"]
-
-    if total_assets <= 0:
-        fig.add_annotation(
-            text="Sin datos",
-            x=0.5,
-            y=0.5,
-            xref="paper",
-            yref="paper",
-            showarrow=False,
-            font=dict(size=15, color=TEXT),
-        )
-        fig.update_layout(title="Banco de sangre")
-        return glow_layout(fig, 340, 15)
-
-    fig.add_trace(
-        go.Pie(
-            labels=labels,
-            values=values,
-            hole=0.68,
-            sort=False,
-            marker=dict(colors=colors, line=dict(color="rgba(255,255,255,0.18)", width=1.2)),
-            textinfo="percent",
-            textfont=dict(color="#ffffff", size=13),
-            hovertemplate="Grupo: %{label}<br>Equipos: %{value}<br>Participación: %{percent}<extra></extra>",
-        )
-    )
-    pct = (yes_count / total_assets * 100.0) if total_assets > 0 else 0.0
-    fig.add_annotation(
-        text=f"<b>{yes_count:,}</b><br><span style='font-size:11px'>{pct:.1f}% del total</span>",
-        x=0.5,
-        y=0.5,
-        xref="paper",
-        yref="paper",
-        showarrow=False,
-        font=dict(color='#ffffff', size=18),
-    )
-    fig.update_layout(
-        title=f"Banco de sangre | {yes_count:,} de {total_assets:,}",
-        showlegend=True,
-        legend=dict(orientation="h", yanchor="bottom", y=-0.18, xanchor="center", x=0.5, bgcolor="rgba(14,26,42,0.36)", bordercolor="rgba(124,221,255,0.22)", borderwidth=1, font=dict(color="#f8fbff", size=11)),
-    )
-    return glow_layout(fig, 340, 15)
-
-
 def compute_mapbox_center_zoom(df: pd.DataFrame, lat_col: str = "Latitude", lon_col: str = "Longitude") -> tuple[dict, float]:
     geo = df.dropna(subset=[lat_col, lon_col]).copy()
     if geo.empty:
@@ -811,7 +760,7 @@ def apply_operational_status_filter(df: pd.DataFrame, selected_states: list[str]
 
 def clean_filter_value(values) -> str:
     if values is None:
-        return "All"
+        return "Todos"
     if isinstance(values, (list, tuple, set)):
         clean = [str(v) for v in values if str(v).strip()]
         return ", ".join(clean) if clean else "All"
@@ -827,12 +776,48 @@ def build_filter_summary(
     selected_states: list[str],
 ) -> dict[str, str]:
     return {
-        "Commercial Region": clean_filter_value(selected_regions),
-        "Country": clean_filter_value(selected_countries),
-        "Distributor": clean_filter_value(selected_distributors),
-        "Instrument Type": clean_filter_value(selected_instruments),
-        "Operational Status": clean_filter_value(selected_states),
+        "Región comercial": clean_filter_value(selected_regions),
+        "País": clean_filter_value(selected_countries),
+        "Distribuidor": clean_filter_value(selected_distributors),
+        "Tipo de instrumento": clean_filter_value(selected_instruments),
+        "Estado operativo": clean_filter_value(selected_states),
     }
+
+
+def translate_status_value(value: str) -> str:
+    mapping = {
+        'Routine': 'En rutina',
+        'NOT IN ROUTINE': 'No en rutina',
+        'IN ROUTINE': 'En rutina',
+        'Scrapped': 'Descartado',
+        'Warehouse To Be Refurbished': 'Bodega por reacondicionar',
+        'WAREHOUSE to be refurbished': 'Bodega por reacondicionar',
+        'Warehouse Ready To Be Installed': 'Bodega lista para instalar',
+        'WAREHOUSE ready to be installed': 'Bodega lista para instalar',
+        'WAREHOUSE to be scrapped': 'Bodega por descartar',
+        'Refurbisched': 'Reacondicionado',
+        'Refurbished': 'Reacondicionado',
+        'Unknown': 'No informado',
+        'Not installed': 'No informado',
+        'Missing': 'Faltante',
+        'LOW': 'Bajo',
+        'OK': 'OK',
+    }
+    txt = safe_text(value, 'No informado')
+    return mapping.get(txt, txt)
+
+
+def format_pdf_numeric_value(value):
+    if pd.isna(value):
+        return 'No informado'
+    if isinstance(value, (int, np.integer)):
+        return f"{int(value):,}".replace(',', '.')
+    if isinstance(value, (float, np.floating)):
+        if abs(value - round(value)) < 1e-9:
+            return f"{int(round(value)):,}".replace(',', '.')
+        return f"{float(value):,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+    text_value = str(value).strip()
+    return text_value if text_value else 'No informado'
 
 
 def prepare_pdf_report_table(df: pd.DataFrame) -> pd.DataFrame:
@@ -853,35 +838,34 @@ def prepare_pdf_report_table(df: pd.DataFrame) -> pd.DataFrame:
     available = [col for col in preferred_columns if col in df.columns]
     report_df = df[available].copy()
 
-    for col in ["Installation date", "PM next date"]:
-        if col in report_df.columns:
-            report_df[col] = pd.to_datetime(report_df[col], errors="coerce").dt.strftime("%Y-%m-%d")
-            report_df[col] = report_df[col].fillna("N/A")
+    if "Installation date" in report_df.columns:
+        report_df["Installation date"] = pd.to_datetime(report_df["Installation date"], errors="coerce").dt.strftime("%Y-%m-%d").fillna("No informado")
 
     for col in report_df.columns:
-        if col not in ["Installation date", "PM next date"]:
-            report_df[col] = report_df[col].fillna("N/A").astype(str).str.strip().replace("", "N/A")
+        if col == "Installation date":
+            continue
+        report_df[col] = report_df[col].fillna("No informado").astype(str).str.strip().replace("", "No informado")
 
-    report_df = report_df.rename(
-        columns={
-            "Commercial Region": "Region",
-            "Distributor name": "Distributor",
-            "Customer name": "Customer",
-            "Instrument type": "Instrument",
-            "Serial number": "Serial",
-            "Operational status grouped": "State",
-            "Operational status": "Raw Status",
-            "Operating System": "OS",
-            "Asset condition": "Asset",
-            "Installation date": "Install Date",
-            "Type of contract": "Contract",
-        }
-    )
+    for col in ["Operational status grouped", "Operational status", "Asset condition", "Operating System"]:
+        if col in report_df.columns:
+            report_df[col] = report_df[col].map(translate_status_value)
 
-    ordered_cols = [
-        c for c in ["Region", "Country", "Distributor", "Customer", "Instrument", "Serial", "State", "Raw Status", "OS", "Asset", "Install Date", "Contract"]
-        if c in report_df.columns
-    ]
+    report_df = report_df.rename(columns={
+        "Commercial Region": "Región",
+        "Country": "País",
+        "Distributor name": "Distribuidor",
+        "Customer name": "Cliente",
+        "Instrument type": "Instrumento",
+        "Serial number": "Serial",
+        "Operational status grouped": "Estado",
+        "Operational status": "Estado detallado",
+        "Operating System": "Sistema operativo",
+        "Asset condition": "Condición",
+        "Installation date": "Fecha de instalación",
+        "Type of contract": "Tipo de contrato",
+    })
+
+    ordered_cols = [c for c in ["Región", "País", "Distribuidor", "Cliente", "Instrumento", "Serial", "Estado", "Estado detallado", "Sistema operativo", "Condición", "Fecha de instalación", "Tipo de contrato"] if c in report_df.columns]
     return report_df[ordered_cols]
 
 
@@ -907,7 +891,7 @@ def _pdf_header_footer(canvas, doc, short_title: str):
 
 
 def _escape_pdf_text(value) -> str:
-    text = safe_text(value, "N/A")
+    text = safe_text(value, "No informado")
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
@@ -920,13 +904,19 @@ def _df_to_wrapped_table(df: pd.DataFrame, styles, col_widths=None, max_rows=Non
     if max_rows is not None:
         work = work.head(max_rows)
     if work.empty:
-        return Paragraph("No data available for this section.", styles["APA_Body"])
+        return Paragraph("No hay datos disponibles para esta sección.", styles["APA_Body"])
 
     for col in work.columns:
-        work[col] = work[col].fillna("N/A").astype(str).str.slice(0, 110)
+        work[col] = work[col].map(format_pdf_numeric_value).astype(str).str.slice(0, 140)
 
-    header_row = [Paragraph(f"<b>{_escape_pdf_text(c)}</b>", styles["APA_Cell_Header"]) for c in work.columns]
-    body_rows = [[_paragraph_cell(v, styles["APA_Cell"]) for v in row] for row in work.values.tolist()]
+    cell_style = styles["APA_Cell_Tiny"] if len(work.columns) >= 8 else styles["APA_Cell"]
+    header_style = styles["APA_Cell_Header_Tiny"] if len(work.columns) >= 8 else styles["APA_Cell_Header"]
+    header_row = [Paragraph(f"<b>{_escape_pdf_text(c)}</b>", header_style) for c in work.columns]
+    body_rows = [[_paragraph_cell(v, cell_style) for v in row] for row in work.values.tolist()]
+    if col_widths is None:
+        usable_width = 10.9 * inch
+        per_col = usable_width / max(len(work.columns), 1)
+        col_widths = [per_col] * len(work.columns)
     table = Table([header_row] + body_rows, colWidths=col_widths, repeatRows=1)
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#203864")),
@@ -1073,42 +1063,6 @@ def _make_pdf_donut(df: pd.DataFrame, label_col: str, value_col: str, title: str
     return buf
 
 
-
-
-def _make_pdf_blood_bank_total_chart(filtered_df: pd.DataFrame, title: str = 'Banco de sangre vs total filtrado'):
-    if not MATPLOTLIB_AVAILABLE or filtered_df is None or filtered_df.empty:
-        return None
-
-    total_assets = int(len(filtered_df))
-    if total_assets <= 0:
-        return None
-
-    if 'CFG::In Blood Bank' in filtered_df.columns:
-        blood_yes = int(
-            filtered_df['CFG::In Blood Bank']
-            .fillna('')
-            .astype(str)
-            .str.strip()
-            .str.lower()
-            .eq('yes')
-            .sum()
-        )
-    else:
-        blood_yes = 0
-
-    rest_assets = max(total_assets - blood_yes, 0)
-    pct = _safe_share_pct(blood_yes, total_assets)
-
-    chart_df = pd.DataFrame(
-        {
-            'Grupo': ['Banco de sangre', 'Resto de equipos'],
-            'Cantidad': [blood_yes, rest_assets],
-        }
-    )
-
-    buf = _make_pdf_barh(chart_df, 'Grupo', 'Cantidad', f"{title} ({blood_yes} de {total_assets} | {pct:.1f}%)", xlabel='Cantidad', max_rows=2, color='#1f77b4')
-    return buf
-
 def _make_pdf_hist_categories(df: pd.DataFrame, label_col: str, order: list[str], title: str, xlabel: str = 'Cantidad'):
     counts = df[label_col].fillna('No informado').astype(str).value_counts()
     chart_df = pd.DataFrame({label_col: order, 'Count': [int(counts.get(v, 0)) for v in order]})
@@ -1135,114 +1089,54 @@ def _pdf_image_flowables(image_buffers: list, max_per_row: int = 2, image_width:
     return flowables
 
 
-
 def _build_machine_config_summary(filtered_df: pd.DataFrame):
     cfg_cols = [c for c in filtered_df.columns if c.startswith('CFG::')]
-    total_assets = int(len(filtered_df))
     cfg_cov_rows = []
     value_summary_rows = []
     chart_buffers = []
-
     for col in cfg_cols:
-        field_name = col.replace('CFG::', '')
-        display_name = 'Banco de sangre' if field_name == 'In Blood Bank' else field_name
-
-        if field_name == 'In Blood Bank':
-            vc = (
-                filtered_df[col]
-                .fillna('')
-                .astype(str)
-                .str.strip()
-            )
-            vc = vc[vc.str.lower().eq('yes')]
-        else:
-            vc = filtered_df[col].dropna().astype(str).str.strip()
-            vc = vc[vc != '']
-
-        count_non_null = int(vc.shape[0])
+        non_null = filtered_df[col].dropna()
+        count_non_null = int(non_null.shape[0])
         if count_non_null <= 0:
             continue
-
+        field_name = col.replace('CFG::', '')
+        if field_name.strip().lower() in {'operative system', 'operating system'}:
+            continue
+        vc = non_null.astype(str).str.strip()
+        vc = vc[vc != '']
+        if vc.empty:
+            continue
         counts = vc.value_counts().reset_index()
         counts.columns = ['Value', 'Count']
         counts['Share %'] = counts['Count'].map(lambda x: _safe_share_pct(x, counts['Count'].sum()))
         top_value = safe_text(counts.iloc[0]['Value'])
         top_count = int(counts.iloc[0]['Count'])
-
-        cfg_cov_rows.append(
-            {
-                'Campo de configuración': display_name,
-                'Equipos con dato': count_non_null,
-                'Orden': 0 if display_name == 'Banco de sangre' else 1,
-            }
-        )
-
-        if display_name == 'Banco de sangre':
-            total_pct = _safe_share_pct(count_non_null, total_assets)
-            value_summary_rows.append(
-                {
-                    'Campo de configuración': display_name,
-                    'Equipos con dato': count_non_null,
-                    'Valores únicos': int(counts.shape[0]),
-                    'Valor principal': top_value,
-                    'Conteo principal': f"{top_count} ({total_pct:.1f}% del total)",
-                    'Orden': 0,
-                }
-            )
-            for _, row in counts.head(5).iterrows():
-                row_count = int(row['Count'])
-                total_pct_row = _safe_share_pct(row_count, total_assets)
-                value_summary_rows.append(
-                    {
-                        'Campo de configuración': f"{display_name} — valor",
-                        'Equipos con dato': '',
-                        'Valores únicos': '',
-                        'Valor principal': safe_text(row['Value']),
-                        'Conteo principal': f"{row_count} ({total_pct_row:.1f}% del total)",
-                        'Orden': 0,
-                    }
-                )
-            chart = _make_pdf_blood_bank_total_chart(filtered_df, title='Banco de sangre vs total filtrado')
-            chart_buffers.append((999999, chart))
+        cfg_cov_rows.append({'Campo de configuración': field_name, 'Equipos con dato': count_non_null})
+        value_summary_rows.append({
+            'Campo de configuración': field_name,
+            'Equipos con dato': count_non_null,
+            'Valores únicos': int(counts.shape[0]),
+            'Valor principal': top_value,
+            'Conteo principal': top_count,
+        })
+        for _, row in counts.head(5).iterrows():
+            value_summary_rows.append({
+                'Campo de configuración': f"{field_name} — valor",
+                'Equipos con dato': '',
+                'Valores únicos': '',
+                'Valor principal': safe_text(row['Value']),
+                'Conteo principal': f"{int(row['Count'])} ({row['Share %']:.1f}%)",
+            })
+        if counts.shape[0] <= 5 and counts.iloc[0]['Count'] / counts['Count'].sum() < 0.86:
+            chart = _make_pdf_donut(counts.rename(columns={'Value': 'Categoría'}), 'Categoría', 'Count', field_name, max_rows=5)
         else:
-            value_summary_rows.append(
-                {
-                    'Campo de configuración': display_name,
-                    'Equipos con dato': count_non_null,
-                    'Valores únicos': int(counts.shape[0]),
-                    'Valor principal': top_value,
-                    'Conteo principal': top_count,
-                    'Orden': 1,
-                }
-            )
-            for _, row in counts.head(5).iterrows():
-                value_summary_rows.append(
-                    {
-                        'Campo de configuración': f"{display_name} — valor",
-                        'Equipos con dato': '',
-                        'Valores únicos': '',
-                        'Valor principal': safe_text(row['Value']),
-                        'Conteo principal': f"{int(row['Count'])} ({row['Share %']:.1f}%)",
-                        'Orden': 1,
-                    }
-                )
-
-            if counts.shape[0] <= 5 and counts.iloc[0]['Count'] / counts['Count'].sum() < 0.86:
-                chart = _make_pdf_donut(counts.rename(columns={'Value': 'Categoría'}), 'Categoría', 'Count', display_name, max_rows=5)
-            else:
-                chart = _make_pdf_barh(counts.rename(columns={'Value': 'Categoría'}), 'Categoría', 'Count', display_name, xlabel='Equipos', max_rows=6, color='#1f77b4')
-            chart_buffers.append((count_non_null, chart))
-
-    cov_df = pd.DataFrame(cfg_cov_rows)
-    if not cov_df.empty:
-        cov_df = cov_df.sort_values(['Orden', 'Equipos con dato', 'Campo de configuración'], ascending=[True, False, True]).drop(columns=['Orden'])
-
+            chart = _make_pdf_barh(counts.rename(columns={'Value': 'Categoría'}), 'Categoría', 'Count', field_name, xlabel='Equipos', max_rows=6, color='#1f77b4')
+        chart_buffers.append((count_non_null, chart))
+    cov_df = pd.DataFrame(cfg_cov_rows).sort_values('Equipos con dato', ascending=False) if cfg_cov_rows else pd.DataFrame(columns=['Campo de configuración', 'Equipos con dato'])
     value_df = pd.DataFrame(value_summary_rows)
-    if not value_df.empty:
-        value_df = value_df.sort_values(['Orden', 'Campo de configuración'], ascending=[True, True]).drop(columns=['Orden'])
-
     charts = [c for _, c in sorted(chart_buffers, key=lambda x: x[0], reverse=True)[:6]]
     return cov_df, value_df, charts
+
 
 def _build_executive_insights(filtered_df: pd.DataFrame, stock_context: dict | None = None) -> tuple[list[str], list[str]]:
     insights = []
@@ -1255,18 +1149,6 @@ def _build_executive_insights(filtered_df: pd.DataFrame, stock_context: dict | N
         insights.append(f"La base instalada filtrada contiene {total_records} equipos y se concentra principalmente en {top_country} ({top_country_pct}%).")
     routine_assets = int(filtered_df.get('Is in routine', pd.Series(dtype=bool)).sum())
     insights.append(f"Se identificaron {routine_assets} equipos en rutina dentro del universo filtrado.")
-    blood_bank_yes = int(
-        filtered_df.get('CFG::In Blood Bank', pd.Series('', index=filtered_df.index))
-        .fillna('')
-        .astype(str)
-        .str.strip()
-        .str.lower()
-        .eq('yes')
-        .sum()
-    )
-    if blood_bank_yes > 0:
-        blood_bank_pct = _safe_share_pct(blood_bank_yes, total_records)
-        insights.append(f"Se identificaron {blood_bank_yes} equipos de banco de sangre, equivalentes al {blood_bank_pct:.1f}% del total filtrado.")
     os_series = filtered_df.get('Operating System', pd.Series(dtype=object)).fillna('No informado').astype(str)
     legacy_count = int(os_series.isin(['Windows XP', 'Windows Vista', 'Windows 7', 'Windows 2000']).sum())
     unknown_os = int(os_series.isin(['Unknown', 'No informado', 'Not installed']).sum())
@@ -1352,29 +1234,18 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
         'table_max_rows': max(len(filtered_df), 1),
     })
 
-    blood_bank_yes = int(
-        filtered_df.get('CFG::In Blood Bank', pd.Series('', index=filtered_df.index))
-        .fillna('')
-        .astype(str)
-        .str.strip()
-        .str.lower()
-        .eq('yes')
-        .sum()
-    )
-    blood_bank_pct = _safe_share_pct(blood_bank_yes, len(filtered_df))
     cfg_pairs = [
-        ('Equipos con configuración', f"{int((filtered_df['Machine Configurations'].fillna('').astype(str).str.strip().ne('') | filtered_df.get('CFG::In Blood Bank', pd.Series('', index=filtered_df.index)).fillna('').astype(str).str.strip().str.lower().eq('yes')).sum()):,}"),
-        ('Equipos de banco de sangre', f"{blood_bank_yes:,} de {len(filtered_df):,} ({blood_bank_pct:.1f}% del total)"),
-        ('Campos activos de configuración', f"{sum((int(filtered_df[c].fillna('').astype(str).str.strip().str.lower().eq('yes').sum()) > 0) if c == 'CFG::In Blood Bank' else (int(filtered_df[c].notna().sum()) > 0) for c in filtered_df.columns if c.startswith('CFG::')):,}"),
+        ('Equipos con configuración', f"{int(filtered_df['Machine Configurations'].notna().sum()):,}"),
+        ('Campos activos de configuración', f"{sum(int(filtered_df[c].notna().sum()) > 0 for c in filtered_df.columns if c.startswith('CFG::')):,}"),
         ('Promedio de campos poblados', f"{filtered_df.get('Machine config fields populated', pd.Series([0])).fillna(0).mean():.1f}"),
     ]
     cfg_cov, cfg_value_df, cfg_charts = _build_machine_config_summary(filtered_df)
-    coverage_chart = _make_pdf_barh(cfg_cov, 'Campo de configuración', 'Equipos con dato', f'Cobertura de campos de configuración | Banco de sangre: {blood_bank_yes} de {len(filtered_df)} ({blood_bank_pct:.1f}%)', max_rows=10)
+    cfg_charts = cfg_charts[:4]
     sections.append({
         'title': 'Configuración de equipo',
-        'intro': 'Se consolidan los campos detectados en Machine Configuration. Banco de sangre se presenta como indicador ejecutivo principal y solo se consideran como positivos los equipos cuyo valor sea Yes.',
+        'intro': 'Se consolidan los campos detectados en configuración de equipo y se muestran las distribuciones de los ítems con mayor visibilidad en el filtro activo.',
         'summary_pairs': cfg_pairs,
-        'charts': [coverage_chart] + cfg_charts,
+        'charts': [_make_pdf_barh(cfg_cov, 'Campo de configuración', 'Equipos con dato', 'Cobertura de campos de configuración', max_rows=10)] + cfg_charts,
         'table_title': 'Resumen de configuración de equipo',
         'table_df': cfg_value_df,
         'table_max_rows': 12,
@@ -1382,7 +1253,7 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
     if not cfg_value_df.empty:
         annexes.append({
             'title': 'Anexo B. Valores de configuración',
-            'intro': 'Valores principales por campo de configuración. Banco de sangre se expresa contra el total filtrado para facilitar la lectura ejecutiva.',
+            'intro': 'Valores principales por campo de configuración.',
             'summary_pairs': [('Filas incluidas', f"{len(cfg_value_df):,}"), ('Alcance', 'Resumen ampliado de campos y valores de configuración')],
             'charts': [],
             'table_title': 'Valores principales por campo',
@@ -1391,7 +1262,7 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
         })
 
     os_df = filtered_df.copy()
-    os_df['Operating System'] = os_df['Operating System'].fillna('No informado')
+    os_df['Operating System'] = os_df['Operating System'].fillna('No informado').replace({'Unknown':'No informado','Not installed':'No informado'})
     os_df['Bucket de actualización'] = os_df['Operating System'].map(os_upgrade_bucket).replace({
         'Windows 10 / OK': 'Windows 10 / OK',
         'Legacy / urgente migrar': 'Legado / migración urgente',
@@ -1488,7 +1359,7 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
                     df_['Uploaded Qty'] = _clean_spare_qty(df_['Uploaded Qty'])
                 if 'Coverage %' in df_.columns:
                     df_['Coverage %'] = pd.to_numeric(df_['Coverage %'], errors='coerce').fillna(0.0).clip(lower=0.0, upper=999.0)
-        main_status = pd.DataFrame({'Estado': ['OK', 'LOW', 'Missing'], 'Cantidad': [int(stock_context.get('ok_skus', 0)), int(stock_context.get('low_skus', 0)), int(stock_context.get('missing_skus', 0))]})
+        main_status = pd.DataFrame({'Estado': ['OK', 'Bajo', 'Faltante'], 'Cantidad': [int(stock_context.get('ok_skus', 0)), int(stock_context.get('low_skus', 0)), int(stock_context.get('missing_skus', 0))]})
         extras_status = pd.DataFrame({'Estado': ['Extras'], 'Cantidad': [int(stock_context.get('extra_skus', 0))]})
         stock_pairs = [
             ('Distribuidor detectado', stock_context.get('detected_distributor', 'N/A')),
@@ -1506,6 +1377,8 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
         if not stock_top_gap.empty:
             gap_table = stock_top_gap[[c for c in ['Required Part Number','Required Description','Required Qty','Uploaded Qty','Qty Gap','Status','Option 2 Estimated Cost','Currency'] if c in stock_top_gap.columns]].copy()
             gap_table.columns = ['Parte requerida', 'Descripción', 'Cant. requerida', 'Cant. cargada', 'Brecha', 'Estado', 'Costo estimado opción 2', 'Moneda']
+            if 'Estado' in gap_table.columns:
+                gap_table['Estado'] = gap_table['Estado'].map(translate_status_value)
         sections.append({
             'title': 'Repuestos y brecha de carstock',
             'intro': 'Se resume la cobertura del stock requerido y la brecha estimada de compra. Los ítems extra se muestran por separado para no distorsionar la lectura principal del gap.',
@@ -1522,6 +1395,8 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
         if not full_comparison_df.empty:
             annex_table = full_comparison_df[[c for c in ['Required Part Number','Required Description','Required Qty','Uploaded Qty','Qty Gap','Coverage %','Status','Option 2 Unit Price','Option 2 Estimated Cost','Currency'] if c in full_comparison_df.columns]].copy()
             annex_table.columns = ['Parte requerida', 'Descripción', 'Cant. requerida', 'Cant. cargada', 'Brecha', 'Cobertura %', 'Estado', 'Precio unitario opción 2', 'Costo estimado opción 2', 'Moneda']
+            if 'Estado' in annex_table.columns:
+                annex_table['Estado'] = annex_table['Estado'].map(translate_status_value)
             annexes.append({
                 'title': 'Anexo E. Comparación completa de repuestos',
                 'intro': 'Comparación completa entre el maestro de carstock y el stock cargado por el distribuidor.',
@@ -1535,6 +1410,8 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
             pur_cols = [c for c in ['Required Part Number','Required Description','Qty Gap','Option 2 Unit Price','Option 2 Estimated Cost','Currency','Status'] if c in purchase_df.columns]
             pur_table = purchase_df[pur_cols].copy()
             pur_table.columns = ['Parte requerida', 'Descripción', 'Brecha', 'Precio unitario opción 2', 'Costo estimado opción 2', 'Moneda', 'Estado']
+            if 'Estado' in pur_table.columns:
+                pur_table['Estado'] = pur_table['Estado'].map(translate_status_value)
             annexes.append({
                 'title': 'Anexo F. Lista sugerida de compra',
                 'intro': 'Compra sugerida para cerrar la brecha actual de carstock.',
@@ -1591,6 +1468,8 @@ def build_pdf_report(
     styles.add(ParagraphStyle(name="APA_Body", parent=styles["BodyText"], fontName="Times-Roman", fontSize=11, leading=16, alignment=TA_JUSTIFY, spaceAfter=6))
     styles.add(ParagraphStyle(name="APA_Cell", parent=styles["BodyText"], fontName="Times-Roman", fontSize=8, leading=10, alignment=TA_LEFT, wordWrap='CJK'))
     styles.add(ParagraphStyle(name="APA_Cell_Header", parent=styles["BodyText"], fontName="Times-Bold", fontSize=8, leading=10, alignment=TA_LEFT, textColor=colors.white))
+    styles.add(ParagraphStyle(name="APA_Cell_Tiny", parent=styles["BodyText"], fontName="Times-Roman", fontSize=7, leading=8.5, alignment=TA_LEFT, wordWrap='CJK'))
+    styles.add(ParagraphStyle(name="APA_Cell_Header_Tiny", parent=styles["BodyText"], fontName="Times-Bold", fontSize=7, leading=8.5, alignment=TA_LEFT, textColor=colors.white))
     styles.add(ParagraphStyle(name="APA_Signature", parent=styles["BodyText"], fontName="Times-Roman", fontSize=11, leading=16, alignment=TA_LEFT, spaceAfter=3))
 
     elements = []
@@ -1611,7 +1490,7 @@ def build_pdf_report(
         canvas.line(doc.leftMargin, height - 30, width - doc.rightMargin, height - 30)
         canvas.line(doc.leftMargin, 24, width - doc.rightMargin, 24)
         canvas.drawString(doc.leftMargin, 12, generated_date)
-        canvas.drawRightString(width - doc.rightMargin, 12, "Informe ejecutivo en formato APA")
+        canvas.drawRightString(width - doc.rightMargin, 12, "Formato APA")
         canvas.restoreState()
 
     elements.append(Spacer(1, 1.3 * inch))
@@ -1660,7 +1539,10 @@ def build_pdf_report(
             elements.append(Paragraph(section.get('table_title', 'Tabla de apoyo'), styles['APA_Heading']))
             col_widths = None
             if section['title'] == 'Resumen de base instalada':
-                width_map = {'Region': 0.8 * inch, 'Country': 0.85 * inch, 'Distributor': 1.15 * inch, 'Customer': 1.2 * inch, 'Instrument': 0.95 * inch, 'Serial': 0.9 * inch, 'State': 0.8 * inch, 'Raw Status': 0.9 * inch, 'OS': 0.85 * inch, 'Asset': 0.7 * inch, 'Install Date': 0.85 * inch, 'Contract': 1.15 * inch}
+                width_map = {'Región': 0.75 * inch, 'País': 0.75 * inch, 'Distribuidor': 1.1 * inch, 'Cliente': 1.25 * inch, 'Instrumento': 1.0 * inch, 'Serial': 0.8 * inch, 'Estado': 0.8 * inch, 'Estado detallado': 0.95 * inch, 'Sistema operativo': 0.85 * inch, 'Condición': 0.75 * inch, 'Fecha de instalación': 0.9 * inch, 'Tipo de contrato': 1.25 * inch}
+                col_widths = [width_map.get(c, 0.9 * inch) for c in table_df.columns]
+            elif section['title'] == 'Repuestos y brecha de carstock':
+                width_map = {'Parte requerida': 1.0 * inch, 'Descripción': 1.7 * inch, 'Cant. requerida': 0.8 * inch, 'Cant. cargada': 0.8 * inch, 'Brecha': 0.7 * inch, 'Estado': 0.8 * inch, 'Costo estimado opción 2': 1.0 * inch, 'Moneda': 0.55 * inch}
                 col_widths = [width_map.get(c, 0.9 * inch) for c in table_df.columns]
             max_rows = section.get('table_max_rows', len(table_df))
             elements.append(_df_to_wrapped_table(table_df, styles, col_widths=col_widths, max_rows=max_rows))
@@ -1696,7 +1578,11 @@ def build_pdf_report(
             elements.append(Paragraph(annex.get('table_title', 'Tabla del anexo'), styles['APA_Heading']))
             elements.append(_df_to_wrapped_table(table_df, styles, max_rows=annex.get('table_max_rows', len(table_df))))
 
-    doc.build(elements, onFirstPage=page_header_footer, onLaterPages=page_header_footer)
+    def cover_page(canvas, doc):
+        canvas.saveState()
+        canvas.restoreState()
+
+    doc.build(elements, onFirstPage=cover_page, onLaterPages=page_header_footer)
     return buffer.getvalue()
 
 def metric_card(label: str, value: str, subtitle: str = "") -> None:
@@ -2123,23 +2009,6 @@ def parse_machine_configuration(df: pd.DataFrame) -> tuple[pd.DataFrame, list[st
     return pd.concat([df.reset_index(drop=True), cfg_df.reset_index(drop=True)], axis=1), config_cols
 
 
-
-def normalize_blood_bank_value(value):
-    if pd.isna(value):
-        return pd.NA
-    text = str(value).strip()
-    if not text:
-        return pd.NA
-    low = text.lower()
-    if low in {"yes", "y", "true", "1", "si", "sí"}:
-        return "Yes"
-    if low in {"no", "n", "false", "0"}:
-        return "No"
-    if low in {"unknown", "n/a", "na"} or "don't know" in low or "dont know" in low:
-        return pd.NA
-    return pd.NA
-
-
 @st.cache_data(show_spinner=False)
 def add_operating_system_columns(df: pd.DataFrame, config_cols: list[str]) -> pd.DataFrame:
     os_candidates = ["CFG::Operative System", "CFG::ETI-Max 3000 Operative System", "CFG::LQS PC OS"]
@@ -2178,33 +2047,9 @@ def add_operating_system_columns(df: pd.DataFrame, config_cols: list[str]) -> pd
         df["Operating System Raw"] = pd.NA
         df["Operating System"] = pd.NA
 
-    if "In Blood Bank" in df.columns:
-        df["CFG::In Blood Bank"] = df["In Blood Bank"].map(normalize_blood_bank_value)
-    else:
-        df["CFG::In Blood Bank"] = pd.NA
-
     cfg_prefix_cols = [f"CFG::{c}" for c in config_cols if f"CFG::{c}" in df.columns]
-    if "CFG::In Blood Bank" not in cfg_prefix_cols:
-        cfg_prefix_cols.append("CFG::In Blood Bank")
-
-    populated_counts = pd.Series(0, index=df.index, dtype="int64")
-    for col in cfg_prefix_cols:
-        if col == "CFG::In Blood Bank":
-            populated_counts += (
-                df[col]
-                .fillna("")
-                .astype(str)
-                .str.strip()
-                .str.lower()
-                .eq("yes")
-                .astype(int)
-            )
-        else:
-            populated_counts += df[col].notna().astype(int)
-
-    df["Machine config fields populated"] = populated_counts
+    df["Machine config fields populated"] = df[cfg_prefix_cols].notna().sum(axis=1) if cfg_prefix_cols else 0
     return df
-
 
 
 @st.cache_data(show_spinner=False)
@@ -2670,19 +2515,6 @@ def active_config_fields(df: pd.DataFrame, config_keys: list[str]) -> list[str]:
         col = f"CFG::{key}"
         if col in df.columns and df[col].notna().any():
             active.append(key)
-
-    if "CFG::In Blood Bank" in df.columns:
-        yes_count = int(
-            df["CFG::In Blood Bank"]
-            .fillna("")
-            .astype(str)
-            .str.strip()
-            .str.lower()
-            .eq("yes")
-            .sum()
-        )
-        if yes_count > 0 and "In Blood Bank" not in active:
-            active.append("In Blood Bank")
     return active
 
 
@@ -3043,163 +2875,77 @@ with machine_tab:
     st.subheader("Machine configuration")
     st.caption("Vista ejecutiva por ítem de configuración, con gráficas separadas para cada campo aplicable y mayor lectura visual del comportamiento de la base instalada.")
     applicable_fields = active_config_fields(filtered, CONFIG_KEYS)
-    if "In Blood Bank" in applicable_fields:
-        applicable_fields = ["In Blood Bank"] + [f for f in applicable_fields if f != "In Blood Bank"]
     cfg_cols_prefixed = [f"CFG::{col}" for col in applicable_fields]
 
     if not cfg_cols_prefixed:
         st.info("No se detectaron campos aplicables dentro de Machine Configurations para el filtro actual.")
     else:
-        machine_cfg_text = filtered["Machine Configurations"].fillna("").astype(str).str.strip().ne("")
-        blood_bank_yes = (
-            filtered["CFG::In Blood Bank"].fillna("").astype(str).str.strip().str.lower().eq("yes")
-            if "CFG::In Blood Bank" in filtered.columns
-            else pd.Series(False, index=filtered.index)
-        )
-        assets_with_cfg = int((machine_cfg_text | blood_bank_yes).sum())
-        blood_bank_yes_count = int(blood_bank_yes.sum())
-        total_assets_filtered = int(len(filtered))
-        non_blood_bank_count = int(max(total_assets_filtered - blood_bank_yes_count, 0))
+        assets_with_cfg = int(filtered["Machine Configurations"].notna().sum())
         avg_cfg_fields = filtered["Machine config fields populated"].mean()
         unique_cfg_fields = len(applicable_fields)
 
-        mc1, mc2, mc3, mc4 = st.columns(4)
+        mc1, mc2, mc3 = st.columns(3)
         with mc1:
-            metric_card("Equipos con config", f"{assets_with_cfg:,}", "Texto de configuración o banco de sangre = Yes")
+            metric_card("Equipos con config", f"{assets_with_cfg:,}", "Con información en Machine Configurations")
         with mc2:
-            metric_card("Banco de sangre", f"{blood_bank_yes_count:,}", f"De {total_assets_filtered:,} equipos filtrados")
+            metric_card("Campos aplicables", f"{unique_cfg_fields}", "Solo ítems presentes en el filtro actual")
         with mc3:
-            metric_card("Campos aplicables", f"{unique_cfg_fields}", "Banco de sangre aparece primero")
-        with mc4:
             metric_card("Promedio de campos", f"{avg_cfg_fields:.1f}", "Campos poblados por equipo")
 
-        ch1, ch2 = st.columns((0.85, 1.65))
+        coverage_df = pd.DataFrame(
+            [{"Config field": col.replace("CFG::", ""), "Populated assets": int(filtered[col].notna().sum())} for col in cfg_cols_prefixed]
+        )
+        coverage_df = coverage_df[coverage_df["Populated assets"] > 0].sort_values("Populated assets", ascending=False)
 
-        with ch1:
-            bb_compare_df = pd.DataFrame(
-                {
-                    "Grupo": ["Banco de sangre", "Resto de equipos"],
-                    "Cantidad": [blood_bank_yes_count, non_blood_bank_count],
-                }
-            )
-            fig_bb_total = px.bar(
-                bb_compare_df,
-                x="Cantidad",
-                y="Grupo",
-                orientation="h",
-                title=f"Banco de sangre | {blood_bank_yes_count:,} de {total_assets_filtered:,}",
-                text="Cantidad",
-            )
-            fig_bb_total.update_traces(
-                marker_color=ACCENT_2,
-                textposition="outside",
-                hovertemplate="Grupo: %{y}<br>Cantidad: %{x}<extra></extra>",
-            )
-            fig_bb_total.update_layout(yaxis=dict(categoryorder="array", categoryarray=["Resto de equipos", "Banco de sangre"]))
-            st.plotly_chart(glow_layout(fig_bb_total, 420), use_container_width=True)
-
-        with ch2:
-            coverage_rows = []
-            for col in cfg_cols_prefixed:
-                field_name = col.replace("CFG::", "")
-                display_name = "Banco de sangre" if field_name == "In Blood Bank" else field_name
-                if field_name == "In Blood Bank":
-                    populated_assets = blood_bank_yes_count
-                else:
-                    populated_assets = int(filtered[col].notna().sum())
-                coverage_rows.append(
-                    {
-                        "Config field": display_name,
-                        "Populated assets": populated_assets,
-                        "Sort order": 0 if field_name == "In Blood Bank" else 1,
-                    }
-                )
-
-            coverage_df = pd.DataFrame(coverage_rows)
-            if not coverage_df.empty:
-                coverage_df = coverage_df[(coverage_df["Populated assets"] > 0) | (coverage_df["Config field"] == "Banco de sangre")].copy()
-                coverage_df = coverage_df.sort_values(["Sort order", "Populated assets", "Config field"], ascending=[True, False, True])
-
-            fig_cfg_fill = px.bar(
-                coverage_df,
-                x="Populated assets",
-                y="Config field",
-                orientation="h",
-                title="Cobertura por campo aplicable",
-                text="Populated assets",
-            )
-            fig_cfg_fill.update_traces(
-                marker_color=ACCENT,
-                textposition="outside",
-                hovertemplate="Campo: %{y}<br>Equipos con dato: %{x}<extra></extra>",
-            )
-            fig_cfg_fill.update_layout(
-                yaxis=dict(
-                    categoryorder="array",
-                    categoryarray=coverage_df["Config field"].tolist()[::-1] if not coverage_df.empty else []
-                )
-            )
-            st.plotly_chart(glow_layout(fig_cfg_fill, 420), use_container_width=True)
+        fig_cfg_fill = px.bar(
+            coverage_df,
+            x="Populated assets",
+            y="Config field",
+            orientation="h",
+            title="Cobertura por campo aplicable",
+            text="Populated assets",
+        )
+        fig_cfg_fill.update_traces(
+            marker_color=ACCENT,
+            textposition="outside",
+            hovertemplate="Campo: %{y}<br>Equipos con dato: %{x}<extra></extra>",
+        )
+        fig_cfg_fill.update_layout(yaxis=dict(categoryorder="total ascending"))
+        st.plotly_chart(glow_layout(fig_cfg_fill, 520), use_container_width=True)
 
         st.markdown("### Distribución visual por ítem")
         st.markdown(
-            '<div class="small-note">Banco de sangre aparece primero y su total se muestra comparado contra el resto de equipos del filtro actual.</div>',
+            '<div class="small-note">Cada gráfico resume la distribución de valores del ítem correspondiente. Se muestran los valores principales y, si aplica, una categoría <b>Otros</b> para simplificar la lectura.</div>',
             unsafe_allow_html=True,
         )
 
-        donut_fields = applicable_fields
+        donut_fields = coverage_df["Config field"].tolist()
         if donut_fields:
             for idx in range(0, len(donut_fields), 3):
                 cols = st.columns(3)
                 for col_ui, field_name in zip(cols, donut_fields[idx:idx + 3]):
                     selected_cfg_col = f"CFG::{field_name}"
-                    display_name = "Banco de sangre" if field_name == "In Blood Bank" else field_name
-
-                    if field_name == "In Blood Bank":
-                        item_series = filtered[selected_cfg_col].fillna("").astype(str).str.strip()
-                        item_series = item_series[item_series.str.lower().eq("yes")]
-                        total_assets = int(item_series.shape[0])
-                        with col_ui:
-                            st.plotly_chart(build_blood_bank_ratio_donut(total_assets, total_assets_filtered), use_container_width=True)
-                    else:
-                        item_series = filtered[selected_cfg_col].dropna().astype(str).str.strip()
-                        item_series = item_series[item_series.ne("")]
-                        total_assets = int(item_series.shape[0])
-                        with col_ui:
-                            st.plotly_chart(build_config_donut(display_name, item_series, total_assets), use_container_width=True)
+                    item_series = filtered[selected_cfg_col].dropna()
+                    item_series = item_series.astype(str).str.strip()
+                    item_series = item_series[item_series.ne("")]
+                    total_assets = int(item_series.shape[0])
+                    with col_ui:
+                        st.plotly_chart(build_config_donut(field_name, item_series, total_assets), use_container_width=True)
 
         st.markdown("### Top valores por ítem")
         detail_rows = []
         for field_name in donut_fields:
             selected_cfg_col = f"CFG::{field_name}"
-            display_name = "Banco de sangre" if field_name == "In Blood Bank" else field_name
-
-            if field_name == "In Blood Bank":
-                item_series = filtered[selected_cfg_col].fillna("").astype(str).str.strip()
-                item_series = item_series[item_series.str.lower().eq("yes")]
-            else:
-                item_series = filtered[selected_cfg_col].dropna().astype(str).str.strip()
-                item_series = item_series[item_series.ne("")]
-
+            item_series = filtered[selected_cfg_col].dropna().astype(str).str.strip()
+            item_series = item_series[item_series.ne("")]
             if item_series.empty:
-                if field_name == "In Blood Bank":
-                    detail_rows.append(
-                        {
-                            "Config field": "Banco de sangre",
-                            "Top value": "Yes",
-                            "Top count": 0,
-                            "Unique values": 0,
-                            "Assets with value": 0,
-                        }
-                    )
                 continue
-
             dist = item_series.value_counts().reset_index()
             dist.columns = ["Value", "Count"]
             top_row = dist.iloc[0]
             detail_rows.append(
                 {
-                    "Config field": display_name,
+                    "Config field": field_name,
                     "Top value": str(top_row["Value"]),
                     "Top count": int(top_row["Count"]),
                     "Unique values": int(dist.shape[0]),
@@ -3208,14 +2954,9 @@ with machine_tab:
             )
 
         if detail_rows:
-            detail_table_df = pd.DataFrame(detail_rows)
-            if "Config field" in detail_table_df.columns:
-                detail_table_df["__sort"] = np.where(detail_table_df["Config field"].eq("Banco de sangre"), 0, 1)
-                detail_table_df = detail_table_df.sort_values(["__sort", "Assets with value", "Config field"], ascending=[True, False, True]).drop(columns=["__sort"])
-            st.dataframe(detail_table_df, use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(detail_rows), use_container_width=True, hide_index=True)
 
         with st.expander("Ver tabla ampliada de machine configuration"):
-            ordered_fields = ["In Blood Bank"] + [f for f in donut_fields if f != "In Blood Bank"]
             detail_columns = [
                 "Commercial Region",
                 "Country",
@@ -3225,19 +2966,8 @@ with machine_tab:
                 "Serial number",
                 "Operating System",
                 "Operational status",
-            ] + [f"CFG::{field}" for field in ordered_fields]
-            machine_table = filtered[detail_columns].copy()
-            rename_map = {f"CFG::{field}": ("Banco de sangre" if field == "In Blood Bank" else field) for field in ordered_fields}
-            machine_table = machine_table.rename(columns=rename_map)
-
-            if "Banco de sangre" in machine_table.columns:
-                machine_table["Banco de sangre"] = machine_table["Banco de sangre"].fillna("").astype(str).str.strip()
-                machine_table["Banco de sangre"] = np.where(
-                    machine_table["Banco de sangre"].str.lower().eq("yes"),
-                    "Yes",
-                    pd.NA,
-                )
-
+            ] + [f"CFG::{field}" for field in donut_fields]
+            machine_table = filtered[detail_columns].copy().rename(columns={f"CFG::{field}": field for field in donut_fields})
             st.dataframe(machine_table, use_container_width=True, hide_index=True)
 
 with os_tab:
@@ -3999,7 +3729,6 @@ with detail_tab:
         "Address",
         "Instrument type",
         "Product Line",
-        "In Blood Bank",
         "Installation date",
         "Operational status",
         "Type of contract",
@@ -4018,14 +3747,7 @@ with detail_tab:
     applicable_row_fields = []
     for key in active_config_fields(detail_df.loc[[row.name]], CONFIG_KEYS):
         col = f"CFG::{key}"
-        value = row.get(col)
-        if key == "In Blood Bank":
-            value_norm = normalize_blood_bank_value(value)
-            if pd.isna(value_norm) or value_norm != "Yes":
-                continue
-            applicable_row_fields.append({"Campo": "Banco de sangre", "Valor": "Yes"})
-        else:
-            applicable_row_fields.append({"Campo": key, "Valor": safe_text(value, "N/A")})
+        applicable_row_fields.append({"Campo": key, "Valor": safe_text(row.get(col), "N/A")})
 
     if applicable_row_fields:
         st.markdown("### Machine configuration del equipo")
@@ -4038,7 +3760,7 @@ with detail_tab:
 with st.sidebar:
     st.subheader("📄 Informe PDF")
     st.caption("Formato ajustado con márgenes APA de 1 pulgada y estructura de informe técnico ejecutiva.")
-    pdf_title = st.text_input("Título del informe", value="Informe Ejecutivo de Base Instalada")
+    pdf_title = st.text_input("Título del informe", value="Installed Base Dashboard Report")
     pdf_author = st.text_input("Nombre para firma", value="Javier Avellaneda")
     pdf_role = st.text_input("Cargo / título", value="Service Leader | Export LATAM")
     pdf_signature_date = st.text_input("Fecha de firma", value=datetime.now().strftime("%Y-%m-%d"))
