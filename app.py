@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from datetime import date, datetime
 from io import BytesIO, StringIO
+import io
 import re
 import textwrap
 import hashlib
@@ -1806,6 +1807,33 @@ def build_long_palette(n: int) -> list[str]:
 def distributor_display_name(name: str, max_len: int = 22) -> str:
     text_name = safe_text(name, "No informado")
     return shorten_distributor_name(text_name, max_len=max_len)
+
+
+def summarize_distributor_counts(summary_df: pd.DataFrame, top_n: int = 5) -> pd.DataFrame:
+    """
+    Mantiene solo los distribuidores más relevantes para la vista ejecutiva.
+    No agrupa en "Otros"; simplemente corta el dataset al top_n para que la
+    visual principal permanezca legible y ordenada.
+    """
+    if summary_df is None or summary_df.empty:
+        return pd.DataFrame(columns=["Distributor name", "Count"])
+
+    work = summary_df.copy()
+    if "Distributor name" not in work.columns or "Count" not in work.columns:
+        return work
+
+    work["Distributor name"] = work["Distributor name"].fillna("No informado").astype(str)
+    work["Count"] = pd.to_numeric(work["Count"], errors="coerce").fillna(0)
+
+    work = (
+        work.sort_values(["Count", "Distributor name"], ascending=[False, True])
+        .reset_index(drop=True)
+    )
+
+    if isinstance(top_n, int) and top_n > 0:
+        work = work.head(top_n).copy()
+
+    return work.reset_index(drop=True)
 
 DISTRIBUTOR_ALIASES = {
     "annar": "Annar Diagnostica Import sas",
