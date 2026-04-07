@@ -1210,16 +1210,35 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
     age_counts['Rango'] = pd.Categorical(age_counts['Rango'], categories=['0-5 años', '5-8 años', '8-10 años', '10+ años'], ordered=True)
     age_counts = age_counts.sort_values('Rango')
 
+    corporate_model_charts = []
+    corporate_model_df = filtered_df.copy()
+    corporate_model_df['Instrument type'] = corporate_model_df['Instrument type'].fillna('No informado').astype(str)
+    corporate_model_df['Distributor name'] = corporate_model_df['Distributor name'].fillna('No informado').astype(str)
+    model_rank = corporate_model_df['Instrument type'].value_counts().index.tolist()
+    for model_name in model_rank[:6]:
+        model_slice = corporate_model_df[corporate_model_df['Instrument type'] == model_name].copy()
+        counts = model_slice['Distributor name'].value_counts().reset_index()
+        counts.columns = ['Distribuidor', 'Cantidad']
+        if counts.empty:
+            continue
+        if counts.shape[0] > 5:
+            top = counts.head(4).copy()
+            other = int(counts.iloc[4:]['Cantidad'].sum())
+            if other > 0:
+                top = pd.concat([top, pd.DataFrame([{'Distribuidor': 'Otros', 'Cantidad': other}])], ignore_index=True)
+            counts = top
+        corporate_model_charts.append(_make_pdf_donut(counts, 'Distribuidor', 'Cantidad', f'Distribución por distribuidor | {model_name}', max_rows=5))
+
     sections.append({
         'title': 'Resumen de base instalada',
-        'intro': 'Esta sección resume la base instalada filtrada y destaca la concentración geográfica, el mix de instrumentos, el estado operativo y el perfil de antigüedad.',
+        'intro': 'Esta sección resume la base instalada filtrada y destaca la concentración geográfica, el mix de instrumentos, el estado operativo, el perfil de antigüedad y la distribución por distribuidor para cada modelo visible.',
         'summary_pairs': base_pairs,
         'charts': [
             _make_pdf_barh(top_country, 'País', 'Cantidad', 'Países con mayor concentración', max_rows=10),
             _make_pdf_barh(top_inst, 'Instrumento', 'Cantidad', 'Mix de instrumentos', max_rows=10),
             _make_pdf_barh(state_counts, 'Estado', 'Cantidad', 'Distribución por estado operativo', max_rows=10),
             _make_pdf_barh(age_counts, 'Rango', 'Cantidad', 'Perfil de antigüedad', max_rows=4),
-        ],
+        ] + corporate_model_charts,
         'table_title': 'Muestra resumida de equipos filtrados',
         'table_df': prepare_pdf_report_table(filtered_df),
         'table_max_rows': 10,
@@ -2586,6 +2605,81 @@ def build_distributor_status_chart(df: pd.DataFrame, selected_model: str) -> go.
         legend_title="Estado operativo",
     )
     return glow_layout(fig, 620, 17)
+
+
+def build_distributor_model_donut(df: pd.DataFrame, selected_model: str) -> go.Figure:
+    fig = go.Figure()
+
+    if df.empty or not selected_model:
+        fig.update_layout(title="Distribución por distribuidor")
+        return glow_layout(fig, 360, 15)
+
+    work = df.copy()
+    work["Instrument type"] = work["Instrument type"].fillna("No informado").astype(str)
+    work["Distributor name"] = work["Distributor name"].fillna("No informado").astype(str)
+    model_df = work[work["Instrument type"] == selected_model].copy()
+
+    if model_df.empty:
+        fig.update_layout(title=selected_model)
+        return glow_layout(fig, 360, 15)
+
+    summary = (
+        model_df.groupby("Distributor name", dropna=False)
+        .size()
+        .reset_index(name="Count")
+        .sort_values("Count", ascending=False)
+    )
+
+    if summary.empty:
+        fig.update_layout(title=selected_model)
+        return glow_layout(fig, 360, 15)
+
+    if len(summary) > 5:
+        top = summary.head(4).copy()
+        other = int(summary.iloc[4:]["Count"].sum())
+        if other > 0:
+            top = pd.concat([top, pd.DataFrame([{"Distributor name": "Otros", "Count": other}])], ignore_index=True)
+        summary = top
+
+    palette = [ACCENT, ACCENT_2, ACCENT_3, WARNING, "rgba(255,255,255,0.28)"]
+    fig.add_trace(
+        go.Pie(
+            labels=summary["Distributor name"],
+            values=summary["Count"],
+            hole=0.68,
+            sort=False,
+            marker=dict(colors=palette[:len(summary)], line=dict(color="rgba(255,255,255,0.20)", width=1.2)),
+            textinfo="percent",
+            textfont=dict(color="#ffffff", size=12),
+            hovertemplate="<b>Modelo:</b> " + selected_model + "<br><b>Distribuidor:</b> %{label}<br><b>Cantidad:</b> %{value}<br><b>Participación:</b> %{percent}<extra></extra>",
+        )
+    )
+    total_assets = int(summary["Count"].sum())
+    fig.add_annotation(
+        text=f"<b>{total_assets:,}</b><br><span style='font-size:11px'>equipos</span>",
+        x=0.5,
+        y=0.5,
+        xref="paper",
+        yref="paper",
+        showarrow=False,
+        font=dict(color="#ffffff", size=17),
+    )
+    fig.update_layout(
+        title=selected_model,
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=-0.22,
+            xanchor="center",
+            x=0.5,
+            bgcolor="rgba(14,26,42,0.36)",
+            bordercolor="rgba(124,221,255,0.22)",
+            borderwidth=1,
+            font=dict(color="#f8fbff", size=10),
+        ),
+    )
+    return glow_layout(fig, 360, 15)
 
 
 st.markdown(
