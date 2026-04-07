@@ -1835,16 +1835,17 @@ def summarize_distributor_counts(summary_df: pd.DataFrame, top_n: int = 5) -> pd
 
     return work.reset_index(drop=True)
 
-
 def build_distributor_detail_table(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Tabla de soporte para el expander de detalle completo por modelo.
-    No resume ni recorta distribuidores: muestra el universo completo
-    ordenado de mayor a menor dentro de cada modelo.
-    """
-    columns = ["Modelo", "Distribuidor", "Cantidad", "% del modelo", "% del total filtrado"]
     if df is None or df.empty:
-        return pd.DataFrame(columns=columns)
+        return pd.DataFrame(
+            columns=[
+                "Modelo",
+                "Distribuidor",
+                "Cantidad",
+                "% del modelo",
+                "% del total filtrado",
+            ]
+        )
 
     work = df.copy()
     work["Instrument type"] = work["Instrument type"].fillna("No informado").astype(str).str.strip()
@@ -1855,43 +1856,34 @@ def build_distributor_detail_table(df: pd.DataFrame) -> pd.DataFrame:
         .size()
         .reset_index(name="Cantidad")
     )
-    if summary.empty:
-        return pd.DataFrame(columns=columns)
 
-    total_filtered = float(summary["Cantidad"].sum())
+    if summary.empty:
+        return pd.DataFrame(
+            columns=[
+                "Modelo",
+                "Distribuidor",
+                "Cantidad",
+                "% del modelo",
+                "% del total filtrado",
+            ]
+        )
+
+    total_filtered = int(summary["Cantidad"].sum())
+
     model_totals = (
         summary.groupby("Instrument type", as_index=False)["Cantidad"]
         .sum()
         .rename(columns={"Cantidad": "Total modelo"})
     )
+
     summary = summary.merge(model_totals, on="Instrument type", how="left")
-    summary["% del modelo"] = np.where(
-        summary["Total modelo"] > 0,
-        (summary["Cantidad"] / summary["Total modelo"] * 100).round(1),
-        0.0,
-    )
-    summary["% del total filtrado"] = np.where(
-        total_filtered > 0,
-        (summary["Cantidad"] / total_filtered * 100).round(1),
-        0.0,
-    )
+    summary["% del modelo"] = (summary["Cantidad"] / summary["Total modelo"] * 100).round(1)
+    summary["% del total filtrado"] = (summary["Cantidad"] / total_filtered * 100).round(1)
 
-    summary = summary.rename(
-        columns={
-            "Instrument type": "Modelo",
-            "Distributor name": "Distribuidor",
-        }
-    )
+    summary = summary.rename(columns={"Instrument type": "Modelo", "Distributor name": "Distribuidor"})
+    summary = summary.sort_values(by=["Modelo", "Cantidad", "Distribuidor"], ascending=[True, False, True]).reset_index(drop=True)
 
-    summary["Distribuidor"] = summary["Distribuidor"].map(lambda x: safe_text(x, "No informado"))
-
-    summary = summary.sort_values(
-        by=["Modelo", "Cantidad", "Distribuidor"],
-        ascending=[True, False, True],
-        kind="stable",
-    ).reset_index(drop=True)
-
-    return summary[columns]
+    return summary[["Modelo", "Distribuidor", "Cantidad", "% del modelo", "% del total filtrado"]]
 
 DISTRIBUTOR_ALIASES = {
     "annar": "Annar Diagnostica Import sas",
