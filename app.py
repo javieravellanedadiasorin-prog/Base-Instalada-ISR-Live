@@ -1885,6 +1885,66 @@ def build_distributor_detail_table(df: pd.DataFrame) -> pd.DataFrame:
 
     return summary[["Modelo", "Distribuidor", "Cantidad", "% del modelo", "% del total filtrado"]]
 
+
+def build_distributor_detail_bar(df: pd.DataFrame, selected_model: str) -> go.Figure:
+    fig = go.Figure()
+
+    if df is None or df.empty or not selected_model:
+        fig.update_layout(title="Detalle completo por distribuidor")
+        return glow_layout(fig, 520, 15)
+
+    work = df.copy()
+    work["Instrument type"] = work["Instrument type"].fillna("No informado").astype(str).str.strip()
+    work["Distributor name"] = work["Distributor name"].fillna("No informado").astype(str).str.strip()
+
+    model_df = work[work["Instrument type"].eq(selected_model)].copy()
+    if model_df.empty:
+        fig.update_layout(title=f"Detalle completo | {selected_model}")
+        return glow_layout(fig, 520, 15)
+
+    summary = (
+        model_df.groupby("Distributor name", dropna=False)
+        .size()
+        .reset_index(name="Count")
+    )
+    if summary.empty:
+        fig.update_layout(title=f"Detalle completo | {selected_model}")
+        return glow_layout(fig, 520, 15)
+
+    summary["Distributor name"] = summary["Distributor name"].fillna("No informado").astype(str)
+    summary["Count"] = pd.to_numeric(summary["Count"], errors="coerce").fillna(0)
+    summary = summary.sort_values(["Count", "Distributor name"], ascending=[False, True]).reset_index(drop=True)
+    summary["Display name"] = summary["Distributor name"].map(lambda x: distributor_display_name(x, 28))
+
+    palette = build_long_palette(len(summary))
+    color_map = {row["Display name"]: palette[i % len(palette)] for i, (_, row) in enumerate(summary.iterrows())}
+    order = summary["Display name"].tolist()[::-1]
+
+    fig = px.bar(
+        summary,
+        x="Count",
+        y="Display name",
+        orientation="h",
+        text="Count",
+        title=f"Detalle completo | {selected_model}",
+        custom_data=["Distributor name", "Count"],
+        color="Display name",
+        color_discrete_map=color_map,
+        category_orders={"Display name": order},
+    )
+    fig.update_traces(
+        textposition="outside",
+        hovertemplate="<b>Modelo:</b> " + selected_model + "<br><b>Distribuidor:</b> %{customdata[0]}<br><b>Cantidad:</b> %{customdata[1]}<extra></extra>",
+        showlegend=False,
+    )
+    fig.update_layout(
+        xaxis_title="Cantidad de equipos",
+        yaxis_title="Distribuidor",
+        margin=dict(t=72, b=28, l=8, r=8),
+        height=max(420, 80 + 32 * len(summary)),
+    )
+    return glow_layout(fig, max(420, 80 + 32 * len(summary)), 15)
+
 DISTRIBUTOR_ALIASES = {
     "annar": "Annar Diagnostica Import sas",
     "bio nuclear": "Bio-Nuclear",
