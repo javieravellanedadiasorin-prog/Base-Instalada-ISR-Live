@@ -1293,6 +1293,7 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
         counts = model_slice['Distributor name'].value_counts().reset_index()
         counts.columns = ['Distribuidor', 'Cantidad']
         counts['Distribuidor'] = counts['Distribuidor'].astype(str).map(lambda x: distributor_display_name(x, 20))
+        counts = counts.sort_values(['Cantidad', 'Distribuidor'], ascending=[False, True]).reset_index(drop=True)
         if counts.empty:
             continue
         corporate_model_charts.append(_make_pdf_donut(counts, 'Distribuidor', 'Cantidad', f'Distribución por distribuidor | {model_name}', max_rows=max(12, len(counts) + 1)))
@@ -2747,7 +2748,12 @@ def build_distributor_global_overview(df: pd.DataFrame) -> go.Figure:
         return glow_layout(fig, 520, 16)
 
     dist_order = summary.groupby('Distributor name', as_index=False)['Count'].sum().sort_values('Count', ascending=False)['Distributor name'].tolist()
-    summary['Legend label'] = summary['Distributor name'].astype(str).map(lambda x: distributor_display_name(x, 18))
+    label_map = {name: distributor_display_name(name, 18) for name in dist_order}
+    legend_order = [label_map[name] for name in dist_order]
+    summary['Legend label'] = summary['Distributor name'].astype(str).map(label_map)
+    summary['Legend label'] = pd.Categorical(summary['Legend label'], categories=legend_order, ordered=True)
+    summary['Instrument type'] = pd.Categorical(summary['Instrument type'], categories=model_order, ordered=True)
+    summary = summary.sort_values(['Instrument type', 'Legend label', 'Count'], ascending=[True, True, False])
     palette = build_long_palette(len(dist_order))
 
     fig = px.bar(
@@ -2759,7 +2765,7 @@ def build_distributor_global_overview(df: pd.DataFrame) -> go.Figure:
         barmode='stack',
         text='Count',
         title='Vista global por distribuidor',
-        category_orders={'Instrument type': model_order},
+        category_orders={'Instrument type': model_order, 'Legend label': legend_order},
         color_discrete_sequence=palette,
         custom_data=['Instrument type', 'Distributor name', 'Count'],
     )
@@ -2807,6 +2813,7 @@ def build_distributor_model_donut(df: pd.DataFrame, selected_model: str) -> go.F
         return glow_layout(fig, 430, 15)
 
     summary["Legend label"] = summary["Distributor name"].astype(str).map(lambda x: distributor_display_name(x, 20))
+    summary = summary.sort_values(["Count", "Legend label"], ascending=[False, True]).reset_index(drop=True)
     palette = build_long_palette(len(summary))
 
     fig.add_trace(
