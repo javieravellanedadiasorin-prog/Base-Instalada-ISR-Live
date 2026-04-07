@@ -1286,27 +1286,16 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
         .rename(columns={'Instrument type': 'Modelo', 'Distributor name': 'Distribuidor'})
     )
     if not global_dist.empty:
-        dist_order = global_dist.groupby('Distribuidor', as_index=False)['Cantidad'].sum().sort_values('Cantidad', ascending=False)['Distribuidor'].tolist()
-        if len(dist_order) > 6:
-            keep = dist_order[:5]
-            global_dist['Distribuidor'] = np.where(global_dist['Distribuidor'].isin(keep), global_dist['Distribuidor'], 'Otros')
-            global_dist = global_dist.groupby(['Modelo', 'Distribuidor'], as_index=False)['Cantidad'].sum()
-        global_dist['Distribuidor'] = global_dist['Distribuidor'].astype(str).map(lambda x: shorten_distributor_name(x, 20) if x != 'Otros' else 'Otros')
-        corporate_model_charts.append(_make_pdf_stacked_barh(global_dist, 'Modelo', 'Distribuidor', 'Cantidad', 'Vista global por distribuidor', max_categories=8, max_segments=6))
+        global_dist['Distribuidor'] = global_dist['Distribuidor'].astype(str).map(lambda x: distributor_display_name(x, 18))
+        corporate_model_charts.append(_make_pdf_stacked_barh(global_dist, 'Modelo', 'Distribuidor', 'Cantidad', 'Vista global por distribuidor', max_categories=8, max_segments=50))
     for model_name in model_rank[:6]:
         model_slice = corporate_model_df[corporate_model_df['Instrument type'] == model_name].copy()
         counts = model_slice['Distributor name'].value_counts().reset_index()
         counts.columns = ['Distribuidor', 'Cantidad']
-        counts['Distribuidor'] = counts['Distribuidor'].astype(str).map(lambda x: shorten_distributor_name(x, 22) if x != 'Otros' else 'Otros')
+        counts['Distribuidor'] = counts['Distribuidor'].astype(str).map(lambda x: distributor_display_name(x, 20))
         if counts.empty:
             continue
-        if counts.shape[0] > 5:
-            top = counts.head(4).copy()
-            other = int(counts.iloc[4:]['Cantidad'].sum())
-            if other > 0:
-                top = pd.concat([top, pd.DataFrame([{'Distribuidor': 'Otros', 'Cantidad': other}])], ignore_index=True)
-            counts = top
-        corporate_model_charts.append(_make_pdf_donut(counts, 'Distribuidor', 'Cantidad', f'Distribución por distribuidor | {model_name}', max_rows=5))
+        corporate_model_charts.append(_make_pdf_donut(counts, 'Distribuidor', 'Cantidad', f'Distribución por distribuidor | {model_name}', max_rows=max(12, len(counts) + 1)))
 
     sections.append({
         'title': 'Resumen de base instalada',
@@ -1779,6 +1768,18 @@ def shorten_distributor_name(name: str, max_len: int = 22) -> str:
 
 def wrap_chart_title(text_value: str, width: int = 28) -> str:
     return "<br>".join(textwrap.wrap(safe_text(text_value, ""), width=width)) if safe_text(text_value, "") else ""
+
+def build_long_palette(n: int) -> list[str]:
+    base = [ACCENT, ACCENT_2, ACCENT_3, WARNING, "#9BB1FF", "#C084FC", "#F472B6", "#60A5FA", "#34D399", "#F59E0B", "#A78BFA", "#F87171", "#22D3EE", "#4ADE80"]
+    if n <= len(base):
+        return base[:n]
+    repeats = (n // len(base)) + 1
+    return (base * repeats)[:n]
+
+
+def distributor_display_name(name: str, max_len: int = 22) -> str:
+    text_name = safe_text(name, "No informado")
+    return shorten_distributor_name(text_name, max_len=max_len)
 
 DISTRIBUTOR_ALIASES = {
     "annar": "Annar Diagnostica Import sas",
@@ -2746,23 +2747,8 @@ def build_distributor_global_overview(df: pd.DataFrame) -> go.Figure:
         return glow_layout(fig, 520, 16)
 
     dist_order = summary.groupby('Distributor name', as_index=False)['Count'].sum().sort_values('Count', ascending=False)['Distributor name'].tolist()
-    if len(dist_order) > 6:
-        keep = dist_order[:5]
-        summary['Distributor group'] = np.where(summary['Distributor name'].isin(keep), summary['Distributor name'], 'Otros')
-        summary = summary.groupby(['Instrument type', 'Distributor group'], as_index=False)['Count'].sum()
-        color_order = keep + ['Otros']
-        color_col = 'Distributor group'
-    else:
-        summary['Distributor group'] = summary['Distributor name']
-        color_order = dist_order
-        color_col = 'Distributor group'
-
-    color_map = {}
-    palette = [ACCENT, ACCENT_2, ACCENT_3, WARNING, '#9BB1FF', 'rgba(255,255,255,0.28)']
-    for i, name in enumerate(color_order):
-        short_name = shorten_distributor_name(name, 18) if name != 'Otros' else 'Otros'
-        color_map[name] = palette[i % len(palette)]
-        summary.loc[summary[color_col] == name, 'Legend label'] = short_name
+    summary['Legend label'] = summary['Distributor name'].astype(str).map(lambda x: distributor_display_name(x, 18))
+    palette = build_long_palette(len(dist_order))
 
     fig = px.bar(
         summary,
@@ -2775,7 +2761,7 @@ def build_distributor_global_overview(df: pd.DataFrame) -> go.Figure:
         title='Vista global por distribuidor',
         category_orders={'Instrument type': model_order},
         color_discrete_sequence=palette,
-        custom_data=['Instrument type', 'Distributor group', 'Count'],
+        custom_data=['Instrument type', 'Distributor name', 'Count'],
     )
     fig.update_traces(
         textposition='inside',
@@ -2820,15 +2806,8 @@ def build_distributor_model_donut(df: pd.DataFrame, selected_model: str) -> go.F
         fig.update_layout(title=selected_model)
         return glow_layout(fig, 430, 15)
 
-    if len(summary) > 5:
-        top = summary.head(4).copy()
-        other = int(summary.iloc[4:]["Count"].sum())
-        if other > 0:
-            top = pd.concat([top, pd.DataFrame([{"Distributor name": "Otros", "Count": other}])], ignore_index=True)
-        summary = top
-
-    summary["Legend label"] = summary["Distributor name"].astype(str).map(lambda x: shorten_distributor_name(x, 20))
-    palette = [ACCENT, ACCENT_2, ACCENT_3, WARNING, "rgba(255,255,255,0.28)"]
+    summary["Legend label"] = summary["Distributor name"].astype(str).map(lambda x: distributor_display_name(x, 20))
+    palette = build_long_palette(len(summary))
 
     fig.add_trace(
         go.Pie(
@@ -2876,72 +2855,6 @@ def build_distributor_model_donut(df: pd.DataFrame, selected_model: str) -> go.F
     )
     return glow_layout(fig, 430, 15)
 
-    work = df.copy()
-    work["Instrument type"] = work["Instrument type"].fillna("No informado").astype(str)
-    work["Distributor name"] = work["Distributor name"].fillna("No informado").astype(str)
-    model_df = work[work["Instrument type"] == selected_model].copy()
-
-    if model_df.empty:
-        fig.update_layout(title=selected_model)
-        return glow_layout(fig, 360, 15)
-
-    summary = (
-        model_df.groupby("Distributor name", dropna=False)
-        .size()
-        .reset_index(name="Count")
-        .sort_values("Count", ascending=False)
-    )
-
-    if summary.empty:
-        fig.update_layout(title=selected_model)
-        return glow_layout(fig, 360, 15)
-
-    if len(summary) > 5:
-        top = summary.head(4).copy()
-        other = int(summary.iloc[4:]["Count"].sum())
-        if other > 0:
-            top = pd.concat([top, pd.DataFrame([{"Distributor name": "Otros", "Count": other}])], ignore_index=True)
-        summary = top
-
-    palette = [ACCENT, ACCENT_2, ACCENT_3, WARNING, "rgba(255,255,255,0.28)"]
-    fig.add_trace(
-        go.Pie(
-            labels=summary["Distributor name"],
-            values=summary["Count"],
-            hole=0.68,
-            sort=False,
-            marker=dict(colors=palette[:len(summary)], line=dict(color="rgba(255,255,255,0.20)", width=1.2)),
-            textinfo="percent",
-            textfont=dict(color="#ffffff", size=12),
-            hovertemplate="<b>Modelo:</b> " + selected_model + "<br><b>Distribuidor:</b> %{label}<br><b>Cantidad:</b> %{value}<br><b>Participación:</b> %{percent}<extra></extra>",
-        )
-    )
-    total_assets = int(summary["Count"].sum())
-    fig.add_annotation(
-        text=f"<b>{total_assets:,}</b><br><span style='font-size:11px'>equipos</span>",
-        x=0.5,
-        y=0.5,
-        xref="paper",
-        yref="paper",
-        showarrow=False,
-        font=dict(color="#ffffff", size=17),
-    )
-    fig.update_layout(
-        title=selected_model,
-        showlegend=True,
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=-0.22,
-            xanchor="center",
-            x=0.5,
-            bgcolor="rgba(14,26,42,0.36)",
-            bordercolor="rgba(124,221,255,0.22)",
-            borderwidth=1,
-            font=dict(color="#f8fbff", size=10),
-        ),
-    )
-    return glow_layout(fig, 360, 15)
 
 
 st.markdown(
