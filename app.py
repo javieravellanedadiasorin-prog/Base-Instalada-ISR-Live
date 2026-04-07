@@ -1021,6 +1021,69 @@ def _make_pdf_barh(df: pd.DataFrame, label_col: str, value_col: str, title: str,
     return buf
 
 
+
+
+def _make_pdf_stacked_barh(df: pd.DataFrame, category_col: str, segment_col: str, value_col: str, title: str, max_categories: int = 8, max_segments: int = 6):
+    if df is None or df.empty or category_col not in df.columns or segment_col not in df.columns or value_col not in df.columns:
+        return None
+
+    work = df.copy()
+    work[category_col] = work[category_col].fillna('No informado').astype(str)
+    work[segment_col] = work[segment_col].fillna('No informado').astype(str)
+    work[value_col] = pd.to_numeric(work[value_col], errors='coerce').fillna(0)
+    work = work[work[value_col] > 0]
+    if work.empty:
+        return None
+
+    cat_order = (
+        work.groupby(category_col, as_index=False)[value_col]
+        .sum()
+        .sort_values(value_col, ascending=False)[category_col]
+        .tolist()
+    )[:max_categories]
+    work = work[work[category_col].isin(cat_order)].copy()
+
+    seg_order = (
+        work.groupby(segment_col, as_index=False)[value_col]
+        .sum()
+        .sort_values(value_col, ascending=False)[segment_col]
+        .tolist()
+    )
+    if len(seg_order) > max_segments:
+        keep = seg_order[: max_segments - 1]
+        work[segment_col] = np.where(work[segment_col].isin(keep), work[segment_col], 'Otros')
+        seg_order = keep + ['Otros']
+        work = work.groupby([category_col, segment_col], as_index=False)[value_col].sum()
+
+    pivot = work.pivot_table(index=category_col, columns=segment_col, values=value_col, aggfunc='sum', fill_value=0)
+    pivot = pivot.reindex(index=cat_order, fill_value=0)
+    ordered_cols = [c for c in seg_order if c in pivot.columns] + [c for c in pivot.columns if c not in seg_order]
+    pivot = pivot[ordered_cols]
+
+    fig, ax = plt.subplots(figsize=(8.6, 4.6))
+    left = np.zeros(len(pivot))
+    palette = ['#5BC0EB', '#9BB1FF', '#63E0C9', '#FDBA5A', '#6B7280', '#C084FC']
+
+    for i, col in enumerate(pivot.columns):
+        values = pivot[col].to_numpy(dtype=float)
+        bars = ax.barh(pivot.index.astype(str), values, left=left, color=palette[i % len(palette)], label=str(col))
+        for b, v, l in zip(bars, values, left):
+            if v >= 1:
+                ax.text(l + v + 0.3, b.get_y() + b.get_height()/2, f'{int(v)}', va='center', ha='left', fontsize=8, color='#0F172A')
+        left = left + values
+
+    ax.set_title(title, fontsize=13, fontweight='bold')
+    ax.set_xlabel('Cantidad')
+    ax.set_ylabel('Modelo')
+    ax.grid(axis='x', alpha=0.22)
+    ax.invert_yaxis()
+    ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.14), ncol=min(3, max(1, len(pivot.columns))), frameon=False, fontsize=8)
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', dpi=220, bbox_inches='tight')
+    plt.close(fig)
+    buf.seek(0)
+    return buf
 def _make_pdf_donut(df: pd.DataFrame, label_col: str, value_col: str, title: str, max_rows: int = 5):
     if not MATPLOTLIB_AVAILABLE or df is None or df.empty or label_col not in df.columns or value_col not in df.columns:
         return None
@@ -1216,6 +1279,20 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
     corporate_model_df['Instrument type'] = corporate_model_df['Instrument type'].fillna('No informado').astype(str)
     corporate_model_df['Distributor name'] = corporate_model_df['Distributor name'].fillna('No informado').astype(str)
     model_rank = corporate_model_df['Instrument type'].value_counts().index.tolist()
+    global_dist = (
+        corporate_model_df.groupby(['Instrument type', 'Distributor name'], dropna=False)
+        .size()
+        .reset_index(name='Cantidad')
+        .rename(columns={'Instrument type': 'Modelo', 'Distributor name': 'Distribuidor'})
+    )
+    if not global_dist.empty:
+        dist_order = global_dist.groupby('Distribuidor', as_index=False)['Cantidad'].sum().sort_values('Cantidad', ascending=False)['Distribuidor'].tolist()
+        if len(dist_order) > 6:
+            keep = dist_order[:5]
+            global_dist['Distribuidor'] = np.where(global_dist['Distribuidor'].isin(keep), global_dist['Distribuidor'], 'Otros')
+            global_dist = global_dist.groupby(['Modelo', 'Distribuidor'], as_index=False)['Cantidad'].sum()
+        global_dist['Distribuidor'] = global_dist['Distribuidor'].astype(str).map(lambda x: shorten_distributor_name(x, 20) if x != 'Otros' else 'Otros')
+        corporate_model_charts.append(_make_pdf_stacked_barh(global_dist, 'Modelo', 'Distribuidor', 'Cantidad', 'Vista global por distribuidor', max_categories=8, max_segments=6))
     for model_name in model_rank[:6]:
         model_slice = corporate_model_df[corporate_model_df['Instrument type'] == model_name].copy()
         counts = model_slice['Distributor name'].value_counts().reset_index()
@@ -2651,6 +2728,71 @@ def build_distributor_status_chart(df: pd.DataFrame, selected_model: str) -> go.
     return glow_layout(fig, 620, 17)
 
 
+def build_distributor_global_overview(df: pd.DataFrame) -> go.Figure:
+    fig = go.Figure()
+
+    if df.empty:
+        fig.update_layout(title='Vista global por distribuidor')
+        return glow_layout(fig, 520, 16)
+
+    work = df.copy()
+    work['Instrument type'] = work['Instrument type'].fillna('No informado').astype(str)
+    work['Distributor name'] = work['Distributor name'].fillna('No informado').astype(str)
+
+    model_order = work['Instrument type'].value_counts().index.tolist()
+    summary = work.groupby(['Instrument type', 'Distributor name'], dropna=False).size().reset_index(name='Count')
+    if summary.empty:
+        fig.update_layout(title='Vista global por distribuidor')
+        return glow_layout(fig, 520, 16)
+
+    dist_order = summary.groupby('Distributor name', as_index=False)['Count'].sum().sort_values('Count', ascending=False)['Distributor name'].tolist()
+    if len(dist_order) > 6:
+        keep = dist_order[:5]
+        summary['Distributor group'] = np.where(summary['Distributor name'].isin(keep), summary['Distributor name'], 'Otros')
+        summary = summary.groupby(['Instrument type', 'Distributor group'], as_index=False)['Count'].sum()
+        color_order = keep + ['Otros']
+        color_col = 'Distributor group'
+    else:
+        summary['Distributor group'] = summary['Distributor name']
+        color_order = dist_order
+        color_col = 'Distributor group'
+
+    color_map = {}
+    palette = [ACCENT, ACCENT_2, ACCENT_3, WARNING, '#9BB1FF', 'rgba(255,255,255,0.28)']
+    for i, name in enumerate(color_order):
+        short_name = shorten_distributor_name(name, 18) if name != 'Otros' else 'Otros'
+        color_map[name] = palette[i % len(palette)]
+        summary.loc[summary[color_col] == name, 'Legend label'] = short_name
+
+    fig = px.bar(
+        summary,
+        y='Instrument type',
+        x='Count',
+        color='Legend label',
+        orientation='h',
+        barmode='stack',
+        text='Count',
+        title='Vista global por distribuidor',
+        category_orders={'Instrument type': model_order},
+        color_discrete_sequence=palette,
+        custom_data=['Instrument type', 'Distributor group', 'Count'],
+    )
+    fig.update_traces(
+        textposition='inside',
+        insidetextanchor='middle',
+        hovertemplate='<b>Modelo:</b> %{customdata[0]}<br><b>Distribuidor:</b> %{customdata[1]}<br><b>Cantidad:</b> %{customdata[2]}<extra></extra>'
+    )
+    fig.update_layout(
+        legend_title='Distribuidor',
+        xaxis_title='Cantidad de equipos',
+        yaxis_title='Modelo',
+        margin=dict(t=72, b=48, l=8, r=8),
+        height=520,
+    )
+    fig.update_yaxes(categoryorder='array', categoryarray=model_order[::-1])
+    return glow_layout(fig, 520, 16)
+
+
 def build_distributor_model_donut(df: pd.DataFrame, selected_model: str) -> go.Figure:
     fig = go.Figure()
 
@@ -3062,8 +3204,13 @@ with base_tab:
     )
     if model_options:
         st.markdown(
-            '<div class="small-note">Ahora la vista corporativa muestra de una vez la distribución por distribuidor para cada modelo visible en el filtro actual, con gráficas circulares independientes y sin necesidad de seleccionar nada manualmente.</div>',
+            '<div class="small-note">Primero se muestra la vista global consolidada por distribuidor y modelo; debajo aparecen las gráficas circulares independientes por cada modelo visible en el filtro actual, sin necesidad de seleccionar nada manualmente.</div>',
             unsafe_allow_html=True,
+        )
+        st.plotly_chart(
+            build_distributor_global_overview(filtered),
+            use_container_width=True,
+            key="global_distributor_overview_bar",
         )
 
         cards_per_row = 3
