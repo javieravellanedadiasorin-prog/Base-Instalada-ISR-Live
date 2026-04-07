@@ -2932,20 +2932,31 @@ with base_tab:
         st.plotly_chart(glow_layout(fig_city, 470), use_container_width=True)
 
     st.markdown("### Vista corporativa por distribuidor")
-    model_options = sorted(filtered["Instrument type"].dropna().astype(str).unique().tolist())
+    model_options = (
+        filtered["Instrument type"]
+        .fillna("No informado")
+        .astype(str)
+        .value_counts()
+        .index
+        .tolist()
+    )
     if model_options:
-        default_model = model_options[0]
-        selected_model_for_status = st.selectbox(
-            "Selecciona el modelo de equipo",
-            options=model_options,
-            index=0,
-            key="corporate_distributor_model_selector",
-        )
         st.markdown(
-            '<div class="small-note">Visual principal corporativo: un modelo a la vez, todos los distribuidores, estados apilados horizontalmente.</div>',
+            '<div class="small-note">Ahora la vista corporativa muestra de una vez la distribución por distribuidor para cada modelo visible en el filtro actual, con gráficas circulares independientes y sin necesidad de seleccionar nada manualmente.</div>',
             unsafe_allow_html=True,
         )
-        st.plotly_chart(build_distributor_status_chart(filtered, selected_model_for_status), use_container_width=True)
+
+        cards_per_row = 3
+        for start in range(0, len(model_options), cards_per_row):
+            row_models = model_options[start:start + cards_per_row]
+            cols = st.columns(len(row_models))
+            for col, model_name in zip(cols, row_models):
+                with col:
+                    st.plotly_chart(
+                        build_distributor_model_donut(filtered, model_name),
+                        use_container_width=True,
+                        key=f"donut_model_distributor_{normalize_key_text(model_name)}",
+                    )
 
     st.markdown("### Tabla general filtrada")
     visible_columns = [
