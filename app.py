@@ -1053,8 +1053,8 @@ def _make_pdf_donut(df: pd.DataFrame, label_col: str, value_col: str, title: str
     )
     ax.text(0, 0.05, safe_number_text(total, '0'), ha='center', va='center', fontsize=16, fontweight='bold')
     ax.text(0, -0.15, 'equipos', ha='center', va='center', fontsize=9)
-    ax.set_title(title, fontsize=11, fontweight='bold', pad=12)
-    ax.legend(wedges, labels, loc='lower center', bbox_to_anchor=(0.5, -0.20), ncol=2, fontsize=7, frameon=False)
+    ax.set_title(_wrap_label(title, 34), fontsize=10.5, fontweight='bold', pad=10)
+    ax.legend(wedges, labels, loc='lower center', bbox_to_anchor=(0.5, -0.22), ncol=2, fontsize=7, frameon=False, columnspacing=1.2, handletextpad=0.6)
     fig.tight_layout()
     buf = BytesIO()
     fig.savefig(buf, format='png', dpi=180, bbox_inches='tight', facecolor='white')
@@ -1219,6 +1219,7 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
         model_slice = corporate_model_df[corporate_model_df['Instrument type'] == model_name].copy()
         counts = model_slice['Distributor name'].value_counts().reset_index()
         counts.columns = ['Distribuidor', 'Cantidad']
+        counts['Distribuidor'] = counts['Distribuidor'].astype(str).map(lambda x: shorten_distributor_name(x, 22) if x != 'Otros' else 'Otros')
         if counts.empty:
             continue
         if counts.shape[0] > 5:
@@ -1658,6 +1659,47 @@ def normalize_search_text(value) -> str:
         return ""
     return re.sub(r"[^a-z0-9]+", " ", str(value).lower()).strip()
 
+
+
+def shorten_distributor_name(name: str, max_len: int = 22) -> str:
+    text_name = safe_text(name, "No informado")
+    exact_map = {
+        "Annar Diagnostica Import sas": "Annar",
+        "Laboratorios Cienvar S.A.": "Cienvar",
+        "WM Argentina S.A.": "WM Argentina",
+        "Grupo Bios": "Grupo Bios",
+        "Bio-Nuclear": "Bio-Nuclear",
+        "Diagnostico UAL": "Diag. UAL",
+        "Biotec del Paraguay, S.R.L.": "Biotec Paraguay",
+        "Biotec del Paraguay": "Biotec Paraguay",
+        "IslaLab Products LLC": "IslaLab",
+        "Capris Médica": "Capris",
+        "Dimex Medica": "Dimex",
+        "Caribbean Medical Supplies inc.": "Caribbean Medical",
+        "Simed Ecuador": "Simed Ecuador",
+        "Simed (Ecuador)": "Simed Ecuador",
+    }
+    if text_name in exact_map:
+        short = exact_map[text_name]
+        return short if len(short) <= max_len else short[: max_len - 1] + "…"
+
+    cleaned = re.sub(r"\b(s\.a\.?|s\.a\.s\.?|s\.r\.l\.?|ltd\.?|llc|inc\.?|corp\.?|corporation|company|import|imports|diagnostica|diagnostics|medical|medica|laboratorios|laboratorio)\b", "", text_name, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,.-")
+    if not cleaned:
+        cleaned = text_name
+
+    words = cleaned.split()
+    if len(cleaned) <= max_len:
+        return cleaned
+    if len(words) >= 2:
+        candidate = " ".join(words[:2]).strip()
+        if len(candidate) <= max_len:
+            return candidate
+    return cleaned[: max_len - 1].rstrip() + "…"
+
+
+def wrap_chart_title(text_value: str, width: int = 28) -> str:
+    return "<br>".join(textwrap.wrap(safe_text(text_value, ""), width=width)) if safe_text(text_value, "") else ""
 
 DISTRIBUTOR_ALIASES = {
     "annar": "Annar Diagnostica Import sas",
@@ -2612,7 +2654,83 @@ def build_distributor_model_donut(df: pd.DataFrame, selected_model: str) -> go.F
 
     if df.empty or not selected_model:
         fig.update_layout(title="Distribución por distribuidor")
-        return glow_layout(fig, 360, 15)
+        return glow_layout(fig, 430, 15)
+
+    work = df.copy()
+    work["Instrument type"] = work["Instrument type"].fillna("No informado").astype(str)
+    work["Distributor name"] = work["Distributor name"].fillna("No informado").astype(str)
+    model_df = work[work["Instrument type"] == selected_model].copy()
+
+    if model_df.empty:
+        fig.update_layout(title=selected_model)
+        return glow_layout(fig, 430, 15)
+
+    summary = (
+        model_df.groupby("Distributor name", dropna=False)
+        .size()
+        .reset_index(name="Count")
+        .sort_values("Count", ascending=False)
+    )
+
+    if summary.empty:
+        fig.update_layout(title=selected_model)
+        return glow_layout(fig, 430, 15)
+
+    if len(summary) > 5:
+        top = summary.head(4).copy()
+        other = int(summary.iloc[4:]["Count"].sum())
+        if other > 0:
+            top = pd.concat([top, pd.DataFrame([{"Distributor name": "Otros", "Count": other}])], ignore_index=True)
+        summary = top
+
+    summary["Legend label"] = summary["Distributor name"].astype(str).map(lambda x: shorten_distributor_name(x, 20))
+    palette = [ACCENT, ACCENT_2, ACCENT_3, WARNING, "rgba(255,255,255,0.28)"]
+
+    fig.add_trace(
+        go.Pie(
+            labels=summary["Legend label"],
+            values=summary["Count"],
+            hole=0.68,
+            sort=False,
+            marker=dict(colors=palette[:len(summary)], line=dict(color="rgba(255,255,255,0.20)", width=1.2)),
+            textinfo="percent",
+            textfont=dict(color="#ffffff", size=12),
+            customdata=np.column_stack([summary["Distributor name"], summary["Count"]]),
+            hovertemplate="<b>Modelo:</b> "
+            + selected_model
+            + "<br><b>Distribuidor:</b> %{customdata[0]}<br><b>Cantidad:</b> %{customdata[1]}<br><b>Participación:</b> %{percent}<extra></extra>",
+        )
+    )
+    total_assets = int(summary["Count"].sum())
+    fig.add_annotation(
+        text=f"<b>{total_assets:,}</b><br><span style='font-size:11px'>equipos</span>",
+        x=0.5,
+        y=0.52,
+        xref="paper",
+        yref="paper",
+        showarrow=False,
+        font=dict(color="#ffffff", size=17),
+    )
+    fig.update_layout(
+        title=dict(text=wrap_chart_title(selected_model, 26), x=0.03, y=0.96, xanchor="left", yanchor="top", font=dict(size=14, color="#f9fdff")),
+        showlegend=True,
+        height=430,
+        margin=dict(t=72, b=96, l=8, r=8),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=-0.10,
+            xanchor="center",
+            x=0.5,
+            bgcolor="rgba(14,26,42,0.18)",
+            bordercolor="rgba(124,221,255,0.16)",
+            borderwidth=1,
+            font=dict(color="#f8fbff", size=10),
+            itemwidth=90,
+            itemsizing="constant",
+        ),
+    )
+    return glow_layout(fig, 430, 15)
 
     work = df.copy()
     work["Instrument type"] = work["Instrument type"].fillna("No informado").astype(str)
