@@ -1286,17 +1286,24 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
         .rename(columns={'Instrument type': 'Modelo', 'Distributor name': 'Distribuidor'})
     )
     if not global_dist.empty:
-        global_dist['Distribuidor'] = global_dist['Distribuidor'].astype(str).map(lambda x: distributor_display_name(x, 18))
-        corporate_model_charts.append(_make_pdf_stacked_barh(global_dist, 'Modelo', 'Distribuidor', 'Cantidad', 'Vista global por distribuidor', max_categories=8, max_segments=50))
+        top_global = global_dist.groupby('Distribuidor', as_index=False)['Cantidad'].sum().sort_values(['Cantidad', 'Distribuidor'], ascending=[False, True]).head(5)['Distribuidor'].tolist()
+        global_dist_main = global_dist[global_dist['Distribuidor'].isin(top_global)].copy()
+        global_dist_main['Distribuidor'] = global_dist_main['Distribuidor'].astype(str).map(lambda x: distributor_display_name(x, 18))
+        corporate_model_charts.append(_make_pdf_stacked_barh(global_dist_main, 'Modelo', 'Distribuidor', 'Cantidad', 'Vista global por distribuidor | resumen (Top 5)', max_categories=8, max_segments=6))
+    detail_corporate_rows = []
     for model_name in model_rank[:6]:
         model_slice = corporate_model_df[corporate_model_df['Instrument type'] == model_name].copy()
         counts = model_slice['Distributor name'].value_counts().reset_index()
         counts.columns = ['Distribuidor', 'Cantidad']
-        counts['Distribuidor'] = counts['Distribuidor'].astype(str).map(lambda x: distributor_display_name(x, 20))
         counts = counts.sort_values(['Cantidad', 'Distribuidor'], ascending=[False, True]).reset_index(drop=True)
         if counts.empty:
             continue
-        corporate_model_charts.append(_make_pdf_donut(counts, 'Distribuidor', 'Cantidad', f'Distribución por distribuidor | {model_name}', max_rows=max(12, len(counts) + 1)))
+        top_counts = counts.head(5).copy()
+        top_counts['Distribuidor'] = top_counts['Distribuidor'].astype(str).map(lambda x: distributor_display_name(x, 20))
+        corporate_model_charts.append(_make_pdf_donut(top_counts, 'Distribuidor', 'Cantidad', f'Distribución por distribuidor | {model_name} | Top 5', max_rows=5))
+        full_counts = counts.copy()
+        full_counts['Modelo'] = model_name
+        detail_corporate_rows.append(full_counts)
 
     sections.append({
         'title': 'Resumen de base instalada',
@@ -1321,6 +1328,24 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
         'table_df': prepare_pdf_report_table(filtered_df),
         'table_max_rows': max(len(filtered_df), 1),
     })
+    if detail_corporate_rows:
+        detail_corporate_df = pd.concat(detail_corporate_rows, ignore_index=True)
+        detail_charts = []
+        for model_name in model_rank[:6]:
+            model_detail = detail_corporate_df[detail_corporate_df['Modelo'].eq(model_name)].copy()
+            if model_detail.empty:
+                continue
+            model_detail['Distribuidor'] = model_detail['Distribuidor'].astype(str).map(lambda x: distributor_display_name(x, 28))
+            detail_charts.append(_make_pdf_barh(model_detail, 'Distribuidor', 'Cantidad', f'Detalle completo | {model_name}', xlabel='Cantidad de equipos', max_rows=max(12, len(model_detail)), color='#2F80ED'))
+        annexes.append({
+            'title': 'Anexo B. Distribución completa por distribuidor y modelo',
+            'intro': 'Detalle completo de distribuidores por modelo. En el cuerpo principal solo se muestra el resumen Top 5 para mantener la lectura ejecutiva.',
+            'summary_pairs': [('Filas incluidas', f"{len(detail_corporate_df):,}"), ('Alcance', 'Detalle completo de distribuidores por modelo')],
+            'charts': detail_charts,
+            'table_title': 'Detalle completo por modelo',
+            'table_df': detail_corporate_df[['Modelo', 'Distribuidor', 'Cantidad']].sort_values(['Modelo', 'Cantidad', 'Distribuidor'], ascending=[True, False, True]),
+            'table_max_rows': max(len(detail_corporate_df), 1),
+        })
 
     cfg_pairs = [
         ('Equipos con configuración', f"{int(filtered_df['Machine Configurations'].notna().sum()):,}"),
@@ -1340,7 +1365,7 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
     })
     if not cfg_value_df.empty:
         annexes.append({
-            'title': 'Anexo B. Valores de configuración',
+            'title': 'Anexo C. Valores de configuración',
             'intro': 'Valores principales por campo de configuración.',
             'summary_pairs': [('Filas incluidas', f"{len(cfg_value_df):,}"), ('Alcance', 'Resumen ampliado de campos y valores de configuración')],
             'charts': [],
@@ -1383,7 +1408,7 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
     })
     if not urgent_table.empty:
         annexes.append({
-            'title': 'Anexo C. Equipos con OS legado',
+            'title': 'Anexo D. Equipos con OS legado',
             'intro': 'Detalle de equipos con sistema operativo legado.',
             'summary_pairs': [('Filas incluidas', f"{len(urgent_table):,}"), ('Alcance', 'Equipos con Windows XP/Vista/7/2000')],
             'charts': [],
@@ -1426,7 +1451,7 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
         'table_max_rows': 10,
     })
     annexes.append({
-        'title': 'Anexo D. Detalle de procesamiento y PM',
+        'title': 'Anexo E. Detalle de procesamiento y PM',
         'intro': 'Detalle ampliado de pruebas por día y estado de PM.',
         'summary_pairs': [('Filas incluidas', f"{len(proc_table):,}"), ('Alcance', 'Detalle ampliado de procesamiento y mantenimiento preventivo')],
         'charts': [],
@@ -1486,7 +1511,7 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
             if 'Estado' in annex_table.columns:
                 annex_table['Estado'] = annex_table['Estado'].map(translate_status_value)
             annexes.append({
-                'title': 'Anexo E. Comparación completa de repuestos',
+                'title': 'Anexo F. Comparación completa de repuestos',
                 'intro': 'Comparación completa entre el maestro de carstock y el stock cargado por el distribuidor.',
                 'summary_pairs': [('Filas incluidas', f"{len(annex_table):,}"), ('Alcance', 'Comparación completa de repuestos')],
                 'charts': [],
@@ -1501,7 +1526,7 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
             if 'Estado' in pur_table.columns:
                 pur_table['Estado'] = pur_table['Estado'].map(translate_status_value)
             annexes.append({
-                'title': 'Anexo F. Lista sugerida de compra',
+                'title': 'Anexo G. Lista sugerida de compra',
                 'intro': 'Compra sugerida para cerrar la brecha actual de carstock.',
                 'summary_pairs': [('Filas incluidas', f"{len(pur_table):,}"), ('Alcance', 'Lista sugerida de compra basada en opción 2')],
                 'charts': [],
@@ -1514,7 +1539,7 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
             ex_table = extra_df[ex_cols].copy()
             ex_table.columns = ['Parte cargada', 'Descripción cargada', 'Cantidad cargada', 'Estado']
             annexes.append({
-                'title': 'Anexo G. Ítems extra no requeridos',
+                'title': 'Anexo H. Ítems extra no requeridos',
                 'intro': 'Repuestos reportados por el distribuidor que no pertenecen al maestro de carstock seleccionado.',
                 'summary_pairs': [('Filas incluidas', f"{len(ex_table):,}"), ('Alcance', 'Ítems extra no requeridos por el maestro')],
                 'charts': [],
@@ -2730,7 +2755,7 @@ def build_distributor_status_chart(df: pd.DataFrame, selected_model: str) -> go.
     return glow_layout(fig, 620, 17)
 
 
-def build_distributor_global_overview(df: pd.DataFrame) -> go.Figure:
+def build_distributor_global_overview(df: pd.DataFrame, top_n: int = 5) -> go.Figure:
     fig = go.Figure()
 
     if df.empty:
@@ -2747,14 +2772,16 @@ def build_distributor_global_overview(df: pd.DataFrame) -> go.Figure:
         fig.update_layout(title='Vista global por distribuidor')
         return glow_layout(fig, 520, 16)
 
-    dist_order = summary.groupby('Distributor name', as_index=False)['Count'].sum().sort_values('Count', ascending=False)['Distributor name'].tolist()
-    label_map = {name: distributor_display_name(name, 18) for name in dist_order}
-    legend_order = [label_map[name] for name in dist_order]
+    dist_order = summary.groupby('Distributor name', as_index=False)['Count'].sum().sort_values(['Count', 'Distributor name'], ascending=[False, True])
+    top_distributors = dist_order['Distributor name'].tolist()[:top_n]
+    summary = summary[summary['Distributor name'].isin(top_distributors)].copy()
+    label_map = {name: distributor_display_name(name, 18) for name in top_distributors}
+    legend_order = [label_map[name] for name in top_distributors]
     summary['Legend label'] = summary['Distributor name'].astype(str).map(label_map)
     summary['Legend label'] = pd.Categorical(summary['Legend label'], categories=legend_order, ordered=True)
     summary['Instrument type'] = pd.Categorical(summary['Instrument type'], categories=model_order, ordered=True)
     summary = summary.sort_values(['Instrument type', 'Legend label', 'Count'], ascending=[True, True, False])
-    palette = build_long_palette(len(dist_order))
+    palette = build_long_palette(len(top_distributors))
 
     fig = px.bar(
         summary,
@@ -2764,7 +2791,7 @@ def build_distributor_global_overview(df: pd.DataFrame) -> go.Figure:
         orientation='h',
         barmode='stack',
         text='Count',
-        title='Vista global por distribuidor',
+        title='Vista global por distribuidor | resumen ejecutivo (Top 5)',
         category_orders={'Instrument type': model_order, 'Legend label': legend_order},
         color_discrete_sequence=palette,
         custom_data=['Instrument type', 'Distributor name', 'Count'],
@@ -2785,7 +2812,7 @@ def build_distributor_global_overview(df: pd.DataFrame) -> go.Figure:
     return glow_layout(fig, 520, 16)
 
 
-def build_distributor_model_donut(df: pd.DataFrame, selected_model: str) -> go.Figure:
+def build_distributor_model_donut(df: pd.DataFrame, selected_model: str, top_n: int = 5) -> go.Figure:
     fig = go.Figure()
 
     if df.empty or not selected_model:
@@ -2805,13 +2832,15 @@ def build_distributor_model_donut(df: pd.DataFrame, selected_model: str) -> go.F
         model_df.groupby("Distributor name", dropna=False)
         .size()
         .reset_index(name="Count")
-        .sort_values("Count", ascending=False)
+        .sort_values(["Count", "Distributor name"], ascending=[False, True])
+        .reset_index(drop=True)
     )
 
     if summary.empty:
         fig.update_layout(title=selected_model)
         return glow_layout(fig, 430, 15)
 
+    summary = summarize_distributor_counts(summary, top_n=top_n)
     summary["Legend label"] = summary["Distributor name"].astype(str).map(lambda x: distributor_display_name(x, 20))
     summary = summary.sort_values(["Count", "Legend label"], ascending=[False, True]).reset_index(drop=True)
     palette = build_long_palette(len(summary))
@@ -2831,7 +2860,7 @@ def build_distributor_model_donut(df: pd.DataFrame, selected_model: str) -> go.F
             + "<br><b>Distribuidor:</b> %{customdata[0]}<br><b>Cantidad:</b> %{customdata[1]}<br><b>Participación:</b> %{percent}<extra></extra>",
         )
     )
-    total_assets = int(summary["Count"].sum())
+    total_assets = int(model_df.shape[0])
     fig.add_annotation(
         text=f"<b>{total_assets:,}</b><br><span style='font-size:11px'>equipos</span>",
         x=0.5,
@@ -2842,7 +2871,7 @@ def build_distributor_model_donut(df: pd.DataFrame, selected_model: str) -> go.F
         font=dict(color="#ffffff", size=17),
     )
     fig.update_layout(
-        title=dict(text=wrap_chart_title(selected_model, 26), x=0.03, y=0.96, xanchor="left", yanchor="top", font=dict(size=14, color="#f9fdff")),
+        title=dict(text=wrap_chart_title(f"{selected_model} | Top 5", 26), x=0.03, y=0.96, xanchor="left", yanchor="top", font=dict(size=14, color="#f9fdff")),
         showlegend=True,
         height=430,
         margin=dict(t=72, b=96, l=8, r=8),
@@ -2861,7 +2890,6 @@ def build_distributor_model_donut(df: pd.DataFrame, selected_model: str) -> go.F
         ),
     )
     return glow_layout(fig, 430, 15)
-
 
 
 st.markdown(
@@ -3124,11 +3152,11 @@ with base_tab:
     )
     if model_options:
         st.markdown(
-            '<div class="small-note">Primero se muestra la vista global consolidada por distribuidor y modelo; debajo aparecen las gráficas circulares independientes por cada modelo visible en el filtro actual, sin necesidad de seleccionar nada manualmente.</div>',
+            '<div class="small-note">Primero se muestra un resumen ejecutivo con los distribuidores más relevantes. Debajo aparecen gráficos circulares Top 5 por modelo. El detalle completo de todos los distribuidores se puede abrir más abajo sin saturar la vista principal.</div>',
             unsafe_allow_html=True,
         )
         st.plotly_chart(
-            build_distributor_global_overview(filtered),
+            build_distributor_global_overview(filtered, top_n=5),
             use_container_width=True,
             key="global_distributor_overview_bar",
         )
@@ -3140,10 +3168,23 @@ with base_tab:
             for col, model_name in zip(cols, row_models):
                 with col:
                     st.plotly_chart(
-                        build_distributor_model_donut(filtered, model_name),
+                        build_distributor_model_donut(filtered, model_name, top_n=5),
                         use_container_width=True,
                         key=f"donut_model_distributor_{normalize_key_text(model_name)}",
                     )
+
+        with st.expander("Ver detalle completo de todos los distribuidores por modelo", expanded=False):
+            st.markdown(
+                '<div class="small-note">Esta vista despliega el detalle completo sin resumir. Se usa una barra horizontal por modelo porque comunica mejor que un donut cuando hay muchos distribuidores.</div>',
+                unsafe_allow_html=True,
+            )
+            st.dataframe(build_distributor_detail_table(filtered), use_container_width=True, hide_index=True)
+            for model_name in model_options:
+                st.plotly_chart(
+                    build_distributor_detail_bar(filtered, model_name),
+                    use_container_width=True,
+                    key=f"detail_bar_model_{normalize_key_text(model_name)}",
+                )
 
     st.markdown("### Tabla general filtrada")
     visible_columns = [
