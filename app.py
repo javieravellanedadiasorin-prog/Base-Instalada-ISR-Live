@@ -1348,8 +1348,10 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
             'table_max_rows': max(len(detail_corporate_df), 1),
         })
 
+    blood_bank_yes = int(filtered_df.get('In Blood Bank', pd.Series(dtype=object)).map(is_blood_bank_yes).sum())
     cfg_pairs = [
         ('Equipos con configuración', f"{int(filtered_df['Machine Configurations'].notna().sum()):,}"),
+        ('Equipos de banco de sangre', f"{blood_bank_yes:,} de {len(filtered_df):,} ({_safe_share_pct(blood_bank_yes, len(filtered_df)):.1f}% del total)"),
         ('Campos activos de configuración', f"{sum(int(filtered_df[c].notna().sum()) > 0 for c in filtered_df.columns if c.startswith('CFG::')):,}"),
         ('Promedio de campos poblados', f"{filtered_df.get('Machine config fields populated', pd.Series([0])).fillna(0).mean():.1f}"),
     ]
@@ -1357,9 +1359,9 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
     cfg_charts = cfg_charts[:4]
     sections.append({
         'title': 'Configuración de equipo',
-        'intro': 'Se consolidan los campos detectados en configuración de equipo y se muestran las distribuciones de los ítems con mayor visibilidad en el filtro activo.',
+        'intro': 'Se consolidan los campos detectados en configuración de equipo y se muestran las distribuciones de los ítems con mayor visibilidad en el filtro activo. Banco de sangre se presenta primero como indicador ejecutivo principal.',
         'summary_pairs': cfg_pairs,
-        'charts': [_make_pdf_barh(cfg_cov, 'Campo de configuración', 'Equipos con dato', 'Cobertura de campos de configuración', max_rows=10)] + cfg_charts,
+        'charts': [_make_pdf_donut(pd.DataFrame({'Categoría':['Banco de sangre','Resto de equipos'],'Count':[blood_bank_yes,max(len(filtered_df)-blood_bank_yes,0)]}), 'Categoría', 'Count', 'Banco de sangre', max_rows=2), _make_pdf_barh(cfg_cov, 'Campo de configuración', 'Equipos con dato', 'Cobertura de campos de configuración', max_rows=10)] + cfg_charts,
         'table_title': 'Resumen de configuración de equipo',
         'table_df': cfg_value_df,
         'table_max_rows': 12,
@@ -1728,6 +1730,49 @@ def safe_number_text(value, fallback: str = "0") -> str:
     except Exception:
         return fallback
     return f"{int(val):,}" if float(val).is_integer() else f"{val:,.1f}"
+
+
+def is_blood_bank_yes(value) -> bool:
+    if pd.isna(value):
+        return False
+    txt = str(value).strip().lower()
+    return txt in {"yes", "y", "true", "1", "si", "sí"}
+
+
+def build_blood_bank_donut(df: pd.DataFrame) -> go.Figure:
+    total_assets = int(len(df))
+    yes_count = int(df.get("In Blood Bank", pd.Series(dtype=object)).map(is_blood_bank_yes).sum()) if total_assets else 0
+    no_count = max(total_assets - yes_count, 0)
+    summary = pd.DataFrame({"Label": ["Banco de sangre", "Resto de equipos"], "Count": [yes_count, no_count]})
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Pie(
+            labels=summary["Label"],
+            values=summary["Count"],
+            hole=0.68,
+            sort=False,
+            marker=dict(colors=[ACCENT_3, "rgba(255,255,255,0.28)"], line=dict(color="rgba(255,255,255,0.20)", width=1.2)),
+            textinfo="percent",
+            textfont=dict(color="#ffffff", size=12),
+            hovertemplate="%{label}<br>Equipos: %{value}<br>Participación: %{percent}<extra></extra>",
+        )
+    )
+    fig.add_annotation(
+        text=f"<b>{yes_count:,}</b><br><span style='font-size:11px'>de {total_assets:,}</span>",
+        x=0.5,
+        y=0.5,
+        xref="paper",
+        yref="paper",
+        showarrow=False,
+        font=dict(color="#ffffff", size=18),
+    )
+    fig.update_layout(
+        title="Banco de sangre",
+        showlegend=True,
+        legend=dict(orientation="h", yanchor="bottom", y=-0.18, xanchor="center", x=0.5, bgcolor="rgba(14,26,42,0.36)", bordercolor="rgba(124,221,255,0.22)", borderwidth=1, font=dict(color="#f8fbff", size=11)),
+    )
+    return glow_layout(fig, 340, 15)
 
 
 def normalize_part_number(value) -> str:
@@ -3344,7 +3389,7 @@ with base_tab:
 
 with machine_tab:
     st.subheader("Machine configuration")
-    st.caption("Vista ejecutiva por ítem de configuración, con gráficas separadas para cada campo aplicable y mayor lectura visual del comportamiento de la base instalada.")
+    st.caption("Vista ejecutiva por ítem de configuración, con Banco de sangre como indicador principal y gráficas separadas para cada campo aplicable.")
     applicable_fields = active_config_fields(filtered, CONFIG_KEYS)
     cfg_cols_prefixed = [f"CFG::{col}" for col in applicable_fields]
 
@@ -3355,13 +3400,21 @@ with machine_tab:
         avg_cfg_fields = filtered["Machine config fields populated"].mean()
         unique_cfg_fields = len(applicable_fields)
 
-        mc1, mc2, mc3 = st.columns(3)
+        blood_bank_yes = int(filtered.get("In Blood Bank", pd.Series(dtype=object)).map(is_blood_bank_yes).sum())
+
+        mc1, mc2, mc3, mc4 = st.columns(4)
         with mc1:
             metric_card("Equipos con config", f"{assets_with_cfg:,}", "Con información en Machine Configurations")
         with mc2:
-            metric_card("Campos aplicables", f"{unique_cfg_fields}", "Solo ítems presentes en el filtro actual")
+            metric_card("Banco de sangre", f"{blood_bank_yes:,}", f"{_safe_share_pct(blood_bank_yes, len(filtered)):.1f}% del total filtrado")
         with mc3:
+            metric_card("Campos aplicables", f"{unique_cfg_fields}", "Solo ítems presentes en el filtro actual")
+        with mc4:
             metric_card("Promedio de campos", f"{avg_cfg_fields:.1f}", "Campos poblados por equipo")
+
+        st.markdown("### Banco de sangre")
+        st.markdown('<div class="small-note">Se cuentan como positivos únicamente los equipos con <b>In Blood Bank = Yes</b>.</div>', unsafe_allow_html=True)
+        st.plotly_chart(build_blood_bank_donut(filtered), use_container_width=True, key="blood_bank_donut_main")
 
         coverage_df = pd.DataFrame(
             [{"Config field": col.replace("CFG::", ""), "Populated assets": int(filtered[col].notna().sum())} for col in cfg_cols_prefixed]
