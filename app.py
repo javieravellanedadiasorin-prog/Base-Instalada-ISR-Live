@@ -1073,6 +1073,42 @@ def _make_pdf_donut(df: pd.DataFrame, label_col: str, value_col: str, title: str
     return buf
 
 
+
+
+def _make_pdf_blood_bank_total_chart(filtered_df: pd.DataFrame, title: str = 'Banco de sangre vs total filtrado'):
+    if not MATPLOTLIB_AVAILABLE or filtered_df is None or filtered_df.empty:
+        return None
+
+    total_assets = int(len(filtered_df))
+    if total_assets <= 0:
+        return None
+
+    if 'CFG::In Blood Bank' in filtered_df.columns:
+        blood_yes = int(
+            filtered_df['CFG::In Blood Bank']
+            .fillna('')
+            .astype(str)
+            .str.strip()
+            .str.lower()
+            .eq('yes')
+            .sum()
+        )
+    else:
+        blood_yes = 0
+
+    rest_assets = max(total_assets - blood_yes, 0)
+    pct = _safe_share_pct(blood_yes, total_assets)
+
+    chart_df = pd.DataFrame(
+        {
+            'Grupo': ['Banco de sangre', 'Resto de equipos'],
+            'Cantidad': [blood_yes, rest_assets],
+        }
+    )
+
+    buf = _make_pdf_barh(chart_df, 'Grupo', 'Cantidad', f"{title} ({blood_yes} de {total_assets} | {pct:.1f}%)", xlabel='Cantidad', max_rows=2, color='#1f77b4')
+    return buf
+
 def _make_pdf_hist_categories(df: pd.DataFrame, label_col: str, order: list[str], title: str, xlabel: str = 'Cantidad'):
     counts = df[label_col].fillna('No informado').astype(str).value_counts()
     chart_df = pd.DataFrame({label_col: order, 'Count': [int(counts.get(v, 0)) for v in order]})
@@ -1099,8 +1135,10 @@ def _pdf_image_flowables(image_buffers: list, max_per_row: int = 2, image_width:
     return flowables
 
 
+
 def _build_machine_config_summary(filtered_df: pd.DataFrame):
     cfg_cols = [c for c in filtered_df.columns if c.startswith('CFG::')]
+    total_assets = int(len(filtered_df))
     cfg_cov_rows = []
     value_summary_rows = []
     chart_buffers = []
@@ -1131,35 +1169,80 @@ def _build_machine_config_summary(filtered_df: pd.DataFrame):
         top_value = safe_text(counts.iloc[0]['Value'])
         top_count = int(counts.iloc[0]['Count'])
 
-        cfg_cov_rows.append({'Campo de configuración': display_name, 'Equipos con dato': count_non_null})
-        value_summary_rows.append({
-            'Campo de configuración': display_name,
-            'Equipos con dato': count_non_null,
-            'Valores únicos': int(counts.shape[0]),
-            'Valor principal': top_value,
-            'Conteo principal': top_count,
-        })
+        cfg_cov_rows.append(
+            {
+                'Campo de configuración': display_name,
+                'Equipos con dato': count_non_null,
+                'Orden': 0 if display_name == 'Banco de sangre' else 1,
+            }
+        )
 
-        for _, row in counts.head(5).iterrows():
-            value_summary_rows.append({
-                'Campo de configuración': f"{display_name} — valor",
-                'Equipos con dato': '',
-                'Valores únicos': '',
-                'Valor principal': safe_text(row['Value']),
-                'Conteo principal': f"{int(row['Count'])} ({row['Share %']:.1f}%)",
-            })
-
-        if counts.shape[0] <= 5 and counts.iloc[0]['Count'] / counts['Count'].sum() < 0.86:
-            chart = _make_pdf_donut(counts.rename(columns={'Value': 'Categoría'}), 'Categoría', 'Count', display_name, max_rows=5)
+        if display_name == 'Banco de sangre':
+            total_pct = _safe_share_pct(count_non_null, total_assets)
+            value_summary_rows.append(
+                {
+                    'Campo de configuración': display_name,
+                    'Equipos con dato': count_non_null,
+                    'Valores únicos': int(counts.shape[0]),
+                    'Valor principal': top_value,
+                    'Conteo principal': f"{top_count} ({total_pct:.1f}% del total)",
+                    'Orden': 0,
+                }
+            )
+            for _, row in counts.head(5).iterrows():
+                row_count = int(row['Count'])
+                total_pct_row = _safe_share_pct(row_count, total_assets)
+                value_summary_rows.append(
+                    {
+                        'Campo de configuración': f"{display_name} — valor",
+                        'Equipos con dato': '',
+                        'Valores únicos': '',
+                        'Valor principal': safe_text(row['Value']),
+                        'Conteo principal': f"{row_count} ({total_pct_row:.1f}% del total)",
+                        'Orden': 0,
+                    }
+                )
+            chart = _make_pdf_blood_bank_total_chart(filtered_df, title='Banco de sangre vs total filtrado')
+            chart_buffers.append((999999, chart))
         else:
-            chart = _make_pdf_barh(counts.rename(columns={'Value': 'Categoría'}), 'Categoría', 'Count', display_name, xlabel='Equipos', max_rows=6, color='#1f77b4')
-        chart_buffers.append((count_non_null, chart))
+            value_summary_rows.append(
+                {
+                    'Campo de configuración': display_name,
+                    'Equipos con dato': count_non_null,
+                    'Valores únicos': int(counts.shape[0]),
+                    'Valor principal': top_value,
+                    'Conteo principal': top_count,
+                    'Orden': 1,
+                }
+            )
+            for _, row in counts.head(5).iterrows():
+                value_summary_rows.append(
+                    {
+                        'Campo de configuración': f"{display_name} — valor",
+                        'Equipos con dato': '',
+                        'Valores únicos': '',
+                        'Valor principal': safe_text(row['Value']),
+                        'Conteo principal': f"{int(row['Count'])} ({row['Share %']:.1f}%)",
+                        'Orden': 1,
+                    }
+                )
 
-    cov_df = pd.DataFrame(cfg_cov_rows).sort_values('Equipos con dato', ascending=False) if cfg_cov_rows else pd.DataFrame(columns=['Campo de configuración', 'Equipos con dato'])
+            if counts.shape[0] <= 5 and counts.iloc[0]['Count'] / counts['Count'].sum() < 0.86:
+                chart = _make_pdf_donut(counts.rename(columns={'Value': 'Categoría'}), 'Categoría', 'Count', display_name, max_rows=5)
+            else:
+                chart = _make_pdf_barh(counts.rename(columns={'Value': 'Categoría'}), 'Categoría', 'Count', display_name, xlabel='Equipos', max_rows=6, color='#1f77b4')
+            chart_buffers.append((count_non_null, chart))
+
+    cov_df = pd.DataFrame(cfg_cov_rows)
+    if not cov_df.empty:
+        cov_df = cov_df.sort_values(['Orden', 'Equipos con dato', 'Campo de configuración'], ascending=[True, False, True]).drop(columns=['Orden'])
+
     value_df = pd.DataFrame(value_summary_rows)
+    if not value_df.empty:
+        value_df = value_df.sort_values(['Orden', 'Campo de configuración'], ascending=[True, True]).drop(columns=['Orden'])
+
     charts = [c for _, c in sorted(chart_buffers, key=lambda x: x[0], reverse=True)[:6]]
     return cov_df, value_df, charts
-
 
 def _build_executive_insights(filtered_df: pd.DataFrame, stock_context: dict | None = None) -> tuple[list[str], list[str]]:
     insights = []
@@ -1172,6 +1255,18 @@ def _build_executive_insights(filtered_df: pd.DataFrame, stock_context: dict | N
         insights.append(f"La base instalada filtrada contiene {total_records} equipos y se concentra principalmente en {top_country} ({top_country_pct}%).")
     routine_assets = int(filtered_df.get('Is in routine', pd.Series(dtype=bool)).sum())
     insights.append(f"Se identificaron {routine_assets} equipos en rutina dentro del universo filtrado.")
+    blood_bank_yes = int(
+        filtered_df.get('CFG::In Blood Bank', pd.Series('', index=filtered_df.index))
+        .fillna('')
+        .astype(str)
+        .str.strip()
+        .str.lower()
+        .eq('yes')
+        .sum()
+    )
+    if blood_bank_yes > 0:
+        blood_bank_pct = _safe_share_pct(blood_bank_yes, total_records)
+        insights.append(f"Se identificaron {blood_bank_yes} equipos de banco de sangre, equivalentes al {blood_bank_pct:.1f}% del total filtrado.")
     os_series = filtered_df.get('Operating System', pd.Series(dtype=object)).fillna('No informado').astype(str)
     legacy_count = int(os_series.isin(['Windows XP', 'Windows Vista', 'Windows 7', 'Windows 2000']).sum())
     unknown_os = int(os_series.isin(['Unknown', 'No informado', 'Not installed']).sum())
@@ -1257,17 +1352,29 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
         'table_max_rows': max(len(filtered_df), 1),
     })
 
+    blood_bank_yes = int(
+        filtered_df.get('CFG::In Blood Bank', pd.Series('', index=filtered_df.index))
+        .fillna('')
+        .astype(str)
+        .str.strip()
+        .str.lower()
+        .eq('yes')
+        .sum()
+    )
+    blood_bank_pct = _safe_share_pct(blood_bank_yes, len(filtered_df))
     cfg_pairs = [
         ('Equipos con configuración', f"{int((filtered_df['Machine Configurations'].fillna('').astype(str).str.strip().ne('') | filtered_df.get('CFG::In Blood Bank', pd.Series('', index=filtered_df.index)).fillna('').astype(str).str.strip().str.lower().eq('yes')).sum()):,}"),
+        ('Equipos de banco de sangre', f"{blood_bank_yes:,} de {len(filtered_df):,} ({blood_bank_pct:.1f}% del total)"),
         ('Campos activos de configuración', f"{sum((int(filtered_df[c].fillna('').astype(str).str.strip().str.lower().eq('yes').sum()) > 0) if c == 'CFG::In Blood Bank' else (int(filtered_df[c].notna().sum()) > 0) for c in filtered_df.columns if c.startswith('CFG::')):,}"),
         ('Promedio de campos poblados', f"{filtered_df.get('Machine config fields populated', pd.Series([0])).fillna(0).mean():.1f}"),
     ]
     cfg_cov, cfg_value_df, cfg_charts = _build_machine_config_summary(filtered_df)
+    coverage_chart = _make_pdf_barh(cfg_cov, 'Campo de configuración', 'Equipos con dato', f'Cobertura de campos de configuración | Banco de sangre: {blood_bank_yes} de {len(filtered_df)} ({blood_bank_pct:.1f}%)', max_rows=10)
     sections.append({
         'title': 'Configuración de equipo',
-        'intro': 'Se consolidan los campos detectados en Machine Configuration. En banco de sangre solo se consideran como positivos los equipos cuyo valor sea Yes.',
+        'intro': 'Se consolidan los campos detectados en Machine Configuration. Banco de sangre se presenta como indicador ejecutivo principal y solo se consideran como positivos los equipos cuyo valor sea Yes.',
         'summary_pairs': cfg_pairs,
-        'charts': [_make_pdf_barh(cfg_cov, 'Campo de configuración', 'Equipos con dato', 'Cobertura de campos de configuración', max_rows=10)] + cfg_charts,
+        'charts': [coverage_chart] + cfg_charts,
         'table_title': 'Resumen de configuración de equipo',
         'table_df': cfg_value_df,
         'table_max_rows': 12,
@@ -1275,7 +1382,7 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
     if not cfg_value_df.empty:
         annexes.append({
             'title': 'Anexo B. Valores de configuración',
-            'intro': 'Valores principales por campo de configuración.',
+            'intro': 'Valores principales por campo de configuración. Banco de sangre se expresa contra el total filtrado para facilitar la lectura ejecutiva.',
             'summary_pairs': [('Filas incluidas', f"{len(cfg_value_df):,}"), ('Alcance', 'Resumen ampliado de campos y valores de configuración')],
             'charts': [],
             'table_title': 'Valores principales por campo',
@@ -3931,7 +4038,7 @@ with detail_tab:
 with st.sidebar:
     st.subheader("📄 Informe PDF")
     st.caption("Formato ajustado con márgenes APA de 1 pulgada y estructura de informe técnico ejecutiva.")
-    pdf_title = st.text_input("Título del informe", value="Installed Base Dashboard Report")
+    pdf_title = st.text_input("Título del informe", value="Informe Ejecutivo de Base Instalada")
     pdf_author = st.text_input("Nombre para firma", value="Javier Avellaneda")
     pdf_role = st.text_input("Cargo / título", value="Service Leader | Export LATAM")
     pdf_signature_date = st.text_input("Fecha de firma", value=datetime.now().strftime("%Y-%m-%d"))
