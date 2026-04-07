@@ -621,6 +621,57 @@ def build_config_donut(field_name: str, series: pd.Series, total_assets: int) ->
     return glow_layout(fig, 340, 15)
 
 
+def build_blood_bank_ratio_donut(yes_count: int, total_assets: int) -> go.Figure:
+    no_count = max(int(total_assets) - int(yes_count), 0)
+    fig = go.Figure()
+
+    values = [int(yes_count), int(no_count)]
+    labels = ["Banco de sangre", "Resto de equipos"]
+    colors = [ACCENT, "rgba(255,255,255,0.18)"]
+
+    if total_assets <= 0:
+        fig.add_annotation(
+            text="Sin datos",
+            x=0.5,
+            y=0.5,
+            xref="paper",
+            yref="paper",
+            showarrow=False,
+            font=dict(size=15, color=TEXT),
+        )
+        fig.update_layout(title="Banco de sangre")
+        return glow_layout(fig, 340, 15)
+
+    fig.add_trace(
+        go.Pie(
+            labels=labels,
+            values=values,
+            hole=0.68,
+            sort=False,
+            marker=dict(colors=colors, line=dict(color="rgba(255,255,255,0.18)", width=1.2)),
+            textinfo="percent",
+            textfont=dict(color="#ffffff", size=13),
+            hovertemplate="Grupo: %{label}<br>Equipos: %{value}<br>Participación: %{percent}<extra></extra>",
+        )
+    )
+    pct = (yes_count / total_assets * 100.0) if total_assets > 0 else 0.0
+    fig.add_annotation(
+        text=f"<b>{yes_count:,}</b><br><span style='font-size:11px'>{pct:.1f}% del total</span>",
+        x=0.5,
+        y=0.5,
+        xref="paper",
+        yref="paper",
+        showarrow=False,
+        font=dict(color='#ffffff', size=18),
+    )
+    fig.update_layout(
+        title=f"Banco de sangre | {yes_count:,} de {total_assets:,}",
+        showlegend=True,
+        legend=dict(orientation="h", yanchor="bottom", y=-0.18, xanchor="center", x=0.5, bgcolor="rgba(14,26,42,0.36)", bordercolor="rgba(124,221,255,0.22)", borderwidth=1, font=dict(color="#f8fbff", size=11)),
+    )
+    return glow_layout(fig, 340, 15)
+
+
 def compute_mapbox_center_zoom(df: pd.DataFrame, lat_col: str = "Latitude", lon_col: str = "Longitude") -> tuple[dict, float]:
     geo = df.dropna(subset=[lat_col, lon_col]).copy()
     if geo.empty:
@@ -3000,13 +3051,15 @@ with machine_tab:
                     if field_name == "In Blood Bank":
                         item_series = filtered[selected_cfg_col].fillna("").astype(str).str.strip()
                         item_series = item_series[item_series.str.lower().eq("yes")]
+                        total_assets = int(item_series.shape[0])
+                        with col_ui:
+                            st.plotly_chart(build_blood_bank_ratio_donut(total_assets, total_assets_filtered), use_container_width=True)
                     else:
                         item_series = filtered[selected_cfg_col].dropna().astype(str).str.strip()
                         item_series = item_series[item_series.ne("")]
-
-                    total_assets = int(item_series.shape[0])
-                    with col_ui:
-                        st.plotly_chart(build_config_donut(display_name, item_series, total_assets), use_container_width=True)
+                        total_assets = int(item_series.shape[0])
+                        with col_ui:
+                            st.plotly_chart(build_config_donut(display_name, item_series, total_assets), use_container_width=True)
 
         st.markdown("### Top valores por ítem")
         detail_rows = []
