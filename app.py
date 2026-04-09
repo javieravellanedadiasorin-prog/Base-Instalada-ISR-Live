@@ -1480,6 +1480,7 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
         stock_pairs = [
             ('Distribuidor detectado', stock_context.get('detected_distributor', 'N/A')),
             ('Familias comparadas', ', '.join(stock_context.get('families', [])) or 'N/A'),
+            ('PO Frequency (weeks)', safe_number_text(stock_context.get('po_frequency_weeks', 0), 'N/A')),
             ('SKUs requeridos', f"{stock_context.get('required_skus', 0):,}"),
             ('SKUs OK', f"{stock_context.get('ok_skus', 0):,}"),
             ('SKUs LOW', f"{stock_context.get('low_skus', 0):,}"),
@@ -2632,6 +2633,161 @@ def build_price_reference(df: pd.DataFrame, part_col: str, option2_col: str, des
     return price_df
 
 
+
+def detect_detailed_carstock_columns(df: pd.DataFrame) -> dict[str, str | None]:
+    normalized = {col: re.sub(r"[^a-z0-9]+", " ", str(col).lower()).strip() for col in df.columns}
+    result = {
+        "part_col": None,
+        "desc_col": None,
+        "instrument_col": None,
+        "carstock_qty_col": None,
+        "parts_per_system_col": None,
+        "min_stock_col": None,
+        "option2_col": None,
+        "currency_col": None,
+        "carstock_flag_col": None,
+        "pn_revision_col": None,
+    }
+    for col, norm in normalized.items():
+        if result["part_col"] is None and ("part number" in norm or "latest part number" in norm or norm in {"part no", "pn"} or "material" in norm):
+            result["part_col"] = col
+        if result["desc_col"] is None and ("description" in norm or "descripcion" in norm or "product description" in norm):
+            result["desc_col"] = col
+        if result["instrument_col"] is None and ("instrument type" in norm or norm in {"instrument", "system", "platform"}):
+            result["instrument_col"] = col
+        if result["carstock_qty_col"] is None and ("carstock qty" in norm or "car stock qty" in norm or norm == "quantity" or norm == "qty"):
+            result["carstock_qty_col"] = col
+        if result["parts_per_system_col"] is None and ("parts per system" in norm or "per system" in norm):
+            result["parts_per_system_col"] = col
+        if result["min_stock_col"] is None and ("minimum stock level required" in norm or "min stock" in norm):
+            result["min_stock_col"] = col
+        if result["option2_col"] is None and ("option 2" in norm or "sp price option 2" in norm or "opt2" in norm):
+            result["option2_col"] = col
+        if result["currency_col"] is None and "currency" in norm:
+            result["currency_col"] = col
+        if result["carstock_flag_col"] is None and norm == "carstock":
+            result["carstock_flag_col"] = col
+        if result["pn_revision_col"] is None and "pn revision" in norm:
+            result["pn_revision_col"] = col
+    return result
+
+
+def build_detailed_master(df: pd.DataFrame, col_map: dict[str, str | None]) -> pd.DataFrame:
+    part_col = col_map.get("part_col")
+    if not part_col:
+        return pd.DataFrame(columns=[
+            "Required Family",
+            "Part Key",
+            "Required Part Number",
+            "Required Description",
+            "Base Carstock Qty",
+            "Parts per system (12 months)",
+            "Minimum Stock Level Required",
+            "Option 2 Unit Price",
+            "Currency",
+        ])
+
+    work = pd.DataFrame({
+        "Required Part Number": df[part_col],
+        "Required Description": df[col_map["desc_col"]] if col_map.get("desc_col") in df.columns else "",
+        "Instrument Raw": df[col_map["instrument_col"]] if col_map.get("instrument_col") in df.columns else "",
+        "Base Carstock Qty": to_numeric_series(df[col_map["carstock_qty_col"]]) if col_map.get("carstock_qty_col") in df.columns else 0.0,
+        "Parts per system (12 months)": to_numeric_series(df[col_map["parts_per_system_col"]]) if col_map.get("parts_per_system_col") in df.columns else np.nan,
+        "Minimum Stock Level Required": to_numeric_series(df[col_map["min_stock_col"]]) if col_map.get("min_stock_col") in df.columns else np.nan,
+        "Option 2 Unit Price": to_numeric_series(df[col_map["option2_col"]]) if col_map.get("option2_col") in df.columns else np.nan,
+        "Currency": df[col_map["currency_col"]] if col_map.get("currency_col") in df.columns else "EUR",
+        "Carstock Flag": df[col_map["carstock_flag_col"]] if col_map.get("carstock_flag_col") in df.columns else "YES",
+        "PN Revision": df[col_map["pn_revision_col"]] if col_map.get("pn_revision_col") in df.columns else "",
+    })
+
+    work["Required Description"] = work["Required Description"].fillna("").astype(str).str.strip()
+    work["Required Family"] = work["Instrument Raw"].map(normalize_family_code)
+    work["Part Key"] = work["Required Part Number"].map(normalize_part_number)
+    work["Currency"] = work["Currency"].fillna("EUR").astype(str).str.strip().replace("", "EUR")
+    work["Carstock Flag"] = work["Carstock Flag"].fillna("").astype(str).str.strip().str.upper()
+    work["PN Revision"] = work["PN Revision"].fillna("").astype(str).str.strip()
+
+    if work["Carstock Flag"].astype(str).str.len().gt(0).any():
+        work = work[work["Carstock Flag"].eq("YES")].copy()
+
+    if work["PN Revision"].astype(str).str.len().gt(0).any():
+        preferred = work["PN Revision"].str.lower().eq("latest")
+        if preferred.any():
+            work = work[preferred].copy()
+
+    work["Base Carstock Qty"] = pd.to_numeric(work["Base Carstock Qty"], errors="coerce").fillna(0.0).clip(lower=0.0)
+    work["Parts per system (12 months)"] = pd.to_numeric(work["Parts per system (12 months)"], errors="coerce")
+    work["Minimum Stock Level Required"] = pd.to_numeric(work["Minimum Stock Level Required"], errors="coerce")
+    work["Option 2 Unit Price"] = pd.to_numeric(work["Option 2 Unit Price"], errors="coerce")
+    work = work[(work["Part Key"] != "") & (work["Required Family"] != "")].copy()
+
+    if work.empty:
+        return work
+
+    agg_spec = {
+        "Required Part Number": "first",
+        "Required Description": "first",
+        "Base Carstock Qty": "max",
+        "Parts per system (12 months)": "max",
+        "Minimum Stock Level Required": "max",
+        "Option 2 Unit Price": "first",
+        "Currency": "first",
+    }
+    work = work.groupby(["Required Family", "Part Key"], as_index=False).agg(agg_spec)
+    return work
+
+
+def build_family_installed_base(distributor_scope: pd.DataFrame) -> dict[str, int]:
+    if distributor_scope is None or distributor_scope.empty or "Instrument type" not in distributor_scope.columns:
+        return {}
+    family_series = distributor_scope["Instrument type"].map(normalize_family_code)
+    family_series = family_series[family_series.ne("")]
+    if family_series.empty:
+        return {}
+    counts = family_series.value_counts().to_dict()
+    return {str(k): int(v) for k, v in counts.items()}
+
+
+def apply_dynamic_required_qty(
+    master_df: pd.DataFrame,
+    family_installed_base: dict[str, int] | None = None,
+    po_frequency_weeks: float | int = 12,
+) -> pd.DataFrame:
+    if master_df is None or master_df.empty:
+        return pd.DataFrame(columns=list(master_df.columns) + ["Installed Base Qty", "PO Frequency (weeks)", "Dynamic Demand Qty", "Required Qty"])
+    work = master_df.copy()
+    family_installed_base = family_installed_base or {}
+    po_frequency_weeks = float(po_frequency_weeks or 0)
+    if po_frequency_weeks <= 0:
+        po_frequency_weeks = 12.0
+
+    if "Base Carstock Qty" not in work.columns:
+        work["Base Carstock Qty"] = pd.to_numeric(work.get("Required Qty", 0), errors="coerce").fillna(0.0)
+    else:
+        work["Base Carstock Qty"] = pd.to_numeric(work["Base Carstock Qty"], errors="coerce").fillna(0.0)
+
+    if "Parts per system (12 months)" not in work.columns:
+        work["Parts per system (12 months)"] = np.nan
+    work["Parts per system (12 months)"] = pd.to_numeric(work["Parts per system (12 months)"], errors="coerce")
+
+    if "Minimum Stock Level Required" not in work.columns:
+        work["Minimum Stock Level Required"] = np.nan
+    work["Minimum Stock Level Required"] = pd.to_numeric(work["Minimum Stock Level Required"], errors="coerce")
+
+    work["Installed Base Qty"] = work.get("Required Family", pd.Series(index=work.index, dtype=object)).map(lambda x: int(family_installed_base.get(str(x), 0)))
+    work["PO Frequency (weeks)"] = po_frequency_weeks
+    work["Dynamic Demand Qty"] = work["Parts per system (12 months)"].fillna(0.0) * work["Installed Base Qty"].fillna(0.0) * (po_frequency_weeks / 52.0)
+
+    baseline = pd.concat([
+        work["Base Carstock Qty"],
+        work["Minimum Stock Level Required"],
+        work["Dynamic Demand Qty"],
+    ], axis=1).max(axis=1, skipna=True).fillna(0.0)
+
+    work["Required Qty"] = baseline.map(lambda x: int(math.ceil(max(float(x), 0.0))))
+    return work
+
+
 @st.cache_data(show_spinner=False)
 def load_carstock_master_bundle(file_bytes: bytes, filename: str) -> dict[str, object]:
     path = Path(filename)
@@ -2639,6 +2795,7 @@ def load_carstock_master_bundle(file_bytes: bytes, filename: str) -> dict[str, o
 
     legacy_families = {}
     consolidated_frames = []
+    detailed_frames = []
     price_frames = []
 
     if ext in {".xlsx", ".xls"}:
@@ -2659,6 +2816,16 @@ def load_carstock_master_bundle(file_bytes: bytes, filename: str) -> dict[str, o
                     continue
                 if df is None or df.empty:
                     continue
+
+                detailed_map = detect_detailed_carstock_columns(df)
+                if detailed_map.get("part_col") and (
+                    detailed_map.get("instrument_col")
+                    or detailed_map.get("parts_per_system_col")
+                    or detailed_map.get("min_stock_col")
+                ):
+                    detailed_df = build_detailed_master(df, detailed_map)
+                    if not detailed_df.empty:
+                        detailed_frames.append(detailed_df)
 
                 price_part_col, price_desc_col, option2_col, currency_col = detect_price_reference_columns(df)
                 if price_part_col and option2_col:
@@ -2686,11 +2853,22 @@ def load_carstock_master_bundle(file_bytes: bytes, filename: str) -> dict[str, o
     else:
         df = load_table_file(file_bytes, filename)
         if df is not None and not df.empty:
+            detailed_map = detect_detailed_carstock_columns(df)
+            if detailed_map.get("part_col") and (
+                detailed_map.get("instrument_col")
+                or detailed_map.get("parts_per_system_col")
+                or detailed_map.get("min_stock_col")
+            ):
+                detailed_df = build_detailed_master(df, detailed_map)
+                if not detailed_df.empty:
+                    detailed_frames.append(detailed_df)
+
             price_part_col, price_desc_col, option2_col, currency_col = detect_price_reference_columns(df)
             if price_part_col and option2_col:
                 price_ref = build_price_reference(df, price_part_col, option2_col, price_desc_col, currency_col)
                 if not price_ref.empty:
                     price_frames.append(price_ref)
+
             distributor_col, family_col, part_col, qty_col, desc_col = detect_carstock_master_columns(df)
             if part_col and qty_col:
                 consolidated_frames.append(
@@ -2731,6 +2909,34 @@ def load_carstock_master_bundle(file_bytes: bytes, filename: str) -> dict[str, o
             ]
         )
 
+    if detailed_frames:
+        detailed_master = pd.concat(detailed_frames, ignore_index=True)
+        detailed_master = detailed_master.groupby(["Required Family", "Part Key"], as_index=False).agg(
+            {
+                "Required Part Number": "first",
+                "Required Description": "first",
+                "Base Carstock Qty": "max",
+                "Parts per system (12 months)": "max",
+                "Minimum Stock Level Required": "max",
+                "Option 2 Unit Price": "first",
+                "Currency": "first",
+            }
+        )
+    else:
+        detailed_master = pd.DataFrame(
+            columns=[
+                "Required Family",
+                "Part Key",
+                "Required Part Number",
+                "Required Description",
+                "Base Carstock Qty",
+                "Parts per system (12 months)",
+                "Minimum Stock Level Required",
+                "Option 2 Unit Price",
+                "Currency",
+            ]
+        )
+
     if price_frames:
         price_reference = pd.concat(price_frames, ignore_index=True)
         price_reference = price_reference.groupby("Part Key", as_index=False).agg(
@@ -2743,25 +2949,61 @@ def load_carstock_master_bundle(file_bytes: bytes, filename: str) -> dict[str, o
     else:
         price_reference = pd.DataFrame(columns=["Part Key", "Option 2 Unit Price", "Currency", "Price Description"])
 
+    if not detailed_master.empty:
+        detailed_price = detailed_master[["Part Key", "Option 2 Unit Price", "Currency", "Required Description"]].copy()
+        detailed_price = detailed_price.rename(columns={"Required Description": "Price Description"})
+        detailed_price = detailed_price[detailed_price["Option 2 Unit Price"].notna()].copy()
+        if not detailed_price.empty:
+            price_reference = pd.concat([price_reference, detailed_price], ignore_index=True)
+            price_reference = price_reference.groupby("Part Key", as_index=False).agg(
+                {
+                    "Option 2 Unit Price": "first",
+                    "Currency": "first",
+                    "Price Description": "first",
+                }
+            )
+
     distributor_options = sorted([d for d in consolidated["Required Distributor"].dropna().astype(str).unique().tolist() if d.strip()])
-    family_options = sorted([f for f in consolidated["Required Family"].dropna().astype(str).unique().tolist() if f.strip()])
+    family_options = sorted(set(
+        [f for f in consolidated["Required Family"].dropna().astype(str).unique().tolist() if f.strip()] +
+        [f for f in detailed_master["Required Family"].dropna().astype(str).unique().tolist() if f.strip()]
+    ))
 
     return {
         "legacy_families": legacy_families,
         "consolidated": consolidated,
+        "detailed_master": detailed_master,
         "price_reference": price_reference,
         "master_distributors": distributor_options,
         "master_families": family_options,
     }
-
 
 def build_required_master_from_scope(
     master_bundle: dict[str, object],
     assigned_distributor: str,
     selected_families: list[str],
 ) -> tuple[pd.DataFrame, str]:
+    detailed_master = master_bundle.get("detailed_master", pd.DataFrame())
     consolidated = master_bundle.get("consolidated", pd.DataFrame())
     legacy_families = master_bundle.get("legacy_families", {})
+
+    if detailed_master is not None and not detailed_master.empty:
+        scoped = detailed_master.copy()
+        if selected_families:
+            scoped = scoped[scoped["Required Family"].isin(selected_families)]
+        if not scoped.empty:
+            scoped = scoped.groupby(["Required Family", "Part Key"], as_index=False).agg(
+                {
+                    "Required Part Number": "first",
+                    "Required Description": "first",
+                    "Base Carstock Qty": "max",
+                    "Parts per system (12 months)": "max",
+                    "Minimum Stock Level Required": "max",
+                    "Option 2 Unit Price": "first",
+                    "Currency": "first",
+                }
+            )
+            return scoped.sort_values(["Required Family", "Required Part Number"], ascending=[True, True]).reset_index(drop=True), "detailed"
 
     if consolidated is not None and not consolidated.empty:
         scoped = consolidated.copy()
@@ -2770,29 +3012,28 @@ def build_required_master_from_scope(
         if selected_families:
             scoped = scoped[scoped["Required Family"].isin(selected_families)]
 
-        scoped = scoped.groupby("Part Key", as_index=False).agg(
+        scoped = scoped.groupby(["Required Family", "Part Key"], as_index=False).agg(
             {
                 "Required Part Number": "first",
                 "Required Description": "first",
                 "Required Qty": "sum",
             }
         )
-        return scoped.sort_values(["Required Qty", "Required Part Number"], ascending=[False, True]).reset_index(drop=True), "consolidated"
+        return scoped.sort_values(["Required Family", "Required Part Number"], ascending=[True, True]).reset_index(drop=True), "consolidated"
 
     selected_families = [f for f in selected_families if f in legacy_families]
     if not selected_families:
-        return pd.DataFrame(columns=["Part Key", "Required Part Number", "Required Description", "Required Qty"]), "legacy"
+        return pd.DataFrame(columns=["Required Family", "Part Key", "Required Part Number", "Required Description", "Required Qty"]), "legacy"
 
     scoped = pd.concat([legacy_families[f] for f in selected_families], ignore_index=True)
-    scoped = scoped.groupby("Part Key", as_index=False).agg(
+    scoped = scoped.groupby(["Required Family", "Part Key"], as_index=False).agg(
         {
             "Required Part Number": "first",
             "Required Description": "first",
             "Required Qty": "sum",
         }
     )
-    return scoped.sort_values(["Required Qty", "Required Part Number"], ascending=[False, True]).reset_index(drop=True), "legacy"
-
+    return scoped.sort_values(["Required Family", "Required Part Number"], ascending=[True, True]).reset_index(drop=True), "legacy"
 
 def prepare_uploaded_stock(stock_df: pd.DataFrame, part_col: str, qty_col: str, desc_col: str | None) -> pd.DataFrame:
     work = stock_df.copy()
@@ -3995,6 +4236,24 @@ with stock_tab:
                             st.session_state["pdf_stock_context"] = {"available": False}
                             st.warning("No hay familias seleccionadas para comparar. Ajusta el maestro o la selección avanzada.")
                         else:
+                            family_installed_base = build_family_installed_base(distributor_scope)
+                            default_po_weeks = float(st.session_state.get("stock_po_frequency_weeks", 12.0) or 12.0)
+
+                            po_col_left, po_col_right = st.columns([1, 2])
+                            with po_col_left:
+                                po_frequency_weeks = st.number_input(
+                                    "PO Frequency (weeks)",
+                                    min_value=1.0,
+                                    max_value=52.0,
+                                    value=default_po_weeks,
+                                    step=1.0,
+                                    key="stock_po_frequency_weeks",
+                                    help="Cantidad de semanas que el distribuidor acostumbra esperar antes de hacer un nuevo pedido de repuestos.",
+                                )
+                            with po_col_right:
+                                family_base_text = ", ".join([f"{fam}: {qty}" for fam, qty in sorted(family_installed_base.items())]) if family_installed_base else "Sin base instalada identificada"
+                                st.caption(f"Base instalada usada para el cálculo dinámico: {family_base_text}")
+
                             master_df, master_mode = build_required_master_from_scope(
                                 master_bundle=master_bundle,
                                 assigned_distributor=detected_distributor,
@@ -4012,6 +4271,12 @@ with stock_tab:
                                 st.session_state["pdf_stock_context"] = {"available": False}
                                 st.warning("No encontré carstock requerido para este distribuidor con las familias inferidas. Revisa el maestro o el nombre del archivo.")
                             else:
+                                master_df = apply_dynamic_required_qty(
+                                    master_df=master_df,
+                                    family_installed_base=family_installed_base,
+                                    po_frequency_weeks=po_frequency_weeks,
+                                )
+
                                 comparison, extra_df, stock_slim = compare_stock(
                                     master_df,
                                     stock_df_raw,
@@ -4050,6 +4315,8 @@ with stock_tab:
                                     "gap_total": total_gap,
                                     "option2_cost": option2_cost,
                                     "currency": option2_currency,
+                                    "po_frequency_weeks": po_frequency_weeks,
+                                    "family_installed_base": family_installed_base,
                                     "top_gap_df": comparison[comparison["Qty Gap"] > 0].sort_values(["Qty Gap", "Required Part Number"], ascending=[False, True]).head(15).copy(),
                                     "full_comparison_df": comparison.copy(),
                                     "purchase_df": purchase_df.copy() if not purchase_df.empty else pd.DataFrame(columns=["Required Part Number", "Required Description", "Qty Gap", "Option 2 Unit Price", "Option 2 Estimated Cost", "Currency", "Status"]),
@@ -4122,7 +4389,25 @@ with stock_tab:
                                         st.plotly_chart(glow_layout(fig_gap, 430), use_container_width=True)
 
                                 st.markdown("### Tabla de brechas")
-                                show_cols = ["Required Part Number", "Required Description", "Required Qty", "Uploaded Qty", "Qty Gap", "Coverage %", "Option 2 Unit Price", "Option 2 Estimated Cost", "Currency", "Status"]
+                                show_cols = [
+                                    "Required Family",
+                                    "Required Part Number",
+                                    "Required Description",
+                                    "Base Carstock Qty",
+                                    "Parts per system (12 months)",
+                                    "Minimum Stock Level Required",
+                                    "Installed Base Qty",
+                                    "PO Frequency (weeks)",
+                                    "Dynamic Demand Qty",
+                                    "Required Qty",
+                                    "Uploaded Qty",
+                                    "Qty Gap",
+                                    "Coverage %",
+                                    "Option 2 Unit Price",
+                                    "Option 2 Estimated Cost",
+                                    "Currency",
+                                    "Status",
+                                ]
                                 st.dataframe(comparison[show_cols], use_container_width=True, hide_index=True)
 
                                 if not purchase_df.empty:
@@ -4147,6 +4432,13 @@ with stock_tab:
                                             "Uploaded Qty": "Uploaded Qty",
                                         }
                                     )
+                                    extras_export["Required Family"] = ""
+                                    extras_export["Base Carstock Qty"] = 0
+                                    extras_export["Parts per system (12 months)"] = pd.NA
+                                    extras_export["Minimum Stock Level Required"] = pd.NA
+                                    extras_export["Installed Base Qty"] = 0
+                                    extras_export["PO Frequency (weeks)"] = st.session_state.get("stock_po_frequency_weeks", 12.0)
+                                    extras_export["Dynamic Demand Qty"] = 0
                                     extras_export["Required Qty"] = 0
                                     extras_export["Qty Gap"] = 0
                                     extras_export["Coverage %"] = 0
@@ -4156,7 +4448,7 @@ with stock_tab:
                                     export_df = pd.concat(
                                         [
                                             export_df,
-                                            extras_export[["Required Part Number", "Required Description", "Required Qty", "Uploaded Qty", "Qty Gap", "Coverage %", "Option 2 Unit Price", "Option 2 Estimated Cost", "Currency", "Status"]],
+                                            extras_export[show_cols],
                                         ],
                                         ignore_index=True,
                                     )
