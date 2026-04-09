@@ -2531,6 +2531,15 @@ def normalize_family_code(value) -> str:
     text = normalize_key_text(value)
     if not text:
         return ""
+    if "mdx" in text:
+        return "MDX"
+    if "emx" in text or "etimax" in text:
+        return "EMX"
+    if "xs" in text or "liaisonxs" in text:
+        return "LXS"
+    if "xl" in text or "las" in text or "liaisonxl" in text:
+        return "LXL"
+    return ""
 
 
 def normalize_master_instrument_family(value) -> str:
@@ -4168,6 +4177,10 @@ with stock_tab:
                                 desc_col = None if desc_selection == "<sin descripción>" else desc_selection
 
                             all_master_families = sorted(set([f for f in available_families if str(f).strip()]))
+                            safe_auto_families = [fam for fam in auto_families if fam in all_master_families]
+                            if not safe_auto_families and all_master_families:
+                                safe_auto_families = all_master_families[:1]
+
                             family_mode = st.radio(
                                 "Modo de selección de familias",
                                 options=["Automático", "Manual"],
@@ -4176,19 +4189,29 @@ with stock_tab:
                                 help="Automático usa las familias inferidas para el distribuidor. Manual te deja escoger cualquier familia disponible en el maestro.",
                             )
 
-                            selected_families_stock = st.multiselect(
+                            manual_family_key = "stock_family_selector_manual"
+                            previous_manual = st.session_state.get(manual_family_key, safe_auto_families.copy())
+                            if not isinstance(previous_manual, list):
+                                previous_manual = safe_auto_families.copy()
+                            previous_manual = [fam for fam in previous_manual if fam in all_master_families]
+                            if not previous_manual and safe_auto_families:
+                                previous_manual = safe_auto_families.copy()
+                            st.session_state[manual_family_key] = previous_manual
+
+                            selected_families_manual = st.multiselect(
                                 "Familias a comparar",
                                 options=all_master_families,
-                                default=auto_families,
-                                key="stock_family_selector_manual",
+                                default=previous_manual,
+                                key=manual_family_key,
                                 placeholder="Selecciona una o varias familias",
                                 help="En modo manual puedes elegir libremente las familias del maestro, aunque no hayan sido inferidas automáticamente.",
                             )
 
                             if family_mode == "Automático":
-                                selected_families_stock = auto_families.copy()
+                                selected_families_stock = safe_auto_families.copy()
                                 st.caption("Modo automático activo: se usarán las familias inferidas para el distribuidor. Cambia a Manual si quieres forzarlas tú mismo.")
                             else:
+                                selected_families_stock = [fam for fam in selected_families_manual if fam in all_master_families]
                                 st.caption("Modo manual activo: las familias seleccionadas aquí se respetarán exactamente en la comparación.")
 
                         if 'part_col' not in locals():
