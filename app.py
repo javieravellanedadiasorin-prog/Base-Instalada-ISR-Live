@@ -4167,13 +4167,29 @@ with stock_tab:
                                 desc_selection = st.selectbox("Columna de descripción", options=desc_options, index=default_desc_index)
                                 desc_col = None if desc_selection == "<sin descripción>" else desc_selection
 
+                            all_master_families = sorted(set([f for f in available_families if str(f).strip()]))
+                            family_mode = st.radio(
+                                "Modo de selección de familias",
+                                options=["Automático", "Manual"],
+                                horizontal=True,
+                                key="stock_family_mode_selector",
+                                help="Automático usa las familias inferidas para el distribuidor. Manual te deja escoger cualquier familia disponible en el maestro.",
+                            )
+
                             selected_families_stock = st.multiselect(
                                 "Familias a comparar",
-                                options=available_families,
+                                options=all_master_families,
                                 default=auto_families,
-                                key="stock_family_selector_auto",
-                                placeholder="Familias detectadas automáticamente",
+                                key="stock_family_selector_manual",
+                                placeholder="Selecciona una o varias familias",
+                                help="En modo manual puedes elegir libremente las familias del maestro, aunque no hayan sido inferidas automáticamente.",
                             )
+
+                            if family_mode == "Automático":
+                                selected_families_stock = auto_families.copy()
+                                st.caption("Modo automático activo: se usarán las familias inferidas para el distribuidor. Cambia a Manual si quieres forzarlas tú mismo.")
+                            else:
+                                st.caption("Modo manual activo: las familias seleccionadas aquí se respetarán exactamente en la comparación.")
 
                         if 'part_col' not in locals():
                             part_col = part_col_guess
