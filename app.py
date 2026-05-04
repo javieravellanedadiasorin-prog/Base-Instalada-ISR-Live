@@ -48,6 +48,24 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+APP_BUILD_ID = "records-parser-status-bloodbank-v6-20260504"
+
+# Fuerza una relectura completa cuando cambia la versión del parser.
+# Sin esto, Streamlit puede conservar en session_state un DataFrame viejo aunque el código haya sido reemplazado.
+if st.session_state.get("_app_build_id") != APP_BUILD_ID:
+    for _key in [
+        "records_active_df",
+        "records_active_signature",
+        "records_active_name",
+        "pdf_stock_context",
+    ]:
+        st.session_state.pop(_key, None)
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
+    st.session_state["_app_build_id"] = APP_BUILD_ID
+
 CUSTOM_HEADERS = [
     "Distributor name",
     "Instrument type",
@@ -1880,13 +1898,28 @@ def finalize_blood_bank_indicator(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def blood_bank_yes_mask(df: pd.DataFrame) -> pd.Series:
+    """
+    Calcula Banco de Sangre en tiempo real usando todas las fuentes disponibles.
+    No confía únicamente en Is Blood Bank, porque esa columna puede haber sido creada
+    antes de parsear Machine Configurations y los CFG::.
+    """
     if df is None or df.empty:
         return pd.Series(dtype=bool)
+
+    mask = pd.Series(False, index=df.index, dtype=bool)
+
     if "Is Blood Bank" in df.columns:
-        return df["Is Blood Bank"].fillna(False).astype(bool)
-    if "In Blood Bank" in df.columns:
-        return df["In Blood Bank"].map(is_blood_bank_yes).fillna(False).astype(bool)
-    return pd.Series(False, index=df.index, dtype=bool)
+        mask = mask | df["Is Blood Bank"].fillna(False).astype(bool)
+
+    for col in df.columns:
+        if _is_blood_bank_column_name(col):
+            mask = mask | df[col].map(is_blood_bank_yes).fillna(False).astype(bool)
+
+    if "Machine Configurations" in df.columns:
+        extracted = df["Machine Configurations"].map(_extract_blood_bank_from_machine_config)
+        mask = mask | extracted.map(is_blood_bank_yes).fillna(False).astype(bool)
+
+    return mask.fillna(False).astype(bool)
 
 
 def blood_bank_counts(df: pd.DataFrame) -> tuple[int, int, int]:
@@ -2254,7 +2287,7 @@ def get_uploaded_file_signature(uploaded_file) -> str:
     if uploaded_file is None:
         return ""
     content = uploaded_file.getvalue()
-    raw = f"{uploaded_file.name}|{len(content)}|".encode("utf-8") + content
+    raw = f"{APP_BUILD_ID}|{uploaded_file.name}|{len(content)}|".encode("utf-8") + content
     return hashlib.md5(raw).hexdigest()
 
 
@@ -2457,6 +2490,16 @@ def finalize_records_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     out["Data completeness %"] = (out[base_cols].notna().sum(axis=1) / max(len(base_cols), 1) * 100).round(1)
     if _operational_status_source:
         out.attrs["operational_status_source"] = _operational_status_source
+    return out
+
+
+def refresh_derived_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    """Recalcula indicadores críticos después de parsear Machine Configurations."""
+    out = df.copy()
+    out = recover_operational_status_column(out)
+    out["Operational status grouped"] = out["Operational status"].map(normalize_operational_status)
+    out["Is in routine"] = out["Operational status grouped"].eq("Routine")
+    out = finalize_blood_bank_indicator(out)
     return out
 
 
@@ -3645,10 +3688,11 @@ if raw_df.empty:
 
 _records_attrs = dict(raw_df.attrs)
 raw_df, CONFIG_KEYS = parse_machine_configuration(raw_df)
-raw_df = finalize_blood_bank_indicator(raw_df)
 raw_df = add_operating_system_columns(raw_df, CONFIG_KEYS)
+raw_df = refresh_derived_indicators(raw_df)
 raw_df.attrs.update(_records_attrs)
 st.sidebar.caption(f"Fuente activa: {source_label}")
+st.sidebar.caption(f"Build activo: {APP_BUILD_ID}")
 if raw_df.attrs.get("records_csv_reader"):
     st.sidebar.caption(f"Lectura CSV: {raw_df.attrs.get('records_csv_reader')}")
 if raw_df.attrs.get("operational_status_source"):
