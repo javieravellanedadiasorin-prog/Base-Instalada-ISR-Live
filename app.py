@@ -1752,25 +1752,39 @@ def safe_number_text(value, fallback: str = "0") -> str:
     return f"{int(val):,}" if float(val).is_integer() else f"{val:,.1f}"
 
 
+
 def _normalize_yes_no_text(value) -> str:
-    if pd.isna(value):
+    """Normaliza textos yes/no sin perder señales como Sí, X, 1.0, True."""
+    if value is None:
         return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except Exception:
+        pass
+
     if isinstance(value, (bool, np.bool_)):
         return "true" if bool(value) else "false"
-    if isinstance(value, (int, float, np.integer, np.floating)) and not pd.isna(value):
+
+    if isinstance(value, (int, float, np.integer, np.floating)):
         try:
-            if float(value) == 1.0:
-                return "1"
-            if float(value) == 0.0:
-                return "0"
+            val = float(value)
+            if np.isnan(val):
+                return ""
+            if abs(val - round(val)) < 1e-9:
+                return str(int(round(val)))
+            return str(val).strip().lower()
         except Exception:
             pass
+
     text = str(value).strip().lower()
     if not text:
         return ""
+
     replacements = {
         "á": "a", "é": "e", "í": "i", "ó": "o", "ú": "u", "ü": "u", "ñ": "n",
         "à": "a", "è": "e", "ì": "i", "ò": "o", "ù": "u",
+        "\xa0": " ",
     }
     for src, dst in replacements.items():
         text = text.replace(src, dst)
@@ -1778,75 +1792,218 @@ def _normalize_yes_no_text(value) -> str:
     return re.sub(r"\s+", " ", text)
 
 
-def is_blood_bank_yes(value) -> bool:
-    text = _normalize_yes_no_text(value)
-    if not text:
-        return False
+_BLOOD_BANK_LABEL_PATTERNS = [
+    re.compile(r"\bin\s*blood\s*bank\b", re.IGNORECASE),
+    re.compile(r"\bblood\s*bank\b", re.IGNORECASE),
+    re.compile(r"\bbloodbank\b", re.IGNORECASE),
+    re.compile(r"\bbanco\s*(?:de\s*)?sangre\b", re.IGNORECASE),
+    re.compile(r"\bbb\b", re.IGNORECASE),
+]
 
-    negative_exact = {
-        "no", "n", "false", "0", "none", "na", "n a", "not available",
-        "not applicable", "unknown", "dont know", "do not know", "not installed",
-    }
-    if text in negative_exact or text.startswith("no ") or text.startswith("not "):
-        return False
 
-    positive_exact = {"yes", "y", "true", "1", "1 0", "si", "s", "x", "ok", "checked", "check"}
-    if text in positive_exact:
+def _is_blood_bank_label(label) -> bool:
+    text = str(label).replace("CFG::", " ").replace("_", " ").strip()
+    norm = _normalize_yes_no_text(text)
+    compact = re.sub(r"\s+", "", norm)
+    if compact in {"inbloodbank", "bloodbank", "bloodbankyesno", "bancodesangre", "bancosangre", "bb"}:
         return True
-
-    tokens = set(text.split())
-    if tokens.intersection({"yes", "si", "true", "checked", "check"}) and not tokens.intersection({"no", "not", "false"}):
+    if ("blood" in norm and "bank" in norm) or ("banco" in norm and "sangre" in norm):
         return True
     return False
 
 
-def _extract_blood_bank_from_machine_config(raw) -> object:
-    if pd.isna(raw):
-        return pd.NA
-    text = str(raw).strip()
+def _parse_blood_bank_bool(value) -> object:
+    """
+    Devuelve True, False o pd.NA.
+    Importante: no cuenta textos ambiguos como Yes/No o True/False.
+    """
+    text = _normalize_yes_no_text(value)
     if not text:
         return pd.NA
-    for part in [p.strip() for p in text.split("|") if p.strip()]:
-        if ":" not in part:
-            continue
-        key, val = part.split(":", 1)
-        key_norm = _normalize_yes_no_text(key)
-        if ("blood" in key_norm and "bank" in key_norm) or ("banco" in key_norm and "sangre" in key_norm):
-            val = str(val).strip()
-            return val if val else pd.NA
+
+    positive_exact = {
+        "yes", "y", "true", "1", "si", "s", "x", "ok", "checked", "check",
+        "selected", "enabled", "enable", "active", "aplica", "applicable", "done",
+    }
+    negative_exact = {
+        "no", "n", "false", "0", "none", "na", "n a", "unknown", "unk", "blank",
+        "not available", "data not available", "not applicable", "not installed",
+        "not done", "dont know", "do not know", "no informado", "missing",
+    }
+
+    if text in positive_exact:
+        return True
+    if text in negative_exact:
+        return False
+
+    negative_phrases = [
+        "data not available", "not available", "not applicable", "not installed", "not done",
+        "dont know", "do not know", "no informado", "sin informacion", "sin dato",
+    ]
+    if any(phrase in text for phrase in negative_phrases):
+        return False
+
+    tokens = set(text.split())
+    pos_tokens = {"yes", "y", "true", "1", "si", "s", "x", "checked", "check", "selected", "enabled", "active", "aplica", "done"}
+    neg_tokens = {"no", "n", "false", "0", "not", "none", "unknown", "dont", "missing"}
+
+    has_pos = bool(tokens.intersection(pos_tokens))
+    has_neg = bool(tokens.intersection(neg_tokens))
+
+    if has_pos and not has_neg:
+        return True
+    if has_neg and not has_pos:
+        return False
+
+    # Casos tipo "blood bank yes" o "banco de sangre si".
+    if _is_blood_bank_label(text) and has_pos and not has_neg:
+        return True
+    if _is_blood_bank_label(text) and has_neg and not has_pos:
+        return False
+
     return pd.NA
 
 
-def finalize_blood_bank_indicator(df: pd.DataFrame) -> pd.DataFrame:
-    out = df.copy()
-    if "In Blood Bank" not in out.columns:
-        out["In Blood Bank"] = pd.NA
+def is_blood_bank_yes(value) -> bool:
+    parsed = _parse_blood_bank_bool(value)
+    return bool(parsed is True)
 
-    current = out["In Blood Bank"].where(out["In Blood Bank"].notna(), pd.NA)
-    current = current.astype("object")
-    blank_mask = current.fillna("").astype(str).str.strip().eq("")
-    current = current.mask(blank_mask, pd.NA)
 
-    for col in list(out.columns):
-        if col == "In Blood Bank":
+def _extract_blood_bank_from_machine_config(raw) -> object:
+    """
+    Extrae explícitamente Yes/No desde Machine Configurations.
+    Soporta formatos con |, salto de línea, ;, ':' o '='.
+    """
+    if raw is None:
+        return pd.NA
+    try:
+        if pd.isna(raw):
+            return pd.NA
+    except Exception:
+        pass
+
+    text = str(raw).strip()
+    if not text:
+        return pd.NA
+
+    # Primero: análisis por segmentos. Es lo más seguro para evitar falsos positivos.
+    segments = [s.strip() for s in re.split(r"\s*\|\s*|\r?\n|\s*;\s*", text) if s and s.strip()]
+    for seg in segments:
+        seg_clean = seg.strip()
+        if not seg_clean:
             continue
-        label = str(col).replace("CFG::", "")
-        label_norm = _normalize_yes_no_text(label)
-        is_candidate = (
-            label_norm in {"in blood bank", "blood bank", "blood bank yes no", "banco de sangre", "banco sangre"}
-            or ("blood" in label_norm and "bank" in label_norm)
-            or ("banco" in label_norm and "sangre" in label_norm)
-        )
-        if is_candidate:
-            source = out[col].fillna("").astype(str).str.strip().replace("", pd.NA)
-            current = current.fillna(source)
+
+        # Formatos clásicos: Key: Value / Key = Value / Key - Value.
+        for sep in [":", "=", "–", "—"]:
+            if sep in seg_clean:
+                key, val = seg_clean.split(sep, 1)
+                if _is_blood_bank_label(key):
+                    parsed = _parse_blood_bank_bool(val)
+                    if parsed is True:
+                        return "Yes"
+                    if parsed is False:
+                        return "No"
+
+        # Guion simple solo si el lado izquierdo parece un label real.
+        if " - " in seg_clean:
+            key, val = seg_clean.split(" - ", 1)
+            if _is_blood_bank_label(key):
+                parsed = _parse_blood_bank_bool(val)
+                if parsed is True:
+                    return "Yes"
+                if parsed is False:
+                    return "No"
+
+        # Formatos sin separador: "In Blood Bank Yes", "Banco de sangre Si".
+        if _is_blood_bank_label(seg_clean):
+            parsed = _parse_blood_bank_bool(seg_clean)
+            if parsed is True:
+                return "Yes"
+            if parsed is False:
+                return "No"
+
+    # Segundo: regex directa sobre todo el texto, por si viene en un solo bloque raro.
+    key_regex = r"(?:in\s*)?(?:blood\s*bank|bloodbank)|(?:banco\s*(?:de\s*)?sangre)|(?:\bbb\b)"
+    pattern = re.compile(key_regex + r"\s*(?:[:=\-–—]|\bis\b|\bes\b)?\s*([^|;\n\r]{1,60})", re.IGNORECASE)
+    for match in pattern.finditer(text):
+        candidate_val = match.group(1).strip()
+        parsed = _parse_blood_bank_bool(candidate_val)
+        if parsed is True:
+            return "Yes"
+        if parsed is False:
+            return "No"
+
+    return pd.NA
+
+
+def _blood_bank_candidate_columns(df: pd.DataFrame) -> list[str]:
+    if df is None or df.empty:
+        return []
+    exact_priority = []
+    other_candidates = []
+    for col in df.columns:
+        col_str = str(col)
+        if col_str == "In Blood Bank":
+            exact_priority.append(col)
+        elif _is_blood_bank_label(col_str):
+            other_candidates.append(col)
+    return exact_priority + [c for c in other_candidates if c not in exact_priority]
+
+
+def finalize_blood_bank_indicator(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calcula Banco de sangre desde TODAS las fuentes posibles, sin depender de Machine Configurations.
+    Regla segura: si cualquier fuente explícita dice Yes/Si/1/True/X, el equipo cuenta como banco de sangre.
+    Si no hay Yes pero sí hay No explícito, queda como No. Si no hay dato explícito, queda vacío.
+    """
+    out = df.copy()
+    if out.empty:
+        if "In Blood Bank" not in out.columns:
+            out["In Blood Bank"] = pd.NA
+        out["Is Blood Bank"] = pd.Series(dtype=bool)
+        out["Blood Bank Source"] = pd.Series(dtype=object)
+        return out
+
+    yes_mask = pd.Series(False, index=out.index, dtype=bool)
+    no_mask = pd.Series(False, index=out.index, dtype=bool)
+    source_text = pd.Series("", index=out.index, dtype="object")
+
+    def merge_source(label: str, values: pd.Series):
+        nonlocal yes_mask, no_mask, source_text
+        parsed = values.map(_parse_blood_bank_bool)
+        parsed_yes = parsed.map(lambda x: x is True).fillna(False).astype(bool)
+        parsed_no = parsed.map(lambda x: x is False).fillna(False).astype(bool)
+
+        new_yes = parsed_yes & ~yes_mask
+        new_no = parsed_no & ~yes_mask & ~no_mask
+
+        if new_yes.any():
+            source_text.loc[new_yes] = source_text.loc[new_yes].mask(source_text.loc[new_yes].eq(""), label)
+        if new_no.any():
+            source_text.loc[new_no] = source_text.loc[new_no].mask(source_text.loc[new_no].eq(""), label)
+
+        # True domina sobre False si hay conflicto entre fuentes de banco de sangre.
+        yes_mask = yes_mask | parsed_yes
+        no_mask = (no_mask | parsed_no) & ~yes_mask
+
+    for col in _blood_bank_candidate_columns(out):
+        merge_source(str(col), out[col].fillna(""))
 
     if "Machine Configurations" in out.columns:
         extracted = out["Machine Configurations"].map(_extract_blood_bank_from_machine_config)
-        current = current.fillna(extracted)
+        merge_source("Machine Configurations", extracted.fillna(""))
 
-    out["In Blood Bank"] = current
-    out["Is Blood Bank"] = out["In Blood Bank"].map(is_blood_bank_yes).fillna(False).astype(bool)
+    # Revisa también columnas CFG creadas después de parse_machine_configuration.
+    for col in [c for c in out.columns if str(c).startswith("CFG::") and _is_blood_bank_label(c)]:
+        merge_source(str(col), out[col].fillna(""))
+
+    in_blood_bank = pd.Series(pd.NA, index=out.index, dtype="object")
+    in_blood_bank.loc[no_mask] = "No"
+    in_blood_bank.loc[yes_mask] = "Yes"
+
+    out["In Blood Bank"] = in_blood_bank
+    out["Is Blood Bank"] = yes_mask.fillna(False).astype(bool)
+    out["Blood Bank Source"] = source_text.replace("", pd.NA)
     return out
 
 
@@ -3948,11 +4105,27 @@ with machine_tab:
         st.plotly_chart(build_blood_bank_donut(filtered), use_container_width=True, key="blood_bank_donut_main")
 
     with st.expander("Diagnóstico Banco de sangre", expanded=False):
-        diag_cols = [c for c in ["Distributor name", "Customer name", "Instrument type", "Serial number", "In Blood Bank", "Is Blood Bank"] if c in filtered.columns]
+        diag_cols = [c for c in ["Distributor name", "Customer name", "Instrument type", "Serial number", "In Blood Bank", "Is Blood Bank", "Blood Bank Source"] if c in filtered.columns]
         if diag_cols:
             st.dataframe(filtered[diag_cols].copy(), use_container_width=True, hide_index=True)
         if "In Blood Bank" in filtered.columns:
-            st.write(filtered["In Blood Bank"].fillna("No informado").astype(str).value_counts().reset_index().rename(columns={"index": "Valor", "In Blood Bank": "Conteo"}))
+            st.write(
+                filtered["In Blood Bank"]
+                .fillna("No informado")
+                .astype(str)
+                .value_counts()
+                .reset_index()
+                .rename(columns={"index": "Valor", "In Blood Bank": "Conteo"})
+            )
+        if "Blood Bank Source" in filtered.columns:
+            st.write(
+                filtered["Blood Bank Source"]
+                .fillna("No detectado")
+                .astype(str)
+                .value_counts()
+                .reset_index()
+                .rename(columns={"index": "Fuente", "Blood Bank Source": "Conteo"})
+            )
 
     applicable_fields = active_config_fields(filtered, CONFIG_KEYS)
     cfg_cols_prefixed = [f"CFG::{col}" for col in applicable_fields]
