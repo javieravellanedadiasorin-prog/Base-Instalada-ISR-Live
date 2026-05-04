@@ -702,19 +702,32 @@ def normalize_operational_status(value) -> str:
         return "No informado"
 
     upper = re.sub(r"\s+", " ", text.upper()).strip()
+    upper_compact = re.sub(r"[^A-Z0-9]+", "", upper)
     lower = text.lower()
 
-    # Importante: primero validar los estados negativos.
-    # "NOT IN ROUTINE" contiene la cadena "IN ROUTINE" y antes se estaba clasificando mal como Routine.
-    if upper in {"NOT IN ROUTINE", "NO ROUTINE", "NOT ROUTINE"} or upper.startswith("NOT IN ROUTINE"):
+    if upper in {"NAN", "NONE", "<NA>", "NO INFORMADO", "NO INFORMADO", "UNKNOWN", "NOT INFORMED"}:
+        return "No informado"
+
+    # Primero negativos: NOT IN ROUTINE contiene IN ROUTINE.
+    if "NOT IN ROUTINE" in upper or upper_compact in {"NOTINROUTINE", "NOROUTINE", "NOTROUTINE"}:
         return "Not in routine"
-    if "scrap" in lower:
+
+    if "SCRAP" in upper:
         return "Scraped"
-    if upper in {"IN ROUTINE", "ROUTINE"} or upper.startswith("IN ROUTINE"):
+
+    if "WAREHOUSE" in upper and ("READY" in upper or "INSTALLED" in upper):
+        return "Warehouse Ready To Be Installed"
+    if "WAREHOUSE" in upper and ("REFURB" in upper or "REFURBISHED" in upper):
+        return "Warehouse To Be Refurbished"
+    if "WAREHOUSE" in upper and "SCRAP" in upper:
+        return "Warehouse To Be Scrapped"
+    if "WAREHOUSE" in upper:
+        return text.title()
+
+    if "IN ROUTINE" in upper or upper in {"ROUTINE"} or upper_compact == "INROUTINE":
         return "Routine"
 
     return text.title()
-
 
 def compute_state_filter_counts(df: pd.DataFrame) -> list[tuple[str, int]]:
     if df.empty or "Operational status grouped" not in df.columns:
@@ -1738,18 +1751,65 @@ def safe_number_text(value, fallback: str = "0") -> str:
 
 
 def is_blood_bank_yes(value) -> bool:
+    """Devuelve True SOLO cuando el valor indica explícitamente Banco de sangre = Sí.
+
+    Soporta tanto valores simples (Si/Yes/1/X) como textos completos del export,
+    por ejemplo: "Banco de sangre (Si)", "Banco de sangre: Sí",
+    "In Blood Bank = Yes". No cuenta nombres de clientes que solo contengan
+    "Banco de sangre" sin un valor afirmativo explícito.
+    """
     if pd.isna(value):
         return False
-    txt = str(value).strip().lower()
-    txt = txt.replace('="', '').replace('"', '').strip()
-    txt_norm = re.sub(r"[^a-z0-9áéíóúñ]+", " ", txt).strip()
-    if txt_norm in {"yes", "y", "true", "1", "1 0", "si", "sí", "s", "x", "checked", "selected"}:
-        return True
-    try:
-        return float(txt.replace(",", ".")) == 1.0
-    except Exception:
+
+    raw = str(value).strip()
+    if not raw:
         return False
 
+    raw = raw.replace('="', '').replace('"', '').strip()
+    low = raw.lower()
+    low = (
+        low.replace("á", "a")
+        .replace("é", "e")
+        .replace("í", "i")
+        .replace("ó", "o")
+        .replace("ú", "u")
+        .replace("ñ", "n")
+    )
+    low = re.sub(r"\s+", " ", low).strip()
+
+    positive_tokens = {"si", "s", "yes", "y", "true", "1", "1.0", "x", "checked", "selected"}
+    negative_tokens = {"no", "n", "false", "0", "0.0", "not", "none"}
+
+    # Caso simple: la celda contiene únicamente el valor.
+    simple = re.sub(r"[^a-z0-9.]+", " ", low).strip()
+    if simple in positive_tokens:
+        return True
+    if simple in negative_tokens:
+        return False
+
+    # Caso numérico directo.
+    try:
+        return float(low.replace(",", ".")) == 1.0
+    except Exception:
+        pass
+
+    # Caso explícito dentro del texto: Banco de sangre (Si), Banco de sangre: Si, In Blood Bank = Yes.
+    # Exigimos que exista la frase de banco de sangre + un valor afirmativo cercano.
+    bank_phrase = r"(?:banco\s+de\s+sangre|blood\s+bank|in\s+blood\s+bank)"
+    value_pattern = r"(si|s[ií]|s|yes|y|true|1(?:\.0)?|x|checked|selected|no|n|false|0(?:\.0)?)"
+    m = re.search(bank_phrase + r"\s*(?:[:=\-–—]|\(|\[)?\s*" + value_pattern + r"\s*(?:\)|\])?", low, flags=re.IGNORECASE)
+    if m:
+        token = m.group(1).lower().replace("í", "i")
+        return token in positive_tokens
+
+    # Caso adicional: el texto completo puede ser algo como "bancodesangresi" por limpieza previa.
+    compact = re.sub(r"[^a-z0-9]+", "", low)
+    if compact in {"bancodesangresi", "bancosangresi", "inbloodbankyes", "bloodbankyes", "bancodesangreyes", "bancosangreyes"}:
+        return True
+    if compact in {"bancodesangreno", "bancosangreno", "inbloodbankno", "bloodbankno"}:
+        return False
+
+    return False
 
 def build_blood_bank_donut(df: pd.DataFrame) -> go.Figure:
     total_assets = int(len(df))
@@ -2109,7 +2169,7 @@ def normalize_instrument_type(value) -> str:
     return text.strip() or safe_text(value)
 
 
-PARSER_VERSION = "records-parser-stable-minimal-v10-20260504"
+PARSER_VERSION = "records-parser-direct-blood-status-v11-20260504"
 
 
 def get_uploaded_file_signature(uploaded_file) -> str:
@@ -2199,6 +2259,26 @@ _HEADER_ALIASES = {
     "pmperformedon": "PM performed On",
     "installationdate": "Installation date",
     "installdate": "Installation date",
+
+    "nombrededistribuidor": "Distributor name",
+    "distribuidor": "Distributor name",
+    "tipodeinstrumento": "Instrument type",
+    "tipoinstrumento": "Instrument type",
+    "fechadeinstalacion": "Installation date",
+    "fechainstalacion": "Installation date",
+    "nombredelcliente": "Customer name",
+    "nombrecliente": "Customer name",
+    "configuraciondelamaquina": "Machine Configurations",
+    "configuracionesdelamaquina": "Machine Configurations",
+    "configuraciondelequipo": "Machine Configurations",
+    "configuracionesdelequipo": "Machine Configurations",
+    "condiciondelactivo": "Asset condition",
+    "estadooperativo": "Operational status",
+    "estadooperacional": "Operational status",
+    "estadodelinstrumento": "Operational status",
+    "estadoinstrumento": "Operational status",
+    "estadodelequipo": "Operational status",
+    "regioncomercial": "Commercial Region",
 }
 
 
@@ -2332,8 +2412,15 @@ def _extract_blood_bank_from_machine_config(value):
     if not text:
         return pd.NA
 
-    # Caso 1: campo explícito con separador. Ej.: Banco de sangre: Si | In Blood Bank = Yes
-    for part in [p.strip() for p in re.split(r"\|\s*|;\s*|\r?\n", text) if p.strip()]:
+    # Revisa fragmentos separados por los delimitadores comunes del campo Machine Configurations.
+    for part in [p.strip() for p in re.split(r"\|\s*|;\s*|\r?\n|,/", text) if p.strip()]:
+        if is_blood_bank_yes(part):
+            return "Si"
+        part_low = part.lower().replace("í", "i")
+        if re.search(r"(?:banco\s+de\s+sangre|blood\s+bank|in\s+blood\s+bank)", part_low, flags=re.IGNORECASE):
+            if re.search(r"\b(no|n|false|0(?:\.0)?)\b", part_low, flags=re.IGNORECASE):
+                return "No"
+
         if ":" in part:
             key, val = part.split(":", 1)
         elif "=" in part:
@@ -2341,26 +2428,24 @@ def _extract_blood_bank_from_machine_config(value):
         else:
             key, val = part, ""
         key_norm = _column_key(key)
-        if key_norm in {"inbloodbank", "bloodbank", "bancodesangre", "bancosangre", "bancodesangresino", "bancosangresino", "bb"} or ("blood" in key_norm and "bank" in key_norm):
+        if (
+            key_norm in {"inbloodbank", "bloodbank", "bancodesangre", "bancosangre", "bancodesangresino", "bancosangresino", "bancodesangresi", "bancosangresi", "bb"}
+            or ("blood" in key_norm and "bank" in key_norm)
+            or ("banco" in key_norm and "sangre" in key_norm)
+        ):
             if str(val).strip():
                 return str(val).strip()
-            # Caso 2: el valor viene entre paréntesis dentro del mismo texto. Ej.: Banco de sangre (Si)
-            m = re.search(r"\((yes|no|si|sí|s|n|true|false|1|0|x)\)", part, flags=re.IGNORECASE)
+            m = re.search(r"\((yes|no|si|sí|s|n|true|false|1|1\.0|0|0\.0|x)\)", part, flags=re.IGNORECASE)
             if m:
                 return m.group(1)
 
-    # Caso 3: frase libre. Ej.: ... Banco de sangre (Si) ... / ... blood bank yes ...
-    patterns = [
-        r"banco\s+de\s+sangre\s*[:=\-]?\s*\(?\s*(si|sí|s|yes|y|true|1|x|no|n|false|0)\s*\)?",
-        r"blood\s+bank\s*[:=\-]?\s*\(?\s*(yes|y|true|1|x|si|sí|s|no|n|false|0)\s*\)?",
-        r"in\s+blood\s+bank\s*[:=\-]?\s*\(?\s*(yes|y|true|1|x|si|sí|s|no|n|false|0)\s*\)?",
-    ]
-    for pattern in patterns:
-        m = re.search(pattern, text, flags=re.IGNORECASE)
-        if m:
-            return m.group(1)
+    # Revisión global del texto completo.
+    if is_blood_bank_yes(text):
+        return "Si"
+    low = text.lower().replace("í", "i")
+    if re.search(r"(?:banco\s+de\s+sangre|blood\s+bank|in\s+blood\s+bank).*\b(no|n|false|0(?:\.0)?)\b", low, flags=re.IGNORECASE):
+        return "No"
     return pd.NA
-
 
 def _recover_blood_bank(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
@@ -3870,6 +3955,19 @@ with machine_tab:
     st.markdown("### Banco de sangre")
     st.markdown('<div class="small-note">Se cuentan como positivos únicamente los equipos donde el archivo indica <b>Banco de sangre = Sí</b> / <b>In Blood Bank = Yes</b>.</div>', unsafe_allow_html=True)
     st.plotly_chart(build_blood_bank_donut(filtered), use_container_width=True, key="blood_bank_donut_main")
+
+    with st.expander("Diagnóstico directo Banco de sangre / Estado operativo", expanded=False):
+        diag_cols = [c for c in ["Distributor name", "Customer name", "Instrument type", "Serial number", "In Blood Bank", "Is Blood Bank", "Blood Bank Source", "Operational status", "Operational status grouped", "Machine Configurations"] if c in filtered.columns]
+        st.caption("Esta tabla muestra exactamente qué está leyendo la app para Banco de sangre y Estado operativo.")
+        st.dataframe(filtered[diag_cols].head(80).copy(), use_container_width=True, hide_index=True)
+        if "In Blood Bank" in filtered.columns:
+            bb_counts = filtered["In Blood Bank"].fillna("<vacío>").astype(str).value_counts().head(20).reset_index()
+            bb_counts.columns = ["Valor leído en In Blood Bank", "Cantidad"]
+            st.dataframe(bb_counts, use_container_width=True, hide_index=True)
+        if "Operational status" in filtered.columns:
+            st_counts = filtered["Operational status"].fillna("<vacío>").astype(str).value_counts().head(20).reset_index()
+            st_counts.columns = ["Valor leído en Operational status", "Cantidad"]
+            st.dataframe(st_counts, use_container_width=True, hide_index=True)
 
     if not cfg_cols_prefixed:
         st.info("No se detectaron campos aplicables dentro de Machine Configurations para el filtro actual.")
