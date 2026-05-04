@@ -122,7 +122,8 @@ ASSAY_COLS = CUSTOM_HEADERS[28:-1]
 
 # Cambia esta versión cuando se ajusta el parser de Records List.
 # Obliga a Streamlit a reparsear el mismo archivo subido, aunque el nombre/tamaño no cambien.
-RECORDS_PARSER_VERSION = "records_parser_operational_status_scan_v4_2026_05_04"
+RECORDS_PARSER_VERSION = "records_parser_operational_status_v5_force_refresh_2026_05_04"
+APP_BUILD_VERSION = "estado-operativo-v5"
 
 PLOT_TEMPLATE = "plotly_dark"
 PLOT_BG = "rgba(12, 19, 30, 0.02)"
@@ -867,7 +868,7 @@ def recover_operational_status_column(df: pd.DataFrame) -> pd.DataFrame:
 
     def _column_priority(col_name: str) -> int:
         norm = normalize_key_text(col_name)
-        if norm in {"instrumentstatus", "operationalstatus", "instrumentstate", "analyzerstatus", "machinestatus", "equipmentstatus"}:
+        if norm in {"instrumentstatus", "operationalstatus", "instrumentstate", "analyzerstatus", "machinestatus", "equipmentstatus", "assetcondition"}:
             return 100
         if norm == "status":
             return 85
@@ -919,6 +920,65 @@ def recover_operational_status_column(df: pd.DataFrame) -> pd.DataFrame:
 
     return out
 
+
+
+def get_status_candidate_columns(df: pd.DataFrame, min_score: float = 0.05) -> list[str]:
+    """Devuelve columnas que podrían contener estados operativos reales."""
+    if df is None or df.empty:
+        return []
+    candidates: list[tuple[float, int, int, str]] = []
+    for col in df.columns:
+        if str(col).startswith("FLAG::") or str(col).startswith("CFG::"):
+            continue
+        try:
+            clean = df[col].dropna().astype(str).str.strip()
+            clean = clean[clean.ne("")]
+            score = _status_like_score(df[col])
+            priority = 0
+            norm = normalize_key_text(col)
+            if norm in {"instrumentstatus", "operationalstatus", "instrumentstate", "analyzerstatus", "machinestatus", "equipmentstatus", "assetcondition", "status"}:
+                priority = 100
+            elif "status" in norm or "state" in norm or "estado" in norm:
+                priority = 75
+            if (score >= min_score or priority >= 75) and not clean.empty:
+                candidates.append((score, priority, int(clean.shape[0]), str(col)))
+        except Exception:
+            continue
+    candidates.sort(key=lambda x: (x[0], x[1], x[2]), reverse=True)
+    ordered = []
+    for _, _, _, col in candidates:
+        if col not in ordered:
+            ordered.append(col)
+    return ordered
+
+
+def finalize_operational_status_for_dashboard(df: pd.DataFrame, forced_source_col: str | None = None) -> pd.DataFrame:
+    """Última validación antes de construir filtros y gráficas.
+
+    Si el parser deja Operational status vacío o mal mapeado, esta función vuelve a
+    buscar el estado real en columnas como Instrument Status, Status o Asset condition,
+    recalcula Operational status grouped y actualiza Is in routine.
+    """
+    if df is None or df.empty:
+        return df
+    out = df.copy()
+
+    if forced_source_col and forced_source_col in out.columns:
+        out["Operational status"] = out[forced_source_col]
+        out.attrs["operational_status_source"] = forced_source_col
+    else:
+        out = recover_operational_status_column(out)
+
+    if "Operational status" not in out.columns:
+        out["Operational status"] = pd.NA
+
+    out["Operational status"] = (
+        out["Operational status"]
+        .replace({"": pd.NA, "nan": pd.NA, "None": pd.NA, "<NA>": pd.NA})
+    )
+    out["Operational status grouped"] = out["Operational status"].map(normalize_operational_status)
+    out["Is in routine"] = out["Operational status grouped"].eq("Routine")
+    return out
 
 def compute_state_filter_counts(df: pd.DataFrame) -> list[tuple[str, int]]:
     """
@@ -3726,6 +3786,12 @@ st.sidebar.markdown(
     unsafe_allow_html=True,
 )
 uploaded_file = st.sidebar.file_uploader("Sube el archivo Records List", type=["csv", "xlsx", "xls"])
+st.sidebar.caption(f"Build activo: {APP_BUILD_VERSION}")
+if st.sidebar.button("Resetear lectura del archivo", help="Limpia cache y vuelve a leer el archivo subido desde cero."):
+    for _key in ["records_active_df", "records_active_signature", "records_active_name"]:
+        st.session_state.pop(_key, None)
+    st.cache_data.clear()
+    st.rerun()
 
 base_dir = Path(__file__).resolve().parent
 sample_candidates = sorted(base_dir.glob("Records_List_Report*.csv"))
@@ -3739,13 +3805,43 @@ if raw_df.empty:
 
 raw_df, CONFIG_KEYS = parse_machine_configuration(raw_df)
 raw_df = add_operating_system_columns(raw_df, CONFIG_KEYS)
+raw_df = finalize_operational_status_for_dashboard(raw_df)
 st.sidebar.caption(f"Fuente activa: {source_label}")
+
+status_candidates = get_status_candidate_columns(raw_df)
+with st.sidebar.expander("Diagnóstico estado operativo", expanded=False):
+    st.caption("Columnas candidatas detectadas para estado operativo")
+    if status_candidates:
+        preview_rows = []
+        for _col in status_candidates[:8]:
+            _vals = raw_df[_col].dropna().astype(str).str.strip()
+            _vals = _vals[_vals.ne("")]
+            _top = ", ".join(_vals.value_counts().head(4).index.astype(str).tolist()) if not _vals.empty else "Sin valores"
+            preview_rows.append({"Columna": _col, "Valores detectados": _top})
+        st.dataframe(pd.DataFrame(preview_rows), use_container_width=True, hide_index=True)
+    else:
+        st.caption("No se encontraron columnas candidatas con valores tipo IN ROUTINE, SCRAPPED o WAREHOUSE.")
+
+    manual_status_source = st.selectbox(
+        "Forzar fuente de estado operativo",
+        options=["Automático"] + status_candidates,
+        index=0,
+        help="Déjalo en Automático. Úsalo solo si el export trae el estado en una columna no estándar.",
+    )
+
+if "manual_status_source" in locals() and manual_status_source != "Automático":
+    raw_df = finalize_operational_status_for_dashboard(raw_df, forced_source_col=manual_status_source)
+else:
+    raw_df = finalize_operational_status_for_dashboard(raw_df)
+
 status_source = raw_df.attrs.get("operational_status_source", "Operational status") if hasattr(raw_df, "attrs") else "Operational status"
 valid_status_count = int(raw_df.get("Operational status", pd.Series(dtype=object)).dropna().astype(str).str.strip().ne("").sum()) if "Operational status" in raw_df.columns else 0
+status_distribution_debug = raw_df["Operational status grouped"].fillna("No informado").astype(str).value_counts().to_dict() if "Operational status grouped" in raw_df.columns else {}
 if valid_status_count == 0:
-    st.sidebar.warning("No se detectaron valores en Operational status. Revisa que el archivo exportado incluya Instrument Status / Status.")
+    st.sidebar.warning("No se detectaron valores en Operational status. Abre Diagnóstico estado operativo y fuerza la columna correcta si el export la trae con otro nombre.")
 else:
     st.sidebar.caption(f"Estado operativo leído desde: {status_source}")
+    st.sidebar.caption("Estados detectados: " + ", ".join([f"{k}: {v}" for k, v in list(status_distribution_debug.items())[:6]]))
 st.sidebar.markdown('<div class="small-note">Usa los filtros como un panel de control para refinar región, país, distribuidor, instrumento y estado operativo.</div>', unsafe_allow_html=True)
 
 region_options = sorted(raw_df["Commercial Region"].dropna().unique().tolist())
