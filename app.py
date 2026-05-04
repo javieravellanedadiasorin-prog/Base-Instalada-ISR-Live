@@ -695,40 +695,81 @@ def dataframe_to_excel_bytes(sheet_map: dict[str, pd.DataFrame]) -> bytes:
 
 
 def normalize_operational_status(value) -> str:
+    """
+    Normaliza el estado operativo sin mezclar estados negativos con Routine.
+
+    Punto crítico corregido:
+    antes se usaba "IN ROUTINE" in upper, lo que clasificaba erróneamente
+    "NOT IN ROUTINE" como "Routine" porque contiene ese mismo texto.
+    """
     if pd.isna(value):
         return "No informado"
+
     text = str(value).strip()
     if not text:
         return "No informado"
 
-    upper = text.upper()
-    lower = text.lower()
+    normalized_spaces = re.sub(r"\s+", " ", text)
+    upper = normalized_spaces.upper()
+    lower = normalized_spaces.lower()
+
+    # Primero se evalúan los estados negativos o no rutinarios.
+    # Esto evita que NOT IN ROUTINE caiga dentro de Routine.
+    if re.search(r"\bNOT\s+IN\s+ROUTINE\b", upper):
+        return "Not in routine"
+    if re.search(r"\bNOT\s+ROUTINE\b", upper):
+        return "Not in routine"
+    if re.search(r"\bNO\s+ROUTINE\b", upper):
+        return "Not in routine"
+    if re.search(r"\bOUT\s+OF\s+ROUTINE\b", upper):
+        return "Not in routine"
 
     if "scrap" in lower:
-        return "Scraped"
-    if upper in {"IN ROUTINE", "ROUTINE"} or "IN ROUTINE" in upper:
+        return "Scrapped"
+
+    # Estado rutinario solo cuando el valor completo corresponde a Routine / In Routine.
+    if upper in {"IN ROUTINE", "ROUTINE"}:
         return "Routine"
 
-    return text.title()
+    return normalized_spaces.title()
 
 
 def compute_state_filter_counts(df: pd.DataFrame) -> list[tuple[str, int]]:
+    """
+    Construye el filtro lateral de Estado operativo.
+
+    Mantiene el acceso rápido "No rutina" como agregado ejecutivo, pero además
+    muestra todas las opciones reales presentes en Operational status grouped después
+    de aplicar región, país, distribuidor e instrumento.
+    """
     if df.empty or "Operational status grouped" not in df.columns:
         return []
 
-    grouped = (
+    state_series = (
         df["Operational status grouped"]
         .fillna("No informado")
         .astype(str)
-        .value_counts()
+        .str.strip()
+        .replace("", "No informado")
     )
 
-    items = []
-    non_routine_count = int((~df["Operational status grouped"].eq("Routine")).sum())
+    grouped = state_series.value_counts()
+
+    items: list[tuple[str, int]] = []
+    non_routine_count = int((~state_series.eq("Routine")).sum())
     if non_routine_count > 0:
         items.append(("No rutina", non_routine_count))
 
-    preferred_order = ["Routine", "Scraped", "No informado"]
+    preferred_order = [
+        "Routine",
+        "Not in routine",
+        "Scrapped",
+        "Scraped",
+        "Warehouse Ready To Be Installed",
+        "Warehouse To Be Refurbished",
+        "Warehouse To Be Scrapped",
+        "No informado",
+    ]
     seen = set()
 
     for name in preferred_order:
@@ -737,9 +778,11 @@ def compute_state_filter_counts(df: pd.DataFrame) -> list[tuple[str, int]]:
             items.append((name, count))
             seen.add(name)
 
-    for name, count in grouped.items():
-        if name not in seen and int(count) > 0:
-            items.append((name, int(count)))
+    remaining = grouped.drop(labels=[name for name in seen if name in grouped.index], errors="ignore")
+    remaining = remaining.sort_values(ascending=False)
+    for name, count in remaining.items():
+        if int(count) > 0:
+            items.append((str(name), int(count)))
 
     return items
 
@@ -790,12 +833,16 @@ def translate_status_value(value: str) -> str:
     mapping = {
         'Routine': 'En rutina',
         'NOT IN ROUTINE': 'No en rutina',
+        'Not in routine': 'No en rutina',
+        'Not In Routine': 'No en rutina',
         'IN ROUTINE': 'En rutina',
         'Scrapped': 'Descartado',
+        'Scraped': 'Descartado',
         'Warehouse To Be Refurbished': 'Bodega por reacondicionar',
         'WAREHOUSE to be refurbished': 'Bodega por reacondicionar',
         'Warehouse Ready To Be Installed': 'Bodega lista para instalar',
         'WAREHOUSE ready to be installed': 'Bodega lista para instalar',
+        'Warehouse To Be Scrapped': 'Bodega por descartar',
         'WAREHOUSE to be scrapped': 'Bodega por descartar',
         'Refurbisched': 'Reacondicionado',
         'Refurbished': 'Reacondicionado',
