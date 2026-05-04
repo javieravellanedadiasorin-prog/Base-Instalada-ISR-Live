@@ -1353,7 +1353,7 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
             'table_max_rows': max(len(detail_corporate_df), 1),
         })
 
-    blood_bank_yes = int(filtered_df.get('In Blood Bank', pd.Series(dtype=object)).map(is_blood_bank_yes).sum())
+    blood_bank_yes = count_blood_bank_yes(filtered_df)
     cfg_pairs = [
         ('Equipos con configuración', f"{int(filtered_df['Machine Configurations'].notna().sum()):,}"),
         ('Equipos de banco de sangre', f"{blood_bank_yes:,} de {len(filtered_df):,} ({_safe_share_pct(blood_bank_yes, len(filtered_df)):.1f}% del total)"),
@@ -1753,7 +1753,7 @@ def is_blood_bank_yes(value) -> bool:
 
 def build_blood_bank_donut(df: pd.DataFrame) -> go.Figure:
     total_assets = int(len(df))
-    yes_count = int(df.get("In Blood Bank", pd.Series(dtype=object)).map(is_blood_bank_yes).sum()) if total_assets else 0
+    yes_count = count_blood_bank_yes(df) if total_assets else 0
     no_count = max(total_assets - yes_count, 0)
     summary = pd.DataFrame({"Label": ["Banco de sangre", "Resto de equipos"], "Count": [yes_count, no_count]})
 
@@ -2109,7 +2109,7 @@ def normalize_instrument_type(value) -> str:
     return text.strip() or safe_text(value)
 
 
-PARSER_VERSION = "records-parser-stable-minimal-v9-20260504"
+PARSER_VERSION = "records-parser-stable-minimal-v10-20260504"
 
 
 def get_uploaded_file_signature(uploaded_file) -> str:
@@ -2144,6 +2144,11 @@ _HEADER_ALIASES = {
     "bloodbankyesno": "In Blood Bank",
     "bancodesangre": "In Blood Bank",
     "bancosangre": "In Blood Bank",
+    "bancodesangresino": "In Blood Bank",
+    "bancosangresino": "In Blood Bank",
+    "bancodesangresi": "In Blood Bank",
+    "bloodbankyesno": "In Blood Bank",
+    "bloodbankyn": "In Blood Bank",
     "address": "Address",
     "direccion": "Address",
     "zipcode": "ZipCode",
@@ -2177,8 +2182,12 @@ _HEADER_ALIASES = {
     "testperday": "Number of tests per day",
     "testsperday": "Number of tests per day",
     "operationalstatus": "Operational status",
+    "status": "Operational status",
+    "state": "Operational status",
+    "rawstatus": "Operational status",
     "instrumentstatus": "Operational status",
     "instrumentstate": "Operational status",
+    "equipmentstatus": "Operational status",
     "assetstatus": "Operational status",
     "typofcontract": "Type of contract",
     "typeofcontract": "Type of contract",
@@ -2269,10 +2278,16 @@ def _status_value_score(series: pd.Series) -> int:
     score = 0
     for value in series.dropna().astype(str).head(5000):
         upper = re.sub(r"\s+", " ", value.upper()).strip()
+        if not upper or upper in {"NAN", "NONE", "<NA>", "NO INFORMADO"}:
+            continue
         if upper in {"IN ROUTINE", "ROUTINE", "NOT IN ROUTINE", "NO ROUTINE", "NOT ROUTINE"}:
+            score += 8
+        elif "IN ROUTINE" in upper:
+            score += 6
+        elif any(token in upper for token in ["SCRAP", "WAREHOUSE", "REFURB", "READY TO BE INSTALLED", "TO BE INSTALLED", "TRANSIT", "CUSTOM"]):
             score += 5
-        elif any(token in upper for token in ["SCRAP", "WAREHOUSE", "REFURB", "READY TO BE INSTALLED", "TRANSIT", "CUSTOM"]):
-            score += 3
+        elif upper in {"INSTALLED", "ACTIVE", "INACTIVE"}:
+            score += 2
     return score
 
 
@@ -2284,16 +2299,25 @@ def _recover_operational_status(df: pd.DataFrame) -> pd.DataFrame:
     current_score = _status_value_score(out["Operational status"])
     best_col = "Operational status"
     best_score = current_score
+
     for col in out.columns:
         key = _column_key(col)
-        if key in {"operationalstatus", "instrumentstatus", "instrumentstate", "assetstatus", "status"} or "status" in key or "state" in key:
-            value_score = _status_value_score(out[col])
-            name_bonus = 3 if key in {"operationalstatus", "instrumentstatus", "instrumentstate", "assetstatus"} else 0
-            score = value_score + name_bonus
-            if score > best_score:
-                best_col = col
-                best_score = score
-    if best_col != "Operational status" and best_score > current_score:
+        key_no_cfg = _column_key(str(col).replace("CFG::", ""))
+        is_candidate_name = (
+            key_no_cfg in {"operationalstatus", "status", "state", "rawstatus", "instrumentstatus", "instrumentstate", "equipmentstatus", "assetstatus"}
+            or "status" in key_no_cfg
+            or key_no_cfg.endswith("state")
+        )
+        value_score = _status_value_score(out[col])
+        if not is_candidate_name and value_score <= 0:
+            continue
+        name_bonus = 8 if key_no_cfg in {"operationalstatus", "instrumentstatus", "rawstatus", "status", "state"} else 0
+        score = value_score + name_bonus
+        if score > best_score:
+            best_col = col
+            best_score = score
+
+    if best_score > 0:
         out["Operational status"] = out[best_col]
         out.attrs["operational_status_source"] = str(best_col)
     else:
@@ -2304,19 +2328,37 @@ def _recover_operational_status(df: pd.DataFrame) -> pd.DataFrame:
 def _extract_blood_bank_from_machine_config(value):
     if pd.isna(value):
         return pd.NA
-    text = str(value)
-    if not text.strip():
+    text = str(value).strip()
+    if not text:
         return pd.NA
+
+    # Caso 1: campo explícito con separador. Ej.: Banco de sangre: Si | In Blood Bank = Yes
     for part in [p.strip() for p in re.split(r"\|\s*|;\s*|\r?\n", text) if p.strip()]:
         if ":" in part:
             key, val = part.split(":", 1)
         elif "=" in part:
             key, val = part.split("=", 1)
         else:
-            continue
+            key, val = part, ""
         key_norm = _column_key(key)
-        if key_norm in {"inbloodbank", "bloodbank", "bancodesangre", "bancosangre"} or ("blood" in key_norm and "bank" in key_norm):
-            return val.strip()
+        if key_norm in {"inbloodbank", "bloodbank", "bancodesangre", "bancosangre", "bancodesangresino", "bancosangresino", "bb"} or ("blood" in key_norm and "bank" in key_norm):
+            if str(val).strip():
+                return str(val).strip()
+            # Caso 2: el valor viene entre paréntesis dentro del mismo texto. Ej.: Banco de sangre (Si)
+            m = re.search(r"\((yes|no|si|sí|s|n|true|false|1|0|x)\)", part, flags=re.IGNORECASE)
+            if m:
+                return m.group(1)
+
+    # Caso 3: frase libre. Ej.: ... Banco de sangre (Si) ... / ... blood bank yes ...
+    patterns = [
+        r"banco\s+de\s+sangre\s*[:=\-]?\s*\(?\s*(si|sí|s|yes|y|true|1|x|no|n|false|0)\s*\)?",
+        r"blood\s+bank\s*[:=\-]?\s*\(?\s*(yes|y|true|1|x|si|sí|s|no|n|false|0)\s*\)?",
+        r"in\s+blood\s+bank\s*[:=\-]?\s*\(?\s*(yes|y|true|1|x|si|sí|s|no|n|false|0)\s*\)?",
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, text, flags=re.IGNORECASE)
+        if m:
+            return m.group(1)
     return pd.NA
 
 
@@ -2324,28 +2366,56 @@ def _recover_blood_bank(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
     if "In Blood Bank" not in out.columns:
         out["In Blood Bank"] = pd.NA
-    sources = []
-    # Primero la columna oficial.
-    sources.append(out["In Blood Bank"])
-    # Luego columnas equivalentes no oficiales.
+
+    candidates: list[tuple[str, pd.Series]] = []
+
+    # 1) Columna oficial o mapeada desde encabezados tipo Banco de sangre (Si/No).
+    candidates.append(("In Blood Bank", out["In Blood Bank"]))
+
+    # 2) Columnas equivalentes.
     for col in out.columns:
         if col == "In Blood Bank":
             continue
         key = _column_key(str(col).replace("CFG::", ""))
-        if key in {"inbloodbank", "bloodbank", "bancodesangre", "bancosangre", "bb"} or ("blood" in key and "bank" in key):
-            sources.append(out[col])
+        if (
+            key in {"inbloodbank", "bloodbank", "bancodesangre", "bancosangre", "bancodesangresino", "bancosangresino", "bb"}
+            or ("blood" in key and "bank" in key)
+            or ("banco" in key and "sangre" in key)
+        ):
+            candidates.append((str(col), out[col]))
+
+    # 3) Texto dentro de Machine Configurations.
     if "Machine Configurations" in out.columns:
-        sources.append(out["Machine Configurations"].map(_extract_blood_bank_from_machine_config))
+        candidates.append(("Machine Configurations", out["Machine Configurations"].map(_extract_blood_bank_from_machine_config)))
 
     final = pd.Series(pd.NA, index=out.index, dtype="object")
-    for src in sources:
-        cleaned = src.where(src.notna(), pd.NA).astype("object")
+    source = pd.Series(pd.NA, index=out.index, dtype="object")
+
+    for source_name, src in candidates:
+        cleaned = src.astype("object").where(src.notna(), pd.NA)
+        # Si aparece cualquier Sí/Yes explícito, prevalece sobre No o vacío.
         positive = cleaned.map(is_blood_bank_yes).fillna(False).astype(bool)
-        final = final.mask(positive, "Yes")
-        final = final.fillna(cleaned)
+        final = final.mask(positive, "Si")
+        source = source.mask(positive, source_name)
+        # Si todavía no hay dato, conserva también el No explícito para diagnóstico.
+        empty = final.isna() & cleaned.notna() & cleaned.astype(str).str.strip().ne("")
+        final = final.mask(empty, cleaned)
+        source = source.mask(empty, source_name)
+
     out["In Blood Bank"] = final
     out["Is Blood Bank"] = out["In Blood Bank"].map(is_blood_bank_yes).fillna(False).astype(bool)
+    out["Blood Bank Source"] = source.fillna("No detectado")
     return out
+
+
+def count_blood_bank_yes(df: pd.DataFrame) -> int:
+    if df is None or df.empty:
+        return 0
+    if "Is Blood Bank" in df.columns:
+        return int(df["Is Blood Bank"].fillna(False).astype(bool).sum())
+    if "In Blood Bank" in df.columns:
+        return int(df["In Blood Bank"].map(is_blood_bank_yes).fillna(False).astype(bool).sum())
+    return 0
 
 
 def _finalize_records_dataframe(table: pd.DataFrame) -> pd.DataFrame:
@@ -2533,11 +2603,15 @@ def parse_machine_configuration(df: pd.DataFrame) -> tuple[pd.DataFrame, list[st
             for part in [p.strip() for p in text.split("|") if p.strip()]:
                 if ":" in part:
                     key, value = part.split(":", 1)
-                    key = key.strip()
-                    value = value.strip()
-                    if value:
-                        row_dict[key] = value
-                        key_set.add(key)
+                elif "=" in part:
+                    key, value = part.split("=", 1)
+                else:
+                    continue
+                key = key.strip()
+                value = value.strip()
+                if value:
+                    row_dict[key] = value
+                    key_set.add(key)
         parsed_rows.append(row_dict)
     config_cols = sorted(key_set)
     if config_cols:
@@ -3519,7 +3593,7 @@ raw_df = add_operating_system_columns(raw_df, CONFIG_KEYS)
 st.sidebar.caption(f"Build activo: {PARSER_VERSION}")
 st.sidebar.caption(f"Fuente activa: {source_label}")
 try:
-    st.sidebar.caption(f"Banco de sangre detectado: {int(raw_df['In Blood Bank'].map(is_blood_bank_yes).sum()):,} de {len(raw_df):,}")
+    st.sidebar.caption(f"Banco de sangre detectado: {count_blood_bank_yes(raw_df):,} de {len(raw_df):,}")
     st.sidebar.caption(f"Estado operativo leído desde: {raw_df.attrs.get('operational_status_source', 'Operational status')}")
 except Exception:
     pass
@@ -3792,14 +3866,17 @@ with machine_tab:
     applicable_fields = active_config_fields(filtered, CONFIG_KEYS)
     cfg_cols_prefixed = [f"CFG::{col}" for col in applicable_fields]
 
+    blood_bank_yes = count_blood_bank_yes(filtered)
+    st.markdown("### Banco de sangre")
+    st.markdown('<div class="small-note">Se cuentan como positivos únicamente los equipos donde el archivo indica <b>Banco de sangre = Sí</b> / <b>In Blood Bank = Yes</b>.</div>', unsafe_allow_html=True)
+    st.plotly_chart(build_blood_bank_donut(filtered), use_container_width=True, key="blood_bank_donut_main")
+
     if not cfg_cols_prefixed:
         st.info("No se detectaron campos aplicables dentro de Machine Configurations para el filtro actual.")
     else:
         assets_with_cfg = int(filtered["Machine Configurations"].notna().sum())
         avg_cfg_fields = filtered["Machine config fields populated"].mean()
         unique_cfg_fields = len(applicable_fields)
-
-        blood_bank_yes = int(filtered.get("In Blood Bank", pd.Series(dtype=object)).map(is_blood_bank_yes).sum())
 
         mc1, mc2, mc3, mc4 = st.columns(4)
         with mc1:
@@ -3810,10 +3887,6 @@ with machine_tab:
             metric_card("Campos aplicables", f"{unique_cfg_fields}", "Solo ítems presentes en el filtro actual")
         with mc4:
             metric_card("Promedio de campos", f"{avg_cfg_fields:.1f}", "Campos poblados por equipo")
-
-        st.markdown("### Banco de sangre")
-        st.markdown('<div class="small-note">Se cuentan como positivos únicamente los equipos con <b>In Blood Bank = Yes</b>.</div>', unsafe_allow_html=True)
-        st.plotly_chart(build_blood_bank_donut(filtered), use_container_width=True, key="blood_bank_donut_main")
 
         coverage_df = pd.DataFrame(
             [{"Config field": col.replace("CFG::", ""), "Populated assets": int(filtered[col].notna().sum())} for col in cfg_cols_prefixed]
