@@ -695,12 +695,8 @@ def dataframe_to_excel_bytes(sheet_map: dict[str, pd.DataFrame]) -> bytes:
 
 
 def normalize_operational_status(value) -> str:
-    """
-    Normaliza el estado operativo sin mezclar estados negativos con Routine.
-    """
     if pd.isna(value):
         return "No informado"
-
     text = str(value).strip()
     if not text:
         return "No informado"
@@ -709,162 +705,16 @@ def normalize_operational_status(value) -> str:
     upper = text.upper()
     lower = text.lower()
 
+    if "scrap" in lower:
+        return "Scrapped"
     if re.search(r"\bNOT\s+IN\s+ROUTINE\b", upper):
         return "Not in routine"
     if re.search(r"\bNOT\s+ROUTINE\b", upper):
         return "Not in routine"
-    if re.search(r"\bNO\s+ROUTINE\b", upper):
-        return "Not in routine"
-    if re.search(r"\bOUT\s+OF\s+ROUTINE\b", upper):
-        return "Not in routine"
-
-    if "scrap" in lower:
-        return "Scrapped"
-
     if upper in {"IN ROUTINE", "ROUTINE"}:
         return "Routine"
 
     return text.title()
-
-
-def _series_non_empty(series: pd.Series) -> pd.Series:
-    return series.notna() & series.astype(str).str.strip().ne("")
-
-
-def _normalize_header_key(value) -> str:
-    if pd.isna(value):
-        return ""
-    return re.sub(r"[^a-z0-9]+", "", str(value).lower())
-
-
-def _first_existing_column(df: pd.DataFrame, candidates: list[str]) -> str | None:
-    by_key = {_normalize_header_key(c): c for c in df.columns}
-    for candidate in candidates:
-        col = by_key.get(_normalize_header_key(candidate))
-        if col is not None:
-            return col
-    return None
-
-
-def _status_value_score(series: pd.Series) -> tuple[float, int, int]:
-    if series is None:
-        return 0.0, 0, 0
-    clean = series.dropna().astype(str).str.strip()
-    clean = clean[clean.ne("")]
-    total = int(clean.shape[0])
-    if total <= 0:
-        return 0.0, 0, 0
-    pattern = re.compile(
-        r"\bIN\s+ROUTINE\b|\bNOT\s+IN\s+ROUTINE\b|\bNOT\s+ROUTINE\b|\bNO\s+ROUTINE\b|SCRAP|WAREHOUSE|REFURB|READY\s+TO\s+BE\s+INSTALLED|TRANSIT|CUSTOM|SHIPPING",
-        re.IGNORECASE,
-    )
-    matched = int(clean.map(lambda x: bool(pattern.search(x))).sum())
-    return matched / max(total, 1), matched, total
-
-
-def recover_operational_status_column(df: pd.DataFrame) -> pd.DataFrame:
-    """Recupera Operational status desde columnas alternativas sin tocar Banco de Sangre."""
-    if df is None or df.empty:
-        return df
-
-    out = df.copy()
-    if "Operational status" not in out.columns:
-        out["Operational status"] = pd.NA
-
-    candidate_names = [
-        "Operational status", "Operational Status", "Instrument Status", "Instrument status",
-        "Instrument State", "Instrument state", "Instrument operational status", "Analyzer Status",
-        "Machine Status", "Equipment Status", "Estado operativo", "Estado del instrumento", "Status",
-    ]
-
-    existing = []
-    for name in candidate_names:
-        col = _first_existing_column(out, [name])
-        if col is not None and col not in existing:
-            existing.append(col)
-
-    for col in out.columns:
-        key = _normalize_header_key(col)
-        if col in existing:
-            continue
-        if any(token in key for token in ["blood", "bank", "banco", "sangre"]):
-            continue
-        if any(token in key for token in ["status", "state", "condition"]):
-            existing.append(col)
-
-    best_col = None
-    best_score = 0.0
-    best_matched = 0
-    for col in existing:
-        ratio, matched, _ = _status_value_score(out[col])
-        if matched <= 0:
-            continue
-        key = _normalize_header_key(col)
-        name_boost = 0.0
-        if key == "operationalstatus":
-            name_boost = 0.60
-        elif key in {"instrumentstatus", "instrumentstate", "instrumentoperationalstatus"}:
-            name_boost = 0.55
-        elif key == "status":
-            name_boost = 0.25
-        score = ratio + name_boost
-        if score > best_score or (score == best_score and matched > best_matched):
-            best_col = col
-            best_score = score
-            best_matched = matched
-
-    if best_col is not None:
-        current_ratio, current_matched, _ = _status_value_score(out["Operational status"])
-        if best_col == "Operational status" or current_matched == 0 or best_score > current_ratio:
-            source = out[best_col]
-            current = out["Operational status"]
-            out["Operational status"] = source.where(_series_non_empty(source), current)
-            out.attrs["operational_status_source"] = best_col
-    else:
-        out.attrs["operational_status_source"] = "Operational status"
-    return out
-
-
-def recover_blood_bank_column(df: pd.DataFrame) -> pd.DataFrame:
-    """Protege In Blood Bank y lo normaliza desde aliases o Machine Configurations si aplica."""
-    if df is None or df.empty:
-        return df
-
-    out = df.copy()
-    if "In Blood Bank" not in out.columns:
-        out["In Blood Bank"] = pd.NA
-
-    alias_col = _first_existing_column(out, [
-        "In Blood Bank", "In blood bank", "Blood Bank", "Blood bank",
-        "Banco de sangre", "Banco Sangre", "In banco de sangre",
-    ])
-    if alias_col is not None and alias_col != "In Blood Bank":
-        source = out[alias_col]
-        current = out["In Blood Bank"]
-        if int(_series_non_empty(source).sum()) > int(_series_non_empty(current).sum()):
-            out["In Blood Bank"] = source.where(_series_non_empty(source), current)
-            out.attrs["blood_bank_source"] = alias_col
-
-    if int(_series_non_empty(out["In Blood Bank"]).sum()) == 0 and "Machine Configurations" in out.columns:
-        extracted = out["Machine Configurations"].fillna("").astype(str).str.extract(
-            r"(?i)(?:in\s*blood\s*bank|blood\s*bank|banco\s*de\s*sangre)\s*[:=]\s*([^|;,$]+)",
-            expand=False,
-        )
-        if extracted.notna().any():
-            out["In Blood Bank"] = extracted.fillna(pd.NA)
-            out.attrs["blood_bank_source"] = "Machine Configurations"
-
-    out["In Blood Bank"] = out["In Blood Bank"].replace({"": pd.NA, "None": pd.NA, "nan": pd.NA, "<NA>": pd.NA})
-    return out
-
-
-def compute_blood_bank_yes_count(df: pd.DataFrame) -> int:
-    if df is None or df.empty:
-        return 0
-    work = recover_blood_bank_column(df)
-    if "In Blood Bank" not in work.columns:
-        return 0
-    return int(work["In Blood Bank"].map(is_blood_bank_yes).sum())
 
 
 def compute_state_filter_counts(df: pd.DataFrame) -> list[tuple[str, int]]:
@@ -885,16 +735,27 @@ def compute_state_filter_counts(df: pd.DataFrame) -> list[tuple[str, int]]:
     if non_routine_count > 0:
         items.append(("No rutina", non_routine_count))
 
-    preferred_order = ["Routine", "Not in routine", "Scrapped", "Warehouse Ready To Be Installed", "Warehouse To Be Refurbished", "Warehouse To Be Scrapped", "No informado"]
+    preferred_order = [
+        "Routine",
+        "Not in routine",
+        "Scrapped",
+        "Warehouse Ready To Be Installed",
+        "Warehouse To Be Refurbished",
+        "Warehouse To Be Scrapped",
+        "No informado",
+    ]
     seen = set()
+
     for name in preferred_order:
         count = int(grouped.get(name, 0))
         if count > 0:
             items.append((name, count))
             seen.add(name)
+
     for name, count in grouped.items():
         if name not in seen and int(count) > 0:
             items.append((name, int(count)))
+
     return items
 
 
@@ -903,12 +764,20 @@ def apply_operational_status_filter(df: pd.DataFrame, selected_states: list[str]
         return df
 
     mask = pd.Series(False, index=df.index)
-    state_series = df["Operational status grouped"].fillna("No informado").astype(str).str.strip().replace("", "No informado")
+    state_series = (
+        df["Operational status grouped"]
+        .fillna("No informado")
+        .astype(str)
+        .str.strip()
+        .replace("", "No informado")
+    )
+
     for state in selected_states:
         if state == "No rutina":
             mask = mask | (~state_series.isin(["Routine", "No informado"]))
         else:
             mask = mask | state_series.eq(state)
+
     return df[mask].copy()
 
 
@@ -941,9 +810,11 @@ def build_filter_summary(
 def translate_status_value(value: str) -> str:
     mapping = {
         'Routine': 'En rutina',
+        'Not in routine': 'No en rutina',
         'NOT IN ROUTINE': 'No en rutina',
         'IN ROUTINE': 'En rutina',
         'Scrapped': 'Descartado',
+        'Scraped': 'Descartado',
         'Warehouse To Be Refurbished': 'Bodega por reacondicionar',
         'WAREHOUSE to be refurbished': 'Bodega por reacondicionar',
         'Warehouse Ready To Be Installed': 'Bodega lista para instalar',
@@ -1500,7 +1371,7 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
             'table_max_rows': max(len(detail_corporate_df), 1),
         })
 
-    blood_bank_yes = compute_blood_bank_yes_count(filtered_df)
+    blood_bank_yes = int(filtered_df.get('In Blood Bank', pd.Series(dtype=object)).map(is_blood_bank_yes).sum())
     cfg_pairs = [
         ('Equipos con configuración', f"{int(filtered_df['Machine Configurations'].notna().sum()):,}"),
         ('Equipos de banco de sangre', f"{blood_bank_yes:,} de {len(filtered_df):,} ({_safe_share_pct(blood_bank_yes, len(filtered_df)):.1f}% del total)"),
@@ -1887,22 +1758,13 @@ def safe_number_text(value, fallback: str = "0") -> str:
 def is_blood_bank_yes(value) -> bool:
     if pd.isna(value):
         return False
-    txt = re.sub(r"\s+", " ", str(value).strip().lower())
-    if not txt:
-        return False
-    yes_values = {"yes", "y", "true", "1", "si", "sí", "s", "x"}
-    no_values = {"no", "n", "false", "0", "not", "none", "na", "n/a"}
-    if txt in yes_values:
-        return True
-    if txt in no_values:
-        return False
-    return bool(re.search(r"\byes\b|\btrue\b|\bsi\b|\bsí\b", txt))
+    txt = str(value).strip().lower()
+    return txt in {"yes", "y", "true", "1", "si", "sí"}
 
 
 def build_blood_bank_donut(df: pd.DataFrame) -> go.Figure:
-    work = recover_blood_bank_column(df.copy()) if df is not None and not df.empty else pd.DataFrame()
-    total_assets = int(len(work))
-    yes_count = compute_blood_bank_yes_count(work) if total_assets else 0
+    total_assets = int(len(df))
+    yes_count = int(df.get("In Blood Bank", pd.Series(dtype=object)).map(is_blood_bank_yes).sum()) if total_assets else 0
     no_count = max(total_assets - yes_count, 0)
     summary = pd.DataFrame({"Label": ["Banco de sangre", "Resto de equipos"], "Count": [yes_count, no_count]})
 
@@ -2316,177 +2178,469 @@ def read_table_any(uploaded_file) -> pd.DataFrame:
     raise ValueError(f"Formato no soportado: {uploaded_file.name}")
 
 
-def _clean_object_columns(df: pd.DataFrame) -> pd.DataFrame:
+def _normalize_header_key(value) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value).lower()).strip()
+
+
+def _merge_or_rename_column(df: pd.DataFrame, source_col: str, target_col: str) -> pd.DataFrame:
+    if source_col == target_col:
+        return df
     out = df.copy()
-    for col in out.columns:
-        if out[col].dtype == object:
-            out[col] = out[col].astype(str).str.strip()
-            out[col] = out[col].replace({"": pd.NA, "None": pd.NA, "nan": pd.NA, "<NA>": pd.NA})
+    if target_col in out.columns:
+        target = out[target_col]
+        source = out[source_col]
+        target_empty = target.isna() | target.astype(str).str.strip().isin(["", "nan", "None", "<NA>"])
+        out.loc[target_empty, target_col] = source.loc[target_empty]
+        out = out.drop(columns=[source_col])
+    else:
+        out = out.rename(columns={source_col: target_col})
     return out
 
 
-def _unexcel_value(value):
-    if pd.isna(value):
-        return pd.NA
-    value = str(value).strip()
-    if value.startswith('="') and value.endswith('"'):
-        return value[2:-1]
-    return value
+def _standardize_record_column_names(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Renombra únicamente columnas equivalentes al layout oficial.
+    No reordena datos por posición cuando el archivo trae encabezados propios.
+    """
+    out = df.copy()
+    official_by_key = {_normalize_header_key(c): c for c in CUSTOM_HEADERS if c != "_blank"}
+    aliases = {
+        "distributor": "Distributor name",
+        "distributorname": "Distributor name",
+        "dealer": "Distributor name",
+        "dealername": "Distributor name",
+        "instrument": "Instrument type",
+        "instrumenttype": "Instrument type",
+        "instrumentfamily": "Instrument type",
+        "system": "Instrument type",
+        "systemtype": "Instrument type",
+        "installationdate": "Installation date",
+        "installdate": "Installation date",
+        "installeddate": "Installation date",
+        "customer": "Customer name",
+        "customername": "Customer name",
+        "account": "Customer name",
+        "accountname": "Customer name",
+        "inbloodbank": "In Blood Bank",
+        "bloodbank": "In Blood Bank",
+        "bloodbankyesno": "In Blood Bank",
+        "bankdesangre": "In Blood Bank",
+        "address": "Address",
+        "zipcode": "ZipCode",
+        "zip": "ZipCode",
+        "city": "City",
+        "country": "Country",
+        "worldregion": "World Region",
+        "commercialregion": "Commercial Region",
+        "latitude": "Latitude",
+        "lat": "Latitude",
+        "longitude": "Longitude",
+        "lon": "Longitude",
+        "lng": "Longitude",
+        "productline": "Product Line",
+        "serialnumber": "Serial number",
+        "serial": "Serial number",
+        "serialno": "Serial number",
+        "sn": "Serial number",
+        "machineconfigurations": "Machine Configurations",
+        "machineconfiguration": "Machine Configurations",
+        "configuration": "Machine Configurations",
+        "configurations": "Machine Configurations",
+        "assetcondition": "Asset condition",
+        "condition": "Asset condition",
+        "pmplan": "PM plan",
+        "numberoftestsperday": "Number of tests per day",
+        "testsperday": "Number of tests per day",
+        "testperday": "Number of tests per day",
+        "operationalstatus": "Operational status",
+        "operationstatus": "Operational status",
+        "operativestatus": "Operational status",
+        "typeofcontract": "Type of contract",
+        "contracttype": "Type of contract",
+        "contractduration": "Contract duration",
+        "tag": "Tag",
+        "notes": "Notes",
+        "pmlastdate": "PM last date",
+        "lastpmdate": "PM last date",
+        "pmfrequency": "PM frequency",
+        "pmnextdate": "PM next date",
+        "nextpmdate": "PM next date",
+        "pmperformedon": "PM performed On",
+    }
+
+    for col in list(out.columns):
+        key = _normalize_header_key(col)
+        target = official_by_key.get(key) or aliases.get(key)
+        if target and target != col:
+            out = _merge_or_rename_column(out, col, target)
+
+    return out
+
+
+def _non_empty_text_series(series: pd.Series) -> pd.Series:
+    return (
+        series
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .replace({"nan": "", "None": "", "<NA>": ""})
+    )
+
+
+def _status_value_score(series: pd.Series) -> int:
+    values = _non_empty_text_series(series)
+    if values.empty:
+        return 0
+    low = values.str.lower()
+    patterns = [
+        r"\bin routine\b",
+        r"\bnot\s+in\s+routine\b",
+        r"\broutine\b",
+        r"scrap",
+        r"warehouse",
+        r"ready\s+to\s+be\s+installed",
+        r"to\s+be\s+refurbished",
+        r"refurbished",
+        r"not installed",
+        r"installed",
+    ]
+    score = 0
+    for pattern in patterns:
+        score += int(low.str.contains(pattern, regex=True, na=False).sum())
+    return score
+
+
+def _detect_operational_status_source(df: pd.DataFrame) -> tuple[str | None, int]:
+    best_col = None
+    best_score = 0
+    for col in df.columns:
+        key = _normalize_header_key(col)
+        if key in {"operationalstatus", "operationstatus", "operativestatus"}:
+            name_bonus = 100
+        elif key in {"instrumentstatus", "instrumentstate", "equipmentstatus", "devicestatus"}:
+            name_bonus = 70
+        elif key == "status":
+            name_bonus = 45
+        elif "status" in key:
+            name_bonus = 25
+        else:
+            name_bonus = 0
+        value_score = _status_value_score(df[col])
+        total_score = name_bonus + (value_score * 5)
+        if value_score > 0 and total_score > best_score:
+            best_col = col
+            best_score = total_score
+    return best_col, best_score
+
+
+def _recover_operational_status(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy()
+    if "Operational status" not in out.columns:
+        out["Operational status"] = pd.NA
+
+    source_col, score = _detect_operational_status_source(out)
+    current_score = _status_value_score(out["Operational status"])
+
+    if source_col is not None and (current_score == 0 or score > (100 + current_score * 5)):
+        source = _non_empty_text_series(out[source_col]).replace("", pd.NA)
+        current = _non_empty_text_series(out["Operational status"]).replace("", pd.NA)
+        out["Operational status"] = current.fillna(source)
+        if current_score == 0:
+            out["Operational status"] = source
+        out.attrs["operational_status_source"] = source_col
+    else:
+        out.attrs["operational_status_source"] = "Operational status"
+
+    return out
+
+
+def _recover_blood_bank(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy()
+    if "In Blood Bank" not in out.columns:
+        out["In Blood Bank"] = pd.NA
+
+    candidates = []
+    for col in out.columns:
+        key = _normalize_header_key(col)
+        if key in {"inbloodbank", "bloodbank", "bloodbankyesno", "bankdesangre"} or ("blood" in key and "bank" in key):
+            candidates.append(col)
+
+    for col in candidates:
+        if col == "In Blood Bank":
+            continue
+        current = _non_empty_text_series(out["In Blood Bank"]).replace("", pd.NA)
+        source = _non_empty_text_series(out[col]).replace("", pd.NA)
+        out["In Blood Bank"] = current.fillna(source)
+
+    if "Machine Configurations" in out.columns:
+        current = _non_empty_text_series(out["In Blood Bank"]).replace("", pd.NA)
+        missing = current.isna()
+        if missing.any():
+            extracted = []
+            for raw in out.loc[missing, "Machine Configurations"].fillna("").astype(str):
+                value = pd.NA
+                for part in [p.strip() for p in raw.split("|") if p.strip()]:
+                    if ":" not in part:
+                        continue
+                    key, val = part.split(":", 1)
+                    if "blood" in key.lower() and "bank" in key.lower():
+                        value = val.strip()
+                        break
+                extracted.append(value)
+            current.loc[missing] = pd.Series(extracted, index=current.index[missing])
+            out["In Blood Bank"] = current
+
+    return out
 
 
 def _standardize_records_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    if df is None:
-        return pd.DataFrame()
+    df = df.copy()
+    if "_blank" in df.columns:
+        df = df.drop(columns=["_blank"])
 
-    out = df.copy()
-    out.columns = [str(c).strip() for c in out.columns]
-    for col in list(out.columns):
-        if str(col).strip().lower().startswith("unnamed") and out[col].fillna("").astype(str).str.strip().eq("").all():
-            out = out.drop(columns=[col])
+    df = _standardize_record_column_names(df)
+    df = _recover_blood_bank(df)
+    df = _recover_operational_status(df)
 
-    out = adapt_uploaded_records_to_standard(out)
-    if "_blank" in out.columns:
-        out = out.drop(columns=["_blank"])
+    for missing in [c for c in CUSTOM_HEADERS if c != "_blank" and c not in df.columns]:
+        df[missing] = pd.NA
 
-    for missing in [c for c in CUSTOM_HEADERS if c != "_blank" and c not in out.columns]:
-        out[missing] = pd.NA
+    official_cols = [c for c in CUSTOM_HEADERS if c != "_blank" and c in df.columns]
+    extra_cols = [c for c in df.columns if c not in official_cols]
+    df = df[official_cols + extra_cols].copy()
 
-    out = recover_blood_bank_column(out)
-    out = recover_operational_status_column(out)
+    for col in df.columns:
+        if df[col].dtype == object:
+            df[col] = df[col].astype(str).str.strip()
+            df[col] = df[col].replace({"": pd.NA, "None": pd.NA, "nan": pd.NA, "<NA>": pd.NA})
 
-    official_cols = [c for c in CUSTOM_HEADERS if c != "_blank" and c in out.columns]
-    extra_cols = [c for c in out.columns if c not in official_cols]
-    out = out[official_cols + extra_cols].copy()
-    out = _clean_object_columns(out)
-    out = recover_blood_bank_column(out)
-    out = recover_operational_status_column(out)
+    def unexcel(value):
+        if pd.isna(value):
+            return pd.NA
+        value = str(value).strip()
+        if value.startswith('="') and value.endswith('"'):
+            return value[2:-1]
+        return value
 
     for col in ["Latitude", "Longitude", "Serial number"]:
-        if col in out.columns:
-            out[col] = out[col].map(_unexcel_value)
-    for col in ["Latitude", "Longitude", "Number of tests per day", "PM frequency", "Contract duration"]:
-        if col in out.columns:
-            out[col] = to_numeric_series(out[col])
-    for col in ["Installation date", "PM last date", "PM next date"]:
-        if col in out.columns:
-            out[col] = pd.to_datetime(out[col], dayfirst=True, errors="coerce")
+        if col in df.columns:
+            df[col] = df[col].map(unexcel)
 
-    out["Instrument family"] = out["Instrument type"].map(normalize_instrument_type)
-    out["Operational status grouped"] = out["Operational status"].map(normalize_operational_status)
+    for col in ["Latitude", "Longitude", "Number of tests per day", "PM frequency", "Contract duration"]:
+        if col in df.columns:
+            df[col] = to_numeric_series(df[col])
+
+    for col in ["Installation date", "PM last date", "PM next date"]:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], dayfirst=True, errors="coerce")
+
+    df["Instrument family"] = df["Instrument type"].map(normalize_instrument_type)
+    df["Operational status grouped"] = df["Operational status"].map(normalize_operational_status)
+
     today = pd.Timestamp(date.today())
-    out["Age (years)"] = ((today - out["Installation date"]).dt.days / 365.25).round(1)
-    out["Is in routine"] = out["Operational status grouped"].eq("Routine")
-    out["Has geolocation"] = out["Latitude"].notna() & out["Longitude"].notna()
+    df["Age (years)"] = ((today - df["Installation date"]).dt.days / 365.25).round(1)
+    df["Is in routine"] = df["Operational status grouped"].fillna("").astype(str).eq("Routine")
+    df["Has geolocation"] = df["Latitude"].notna() & df["Longitude"].notna()
 
     yes_map = {"yes", "y", "true", "1", "si", "sí"}
     assay_flags = {}
     for col in ASSAY_COLS:
-        if col not in out.columns:
-            out[col] = pd.NA
-        normalized = out[col].fillna("No").astype(str).str.strip()
-        out[col] = normalized
+        if col not in df.columns:
+            df[col] = pd.NA
+        normalized = df[col].fillna("No").astype(str).str.strip()
+        df[col] = normalized
         assay_flags[f"FLAG::{col}"] = normalized.str.lower().isin(yes_map)
     if assay_flags:
-        assay_flags_df = pd.DataFrame(assay_flags, index=out.index)
-        out = pd.concat([out.reset_index(drop=True), assay_flags_df.reset_index(drop=True)], axis=1)
-        out["Enabled assay count"] = assay_flags_df.sum(axis=1).values
+        assay_flags_df = pd.DataFrame(assay_flags)
+        df = pd.concat([df.reset_index(drop=True), assay_flags_df.reset_index(drop=True)], axis=1)
+        df["Enabled assay count"] = assay_flags_df.sum(axis=1)
     else:
-        out["Enabled assay count"] = 0
+        df["Enabled assay count"] = 0
 
-    base_cols = [c for c in CUSTOM_HEADERS if c != "_blank" and c in out.columns]
-    out["Data completeness %"] = (out[base_cols].notna().sum(axis=1) / max(len(base_cols), 1) * 100).round(1)
-    return out
-
-
-def _score_records_table_candidate(df: pd.DataFrame) -> float:
-    if df is None or df.empty:
-        return -1.0
-    custom_keys = {_normalize_header_key(h) for h in CUSTOM_HEADERS}
-    header_matches = sum(1 for c in df.columns if str(c).strip() in CUSTOM_HEADERS)
-    normalized_matches = sum(1 for c in df.columns if _normalize_header_key(c) in custom_keys)
-    col_distance = abs(df.shape[1] - len(CUSTOM_HEADERS))
-    score = header_matches * 3 + normalized_matches * 2 - col_distance * 0.5
-    if "In Blood Bank" in df.columns:
-        score += 5
-    if "Operational status" in df.columns:
-        score += 5
-    return score
+    base_cols = [c for c in CUSTOM_HEADERS if c != "_blank" and c in df.columns]
+    df["Data completeness %"] = (df[base_cols].notna().sum(axis=1) / max(len(base_cols), 1) * 100).round(1)
+    return df
 
 
 @st.cache_data(show_spinner=False)
 def load_records(file_bytes: bytes) -> pd.DataFrame:
-    raw = bytes(file_bytes)
-    attempts = []
-    for encoding in ["utf-8-sig", "utf-8", "latin1"]:
-        try:
-            text_data = raw.decode(encoding, errors="replace")
-        except Exception:
-            continue
-        for sep in [";", ",", "\t", "|", None]:
+    expected_full = len(CUSTOM_HEADERS)
+    custom_headers_no_blank = [c for c in CUSTOM_HEADERS if c != "_blank"]
+    expected_no_blank = len(custom_headers_no_blank)
+
+    def _decode_candidates(raw_bytes: bytes) -> list[tuple[str, str]]:
+        candidates: list[tuple[str, str]] = []
+        for enc in ["utf-8-sig", "utf-8", "latin1"]:
             try:
-                candidate = pd.read_csv(StringIO(text_data), sep=sep, engine="python", dtype=str, keep_default_na=False, on_bad_lines="skip")
-                if candidate is None or candidate.empty or candidate.shape[1] < 3:
-                    continue
-                attempts.append((_score_records_table_candidate(candidate), encoding, sep, candidate))
+                candidates.append((enc, raw_bytes.decode(enc)))
             except Exception:
                 continue
+        if not candidates:
+            candidates.append(("utf-8-sig", raw_bytes.decode("utf-8-sig", errors="replace")))
+        clean_candidates: list[tuple[str, str]] = []
+        seen = set()
+        for enc, txt in candidates:
+            txt = txt.replace("\x00", "")
+            if txt not in seen:
+                clean_candidates.append((enc, txt))
+                seen.add(txt)
+        return clean_candidates
 
-    if not attempts:
-        text_data = raw.decode("utf-8-sig", errors="replace")
-        reader = csv.reader(StringIO(text_data), delimiter=";")
-        all_rows = [row for row in reader if any(str(cell).strip() for cell in row)]
-        if not all_rows:
-            raise ValueError("El CSV está vacío o no contiene filas legibles.")
-        width = len(CUSTOM_HEADERS)
-        normalized_rows = []
-        for row in all_rows[1:]:
-            row = list(row)
-            if len(row) < width:
-                row = row + [pd.NA] * (width - len(row))
-            elif len(row) > width:
-                row = row[:width]
-            normalized_rows.append(row)
-        return _standardize_records_dataframe(pd.DataFrame(normalized_rows, columns=CUSTOM_HEADERS))
+    def _candidate_separators(text: str) -> list[str]:
+        sample = "\n".join(text.splitlines()[:60])
+        separators: list[str] = []
+        try:
+            dialect = csv.Sniffer().sniff(sample, delimiters=";,\t|")
+            if dialect.delimiter:
+                separators.append(dialect.delimiter)
+        except Exception:
+            pass
+        for sep in [";", ",", "\t", "|"]:
+            if sep not in separators:
+                separators.append(sep)
+        return separators
 
-    attempts.sort(key=lambda x: x[0], reverse=True)
-    best_score, best_encoding, best_sep, best_df = attempts[0]
-    if best_score < 15 and best_df.shape[1] in {len(CUSTOM_HEADERS), len(CUSTOM_HEADERS) - 1}:
-        best_df = best_df.copy()
-        best_df.columns = CUSTOM_HEADERS if best_df.shape[1] == len(CUSTOM_HEADERS) else [c for c in CUSTOM_HEADERS if c != "_blank"]
-    df = _standardize_records_dataframe(best_df)
-    df.attrs["records_csv_reader"] = f"encoding={best_encoding}; separator={repr(best_sep)}"
+    def _is_sep_row(row: list[str]) -> bool:
+        joined = "".join(str(x) for x in row).strip().lower()
+        first = str(row[0]).strip().lower() if row else ""
+        return joined.startswith("sep=") or first.startswith("sep=")
+
+    def _parse_rows(text: str, sep: str) -> list[list[str]]:
+        reader = csv.reader(StringIO(text), delimiter=sep, quotechar='"', doublequote=True)
+        rows: list[list[str]] = []
+        for row in reader:
+            if not row:
+                continue
+            row = [str(cell).strip() for cell in row]
+            if not any(cell for cell in row):
+                continue
+            if _is_sep_row(row):
+                continue
+            rows.append(row)
+        return rows
+
+    official_keys = {_normalize_header_key(c) for c in CUSTOM_HEADERS}
+    alias_keys = {
+        "distributor", "distributorname", "instrument", "instrumenttype", "installationdate",
+        "customer", "customername", "inbloodbank", "bloodbank", "city", "country",
+        "worldregion", "commercialregion", "latitude", "longitude", "productline",
+        "serial", "serialnumber", "machineconfiguration", "machineconfigurations",
+        "assetcondition", "pmplan", "numberoftestsperday", "operationalstatus",
+        "operationstatus", "instrumentstatus", "status", "typeofcontract", "contractduration",
+        "pmlastdate", "pmfrequency", "pmnextdate", "pmperformedon",
+    }
+
+    def _header_score(row: list[str]) -> int:
+        keys = [_normalize_header_key(x) for x in row]
+        return sum(1 for k in keys if k in official_keys or k in alias_keys)
+
+    def _score_rows(rows: list[list[str]]) -> float:
+        if not rows:
+            return -1_000_000.0
+        lengths = [len(r) for r in rows[:300] if r]
+        if not lengths:
+            return -1_000_000.0
+        exact_len_hits = sum(1 for n in lengths if n in {expected_full, expected_no_blank})
+        median_len = float(pd.Series(lengths).median())
+        closeness = min(abs(median_len - expected_full), abs(median_len - expected_no_blank))
+        useful_width = max(lengths)
+        return (_header_score(rows[0]) * 35.0) + (exact_len_hits * 4.0) + (useful_width * 0.25) - (closeness * 3.0) + min(len(rows), 500) * 0.01
+
+    best_rows: list[list[str]] | None = None
+    best_sep = None
+    best_encoding = None
+    best_score = -1_000_000.0
+
+    for enc, text in _decode_candidates(file_bytes):
+        for sep in _candidate_separators(text):
+            try:
+                rows_candidate = _parse_rows(text, sep)
+            except Exception:
+                continue
+            score = _score_rows(rows_candidate)
+            if score > best_score:
+                best_score = score
+                best_rows = rows_candidate
+                best_sep = sep
+                best_encoding = enc
+
+    if not best_rows:
+        raise ValueError("No fue posible leer el CSV de Records List. El archivo parece vacío o no tiene estructura tabular.")
+
+    first_row = [str(x).strip() for x in best_rows[0]]
+    has_header = _header_score(first_row) >= 5 or (_header_score(first_row) >= 3 and len(first_row) >= 20)
+
+    if has_header:
+        columns = first_row.copy()
+        data_rows = best_rows[1:]
+    else:
+        columns = custom_headers_no_blank.copy() if len(first_row) == expected_no_blank else CUSTOM_HEADERS.copy()
+        data_rows = best_rows
+
+    clean_columns: list[str] = []
+    seen_cols: dict[str, int] = {}
+    for i, col in enumerate(columns):
+        clean_col = str(col).strip() or f"Unnamed column {i + 1}"
+        if clean_col in seen_cols:
+            seen_cols[clean_col] += 1
+            clean_col = f"{clean_col}__{seen_cols[clean_col]}"
+        else:
+            seen_cols[clean_col] = 0
+        clean_columns.append(clean_col)
+
+    target_len = len(clean_columns)
+    normalized_rows: list[list[object]] = []
+    for row in data_rows:
+        row = [str(cell).strip() for cell in row]
+        if not any(row):
+            continue
+        if len(row) < target_len:
+            row = row + [pd.NA] * (target_len - len(row))
+        elif len(row) > target_len:
+            overflow = row[target_len - 1:]
+            compacted_last = " | ".join([str(x).strip() for x in overflow if str(x).strip()])
+            row = row[:target_len - 1] + ([compacted_last] if compacted_last else [pd.NA])
+        normalized_rows.append(row)
+
+    df = pd.DataFrame(normalized_rows, columns=clean_columns)
+    df = _standardize_records_dataframe(df)
+    df.attrs["records_csv_reader"] = f"encoding={best_encoding}; separator={repr(best_sep)}; has_header={has_header}"
     return df
 
 
 def adapt_uploaded_records_to_standard(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
+
     if "_blank" in out.columns:
         out = out.drop(columns=["_blank"])
+
     exact_matches = sum(1 for c in CUSTOM_HEADERS if c in out.columns)
-    custom_by_key = {_normalize_header_key(c): c for c in CUSTOM_HEADERS if c != "_blank"}
-    normalized_matches = sum(1 for c in out.columns if _normalize_header_key(c) in custom_by_key)
+    normalized_matches = sum(1 for c in out.columns if _normalize_header_key(c) in {_normalize_header_key(h) for h in CUSTOM_HEADERS})
     if exact_matches >= 20 or normalized_matches >= 20:
-        rename_map = {}
-        for c in out.columns:
-            target = custom_by_key.get(_normalize_header_key(c))
-            if target and target not in out.columns:
-                rename_map[c] = target
-        return out.rename(columns=rename_map) if rename_map else out
+        return _standardize_records_dataframe(out)
+
     if out.shape[1] == len(CUSTOM_HEADERS):
         out.columns = CUSTOM_HEADERS
-        return out.drop(columns=["_blank"]) if "_blank" in out.columns else out
+        if "_blank" in out.columns:
+            out = out.drop(columns=["_blank"])
+        return _standardize_records_dataframe(out)
+
     if out.shape[1] == len(CUSTOM_HEADERS) - 1:
         out.columns = [c for c in CUSTOM_HEADERS if c != "_blank"]
-        return out
-    return out
+        return _standardize_records_dataframe(out)
+
+    return _standardize_records_dataframe(out)
 
 
 def parse_uploaded_records(uploaded_file) -> pd.DataFrame:
     name = uploaded_file.name.lower()
+
     if name.endswith(".csv"):
         return load_records(uploaded_file.getvalue())
+
     table = read_table_any(uploaded_file)
-    return _standardize_records_dataframe(table)
+    table = adapt_uploaded_records_to_standard(table)
+    return table
 
 
 def get_active_records_dataset(uploaded_file, sample_candidates: list[Path]) -> tuple[pd.DataFrame, str]:
@@ -3506,8 +3660,6 @@ if raw_df.empty:
 raw_df, CONFIG_KEYS = parse_machine_configuration(raw_df)
 raw_df = add_operating_system_columns(raw_df, CONFIG_KEYS)
 st.sidebar.caption(f"Fuente activa: {source_label}")
-st.sidebar.caption(f"Estado operativo leído desde: {raw_df.attrs.get('operational_status_source', 'Operational status')}")
-st.sidebar.caption(f"Banco de sangre detectado: {compute_blood_bank_yes_count(raw_df):,} de {len(raw_df):,}")
 st.sidebar.markdown('<div class="small-note">Usa los filtros como un panel de control para refinar región, país, distribuidor, instrumento y estado operativo.</div>', unsafe_allow_html=True)
 
 region_options = sorted(raw_df["Commercial Region"].dropna().unique().tolist())
@@ -3777,28 +3929,29 @@ with machine_tab:
     applicable_fields = active_config_fields(filtered, CONFIG_KEYS)
     cfg_cols_prefixed = [f"CFG::{col}" for col in applicable_fields]
 
-    assets_with_cfg = int(filtered["Machine Configurations"].notna().sum()) if "Machine Configurations" in filtered.columns else 0
-    avg_cfg_fields = filtered["Machine config fields populated"].mean() if "Machine config fields populated" in filtered.columns else 0
-    unique_cfg_fields = len(applicable_fields)
-    blood_bank_yes = compute_blood_bank_yes_count(filtered)
-
-    mc1, mc2, mc3, mc4 = st.columns(4)
-    with mc1:
-        metric_card("Equipos con config", f"{assets_with_cfg:,}", "Con información en Machine Configurations")
-    with mc2:
-        metric_card("Banco de sangre", f"{blood_bank_yes:,}", f"{_safe_share_pct(blood_bank_yes, len(filtered)):.1f}% del total filtrado")
-    with mc3:
-        metric_card("Campos aplicables", f"{unique_cfg_fields}", "Solo ítems presentes en el filtro actual")
-    with mc4:
-        metric_card("Promedio de campos", f"{avg_cfg_fields:.1f}", "Campos poblados por equipo")
-
-    st.markdown("### Banco de sangre")
-    st.markdown('<div class="small-note">Se cuentan como positivos únicamente los equipos con <b>In Blood Bank = Yes</b>. Este cálculo no depende de Machine Configurations ni del filtro de estado operativo.</div>', unsafe_allow_html=True)
-    st.plotly_chart(build_blood_bank_donut(filtered), use_container_width=True, key="blood_bank_donut_main")
-
     if not cfg_cols_prefixed:
-        st.info("No se detectaron campos aplicables dentro de Machine Configurations para el filtro actual. El cálculo de Banco de sangre se mantiene activo porque viene de su propia columna.")
+        st.info("No se detectaron campos aplicables dentro de Machine Configurations para el filtro actual.")
     else:
+        assets_with_cfg = int(filtered["Machine Configurations"].notna().sum())
+        avg_cfg_fields = filtered["Machine config fields populated"].mean()
+        unique_cfg_fields = len(applicable_fields)
+
+        blood_bank_yes = int(filtered.get("In Blood Bank", pd.Series(dtype=object)).map(is_blood_bank_yes).sum())
+
+        mc1, mc2, mc3, mc4 = st.columns(4)
+        with mc1:
+            metric_card("Equipos con config", f"{assets_with_cfg:,}", "Con información en Machine Configurations")
+        with mc2:
+            metric_card("Banco de sangre", f"{blood_bank_yes:,}", f"{_safe_share_pct(blood_bank_yes, len(filtered)):.1f}% del total filtrado")
+        with mc3:
+            metric_card("Campos aplicables", f"{unique_cfg_fields}", "Solo ítems presentes en el filtro actual")
+        with mc4:
+            metric_card("Promedio de campos", f"{avg_cfg_fields:.1f}", "Campos poblados por equipo")
+
+        st.markdown("### Banco de sangre")
+        st.markdown('<div class="small-note">Se cuentan como positivos únicamente los equipos con <b>In Blood Bank = Yes</b>.</div>', unsafe_allow_html=True)
+        st.plotly_chart(build_blood_bank_donut(filtered), use_container_width=True, key="blood_bank_donut_main")
+
         coverage_df = pd.DataFrame(
             [{"Config field": col.replace("CFG::", ""), "Populated assets": int(filtered[col].notna().sum())} for col in cfg_cols_prefixed]
         )
@@ -3865,9 +4018,15 @@ with machine_tab:
 
         with st.expander("Ver tabla ampliada de machine configuration"):
             detail_columns = [
-                "Commercial Region", "Country", "Distributor name", "Customer name", "Instrument type", "Serial number", "Operating System", "Operational status", "In Blood Bank",
+                "Commercial Region",
+                "Country",
+                "Distributor name",
+                "Customer name",
+                "Instrument type",
+                "Serial number",
+                "Operating System",
+                "Operational status",
             ] + [f"CFG::{field}" for field in donut_fields]
-            detail_columns = [c for c in detail_columns if c in filtered.columns]
             machine_table = filtered[detail_columns].copy().rename(columns={f"CFG::{field}": field for field in donut_fields})
             st.dataframe(machine_table, use_container_width=True, hide_index=True)
 
