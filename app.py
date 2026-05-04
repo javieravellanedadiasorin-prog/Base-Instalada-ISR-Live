@@ -2157,11 +2157,181 @@ def read_table_any(uploaded_file) -> pd.DataFrame:
 
 @st.cache_data(show_spinner=False)
 def load_records(file_bytes: bytes) -> pd.DataFrame:
-    content = file_bytes.decode("utf-8-sig", errors="replace").splitlines()
-    rows = [line.split(";") for line in content[1:] if line.strip()]
-    df = pd.DataFrame(rows, columns=CUSTOM_HEADERS)
+    """
+    Lector robusto para Records List en CSV.
+
+    Corrige el fallo que aparece al cargar algunos CSV:
+    ValueError / pandas DataFrame rows vs CUSTOM_HEADERS incompatible.
+
+    Causa del fallo anterior:
+    - El código hacía line.split(";") de forma fija.
+    - Si el archivo venía separado por coma, tabulador o tenía comillas/campos con separadores internos,
+      cada fila quedaba con una cantidad de columnas diferente a CUSTOM_HEADERS.
+
+    Esta versión:
+    - Detecta separador real: ; , tab o |.
+    - Respeta comillas CSV.
+    - Acepta archivos con encabezados propios o sin encabezado.
+    - Ajusta filas cortas/largas para evitar que pandas se caiga.
+    - Mantiene intacto el resto del procesamiento del dashboard.
+    """
+    expected_full = len(CUSTOM_HEADERS)
+    custom_headers_no_blank = [c for c in CUSTOM_HEADERS if c != "_blank"]
+    expected_no_blank = len(custom_headers_no_blank)
+
+    def _decode_candidates(raw_bytes: bytes) -> list[tuple[str, str]]:
+        candidates: list[tuple[str, str]] = []
+        for enc in ["utf-8-sig", "latin1"]:
+            try:
+                candidates.append((enc, raw_bytes.decode(enc)))
+            except Exception:
+                continue
+        if not candidates:
+            candidates.append(("utf-8-sig", raw_bytes.decode("utf-8-sig", errors="replace")))
+        clean_candidates: list[tuple[str, str]] = []
+        seen = set()
+        for enc, txt in candidates:
+            txt = txt.replace("\x00", "")
+            if txt not in seen:
+                clean_candidates.append((enc, txt))
+                seen.add(txt)
+        return clean_candidates
+
+    def _candidate_separators(text: str) -> list[str]:
+        sample = "\n".join(text.splitlines()[:40])
+        separators: list[str] = []
+        try:
+            dialect = csv.Sniffer().sniff(sample, delimiters=";,\t|")
+            if dialect.delimiter:
+                separators.append(dialect.delimiter)
+        except Exception:
+            pass
+        for sep in [";", ",", "\t", "|"]:
+            if sep not in separators:
+                separators.append(sep)
+        return separators
+
+    def _is_sep_row(row: list[str]) -> bool:
+        joined = "".join(str(x) for x in row).strip().lower()
+        first = str(row[0]).strip().lower() if row else ""
+        return joined.startswith("sep=") or first.startswith("sep=")
+
+    def _parse_rows(text: str, sep: str) -> list[list[str]]:
+        reader = csv.reader(StringIO(text), delimiter=sep, quotechar='"', doublequote=True)
+        rows: list[list[str]] = []
+        for row in reader:
+            if not row:
+                continue
+            row = [str(cell).strip() for cell in row]
+            if not any(cell for cell in row):
+                continue
+            if _is_sep_row(row):
+                continue
+            rows.append(row)
+        return rows
+
+    def _score_rows(rows: list[list[str]]) -> float:
+        if not rows:
+            return -1_000_000.0
+        header_candidate = [str(x).strip() for x in rows[0]]
+        header_matches = sum(1 for h in header_candidate if h in CUSTOM_HEADERS)
+        lengths = [len(r) for r in rows[:300] if r]
+        if not lengths:
+            return -1_000_000.0
+        exact_len_hits = sum(1 for n in lengths if n in {expected_full, expected_no_blank})
+        median_len = float(pd.Series(lengths).median())
+        closeness = min(abs(median_len - expected_full), abs(median_len - expected_no_blank))
+        useful_width = max(lengths)
+        # Encabezados reconocidos y filas con ancho esperado pesan más que el simple número de filas.
+        return (header_matches * 25.0) + (exact_len_hits * 4.0) + (useful_width * 0.25) - (closeness * 3.0) + min(len(rows), 500) * 0.01
+
+    best_rows: list[list[str]] | None = None
+    best_sep = None
+    best_encoding = None
+    best_score = -1_000_000.0
+
+    for enc, text in _decode_candidates(file_bytes):
+        for sep in _candidate_separators(text):
+            try:
+                rows_candidate = _parse_rows(text, sep)
+            except Exception:
+                continue
+            score = _score_rows(rows_candidate)
+            if score > best_score:
+                best_score = score
+                best_rows = rows_candidate
+                best_sep = sep
+                best_encoding = enc
+
+    if not best_rows:
+        raise ValueError("No fue posible leer el CSV de Records List. El archivo parece vacío o no tiene estructura tabular.")
+
+    first_row = [str(x).strip() for x in best_rows[0]]
+    header_matches = sum(1 for h in first_row if h in CUSTOM_HEADERS)
+    first_row_norm = [normalize_key_text(x) for x in first_row]
+    custom_norm = {normalize_key_text(x) for x in CUSTOM_HEADERS}
+    normalized_header_matches = sum(1 for h in first_row_norm if h in custom_norm and h)
+
+    has_header = header_matches >= 8 or normalized_header_matches >= 8
+
+    if has_header:
+        columns = first_row.copy()
+        data_rows = best_rows[1:]
+    else:
+        # Algunos exports vienen sin encabezado real; se asigna el layout oficial.
+        if len(first_row) == expected_no_blank:
+            columns = custom_headers_no_blank.copy()
+        else:
+            columns = CUSTOM_HEADERS.copy()
+        data_rows = best_rows
+
+    # Si el archivo trae una columna final vacía adicional, se conserva temporalmente como _blank.
+    if len(columns) == expected_full - 1 and "_blank" not in columns:
+        columns = custom_headers_no_blank.copy() if not has_header else columns.copy()
+    elif len(columns) == expected_full and not has_header:
+        columns = CUSTOM_HEADERS.copy()
+
+    # Asegurar nombres de columna no vacíos y no duplicados.
+    clean_columns: list[str] = []
+    seen_cols: dict[str, int] = {}
+    for i, col in enumerate(columns):
+        clean_col = str(col).strip() or f"Unnamed column {i + 1}"
+        if clean_col in seen_cols:
+            seen_cols[clean_col] += 1
+            clean_col = f"{clean_col}__{seen_cols[clean_col]}"
+        else:
+            seen_cols[clean_col] = 0
+        clean_columns.append(clean_col)
+
+    target_len = len(clean_columns)
+    normalized_rows: list[list[object]] = []
+    for row in data_rows:
+        row = [str(cell).strip() for cell in row]
+        if not any(row):
+            continue
+        if len(row) < target_len:
+            row = row + [pd.NA] * (target_len - len(row))
+        elif len(row) > target_len:
+            overflow = row[target_len - 1:]
+            # Caso común: separadores sobrantes al final. Si no son vacíos, se compactan en la última columna
+            # para no desplazar el resto de campos ni romper la carga.
+            compacted_last = " | ".join([str(x).strip() for x in overflow if str(x).strip()])
+            row = row[:target_len - 1] + ([compacted_last] if compacted_last else [pd.NA])
+        normalized_rows.append(row)
+
+    df = pd.DataFrame(normalized_rows, columns=clean_columns)
+    df = adapt_uploaded_records_to_standard(df)
+
     if "_blank" in df.columns:
         df = df.drop(columns=["_blank"])
+
+    for missing in [c for c in CUSTOM_HEADERS if c != "_blank" and c not in df.columns]:
+        df[missing] = pd.NA
+
+    # Reordenar primero las columnas oficiales y dejar al final cualquier columna extra del archivo.
+    official_cols = [c for c in CUSTOM_HEADERS if c != "_blank" and c in df.columns]
+    extra_cols = [c for c in df.columns if c not in official_cols]
+    df = df[official_cols + extra_cols].copy()
 
     for col in df.columns:
         if df[col].dtype == object:
@@ -2177,13 +2347,16 @@ def load_records(file_bytes: bytes) -> pd.DataFrame:
         return value
 
     for col in ["Latitude", "Longitude", "Serial number"]:
-        df[col] = df[col].map(unexcel)
+        if col in df.columns:
+            df[col] = df[col].map(unexcel)
 
     for col in ["Latitude", "Longitude", "Number of tests per day", "PM frequency", "Contract duration"]:
-        df[col] = to_numeric_series(df[col])
+        if col in df.columns:
+            df[col] = to_numeric_series(df[col])
 
     for col in ["Installation date", "PM last date", "PM next date"]:
-        df[col] = pd.to_datetime(df[col], dayfirst=True, errors="coerce")
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], dayfirst=True, errors="coerce")
 
     df["Instrument family"] = df["Instrument type"].map(normalize_instrument_type)
     df["Operational status grouped"] = df["Operational status"].map(normalize_operational_status)
@@ -2193,23 +2366,25 @@ def load_records(file_bytes: bytes) -> pd.DataFrame:
     df["Is in routine"] = df["Operational status"].fillna("").astype(str).str.upper().eq("IN ROUTINE")
     df["Has geolocation"] = df["Latitude"].notna() & df["Longitude"].notna()
 
-    yes_map = {"yes", "y", "true", "1"}
+    yes_map = {"yes", "y", "true", "1", "si", "sí"}
     assay_flags = {}
     for col in ASSAY_COLS:
+        if col not in df.columns:
+            df[col] = pd.NA
         normalized = df[col].fillna("No").astype(str).str.strip()
         df[col] = normalized
         assay_flags[f"FLAG::{col}"] = normalized.str.lower().isin(yes_map)
     if assay_flags:
         assay_flags_df = pd.DataFrame(assay_flags)
-        df = pd.concat([df, assay_flags_df], axis=1)
+        df = pd.concat([df.reset_index(drop=True), assay_flags_df.reset_index(drop=True)], axis=1)
         df["Enabled assay count"] = assay_flags_df.sum(axis=1)
     else:
         df["Enabled assay count"] = 0
 
-    base_cols = [c for c in CUSTOM_HEADERS if c != "_blank"]
-    df["Data completeness %"] = (df[base_cols].notna().sum(axis=1) / len(base_cols) * 100).round(1)
+    base_cols = [c for c in CUSTOM_HEADERS if c != "_blank" and c in df.columns]
+    df["Data completeness %"] = (df[base_cols].notna().sum(axis=1) / max(len(base_cols), 1) * 100).round(1)
+    df.attrs["records_csv_reader"] = f"encoding={best_encoding}; separator={repr(best_sep)}"
     return df
-
 
 def adapt_uploaded_records_to_standard(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
