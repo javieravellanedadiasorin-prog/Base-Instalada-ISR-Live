@@ -122,7 +122,7 @@ ASSAY_COLS = CUSTOM_HEADERS[28:-1]
 
 # Cambia esta versión cuando se ajusta el parser de Records List.
 # Obliga a Streamlit a reparsear el mismo archivo subido, aunque el nombre/tamaño no cambien.
-RECORDS_PARSER_VERSION = "records_parser_status_alias_v3_2026_05_04"
+RECORDS_PARSER_VERSION = "records_parser_operational_status_scan_v4_2026_05_04"
 
 PLOT_TEMPLATE = "plotly_dark"
 PLOT_BG = "rgba(12, 19, 30, 0.02)"
@@ -836,7 +836,7 @@ def _status_like_score(series: pd.Series) -> float:
         return 0.0
 
     pattern = re.compile(
-        r"routine|scrap|warehouse|refurb|install|installed|transit|custom|shipping|stock|demo|stand.?by|decommission|active|inactive",
+        r"routine|rutina|scrap|scrapped|scraped|descart|warehouse|bodega|almacen|almacén|refurb|install|installed|transit|custom|shipping|stock|demo|stand.?by|decommission|active|inactive|routine|not\s+in\s+routine|in\s+routine",
         re.IGNORECASE,
     )
     return float(clean.map(lambda x: bool(pattern.search(x))).mean())
@@ -844,56 +844,78 @@ def _status_like_score(series: pd.Series) -> float:
 
 def recover_operational_status_column(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Recupera Operational status desde columnas alternativas cuando el export no trae
-    exactamente ese encabezado o cuando la columna oficial viene vacía.
+    Recupera Operational status desde el archivo descargado directamente.
+
+    Motivo de esta versión:
+    algunos exports traen varias columnas llamadas Status / Instrument Status o cambian
+    la posición de las columnas. Por eso no basta con asumir que la columna estándar
+    Operational status ya quedó bien mapeada.
+
+    Esta función escanea TODAS las columnas y selecciona la que realmente contiene
+    valores operativos como IN ROUTINE, NOT IN ROUTINE, SCRAPPED, WAREHOUSE, etc.
     """
     if df is None or df.empty:
         return df
 
     out = rename_known_column_aliases(df)
 
+    def _clean_non_empty(s: pd.Series) -> pd.Series:
+        clean = s.dropna().astype(str).str.strip()
+        clean = clean[clean.ne("")]
+        clean = clean[~clean.str.lower().isin({"nan", "none", "<na>", "no informado", "unknown"})]
+        return clean
+
+    def _column_priority(col_name: str) -> int:
+        norm = normalize_key_text(col_name)
+        if norm in {"instrumentstatus", "operationalstatus", "instrumentstate", "analyzerstatus", "machinestatus", "equipmentstatus"}:
+            return 100
+        if norm == "status":
+            return 85
+        if "status" in norm or "state" in norm or "estado" in norm:
+            return 70
+        return 0
+
+    current_score = 0.0
     current_has_data = False
     if "Operational status" in out.columns:
-        current_clean = out["Operational status"].dropna().astype(str).str.strip()
-        current_clean = current_clean[current_clean.ne("")]
+        current_clean = _clean_non_empty(out["Operational status"])
         current_has_data = not current_clean.empty
+        current_score = _status_like_score(out["Operational status"])
 
-    if current_has_data:
+    # Si la columna actual ya contiene estados reales, se conserva.
+    if current_has_data and current_score >= 0.20:
+        out.attrs["operational_status_source"] = "Operational status"
         return out
 
-    alias_priority = [
-        "Instrument Status",
-        "Instrument status",
-        "Instrument State",
-        "Instrument state",
-        "Operational Status",
-        "Analyzer Status",
-        "Machine Status",
-        "Equipment Status",
-        "Estado operativo",
-        "Estado del instrumento",
-        "Status",
-    ]
-
-    existing_by_norm: dict[str, str] = {}
+    candidates: list[tuple[float, int, int, str]] = []
     for col in out.columns:
-        existing_by_norm.setdefault(normalize_key_text(col), col)
-
-    best_col = None
-    best_score = 0.0
-    for alias in alias_priority:
-        col = existing_by_norm.get(normalize_key_text(alias))
-        if not col or col == "Operational status":
+        if str(col).startswith("FLAG::"):
+            continue
+        clean = _clean_non_empty(out[col])
+        if clean.empty:
             continue
         score = _status_like_score(out[col])
-        if score > best_score:
-            best_col = col
-            best_score = score
+        priority = _column_priority(str(col))
+        if score >= 0.12 or priority >= 70:
+            candidates.append((score, priority, int(clean.shape[0]), str(col)))
 
-    # Para "Status" se exige evidencia mínima de que realmente contiene estados operativos.
-    if best_col is not None and best_score >= 0.20:
+    if not candidates:
+        # No se encontró ninguna columna con pinta de estado operativo.
+        if "Operational status" not in out.columns:
+            out["Operational status"] = pd.NA
+        out.attrs["operational_status_source"] = "No detectado"
+        return out
+
+    # Orden: mayor parecido a estado operativo, luego prioridad por nombre, luego más datos.
+    candidates.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+    best_score, best_priority, best_count, best_col = candidates[0]
+
+    # Reemplazar solo si la columna actual está vacía/mal leída o el candidato es claramente mejor.
+    if (not current_has_data) or (best_score > current_score + 0.05) or (best_priority >= 70 and current_score < 0.20):
         out["Operational status"] = out[best_col]
         out.attrs["operational_status_source"] = best_col
+    else:
+        out.attrs["operational_status_source"] = "Operational status"
 
     return out
 
