@@ -120,6 +120,10 @@ CUSTOM_HEADERS = [
 
 ASSAY_COLS = CUSTOM_HEADERS[28:-1]
 
+# Cambia esta versión cuando se ajusta el parser de Records List.
+# Obliga a Streamlit a reparsear el mismo archivo subido, aunque el nombre/tamaño no cambien.
+RECORDS_PARSER_VERSION = "records_parser_status_alias_v3_2026_05_04"
+
 PLOT_TEMPLATE = "plotly_dark"
 PLOT_BG = "rgba(12, 19, 30, 0.02)"
 GRID = "rgba(170, 224, 255, 0.10)"
@@ -734,6 +738,166 @@ def normalize_operational_status(value) -> str:
     return normalized_spaces.title()
 
 
+# Aliases defensivos para archivos descargados directamente de ISR-Live/Records List.
+# El export puede traer variaciones de encabezado como "Instrument Status" o "Status".
+# Si no se mapean, la columna oficial "Operational status" queda vacía y el filtro lateral
+# solo muestra "No informado".
+COLUMN_ALIASES = {
+    "Operational status": [
+        "Operational status",
+        "Operational Status",
+        "Instrument Status",
+        "Instrument status",
+        "Instrument state",
+        "Instrument State",
+        "Instrument operational status",
+        "Analyzer status",
+        "Analyzer Status",
+        "Machine status",
+        "Machine Status",
+        "Equipment status",
+        "Equipment Status",
+        "Estado operativo",
+        "Estado Operativo",
+        "Estado del instrumento",
+        "Status",
+    ],
+    "Number of tests per day": [
+        "Number of tests per day",
+        "Number Of Tests Per Day",
+        "Volume",
+        "volume",
+        "Volumen",
+        "Tests per day",
+        "Tests/day",
+    ],
+    "Type of contract": [
+        "Type of contract",
+        "Contract type",
+        "Tipo de contrato",
+    ],
+    "Instrument type": [
+        "Instrument type",
+        "Instrument Type",
+        "Instrument",
+        "Analyzer type",
+        "System type",
+    ],
+    "Distributor name": [
+        "Distributor name",
+        "Distributor Name",
+        "Distributor",
+        "Dealer",
+    ],
+    "Serial number": [
+        "Serial number",
+        "Serial Number",
+        "Serial",
+        "SN",
+        "S/N",
+    ],
+}
+
+
+def rename_known_column_aliases(df: pd.DataFrame) -> pd.DataFrame:
+    """Renombra variaciones conocidas de encabezados al estándar interno del dashboard."""
+    if df is None or df.empty:
+        return df
+
+    out = df.copy()
+    normalized_to_columns: dict[str, list[str]] = {}
+    for col in out.columns:
+        normalized_to_columns.setdefault(normalize_key_text(col), []).append(col)
+
+    rename_map: dict[str, str] = {}
+    for standard_col, aliases in COLUMN_ALIASES.items():
+        if standard_col in out.columns:
+            continue
+        for alias in aliases:
+            norm_alias = normalize_key_text(alias)
+            if norm_alias in normalized_to_columns:
+                source_col = normalized_to_columns[norm_alias][0]
+                if source_col not in rename_map:
+                    rename_map[source_col] = standard_col
+                    break
+
+    if rename_map:
+        out = out.rename(columns=rename_map)
+    return out
+
+
+def _status_like_score(series: pd.Series) -> float:
+    """Mide si una columna parece contener estados operativos reales."""
+    if series is None:
+        return 0.0
+    clean = series.dropna().astype(str).str.strip()
+    clean = clean[clean.ne("")]
+    if clean.empty:
+        return 0.0
+
+    pattern = re.compile(
+        r"routine|scrap|warehouse|refurb|install|installed|transit|custom|shipping|stock|demo|stand.?by|decommission|active|inactive",
+        re.IGNORECASE,
+    )
+    return float(clean.map(lambda x: bool(pattern.search(x))).mean())
+
+
+def recover_operational_status_column(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Recupera Operational status desde columnas alternativas cuando el export no trae
+    exactamente ese encabezado o cuando la columna oficial viene vacía.
+    """
+    if df is None or df.empty:
+        return df
+
+    out = rename_known_column_aliases(df)
+
+    current_has_data = False
+    if "Operational status" in out.columns:
+        current_clean = out["Operational status"].dropna().astype(str).str.strip()
+        current_clean = current_clean[current_clean.ne("")]
+        current_has_data = not current_clean.empty
+
+    if current_has_data:
+        return out
+
+    alias_priority = [
+        "Instrument Status",
+        "Instrument status",
+        "Instrument State",
+        "Instrument state",
+        "Operational Status",
+        "Analyzer Status",
+        "Machine Status",
+        "Equipment Status",
+        "Estado operativo",
+        "Estado del instrumento",
+        "Status",
+    ]
+
+    existing_by_norm: dict[str, str] = {}
+    for col in out.columns:
+        existing_by_norm.setdefault(normalize_key_text(col), col)
+
+    best_col = None
+    best_score = 0.0
+    for alias in alias_priority:
+        col = existing_by_norm.get(normalize_key_text(alias))
+        if not col or col == "Operational status":
+            continue
+        score = _status_like_score(out[col])
+        if score > best_score:
+            best_col = col
+            best_score = score
+
+    # Para "Status" se exige evidencia mínima de que realmente contiene estados operativos.
+    if best_col is not None and best_score >= 0.20:
+        out["Operational status"] = out[best_col]
+        out.attrs["operational_status_source"] = best_col
+
+    return out
+
+
 def compute_state_filter_counts(df: pd.DataFrame) -> list[tuple[str, int]]:
     """
     Construye el filtro lateral de Estado operativo.
@@ -756,7 +920,8 @@ def compute_state_filter_counts(df: pd.DataFrame) -> list[tuple[str, int]]:
     grouped = state_series.value_counts()
 
     items: list[tuple[str, int]] = []
-    non_routine_count = int((~state_series.eq("Routine")).sum())
+    non_routine_mask = (~state_series.eq("Routine")) & (~state_series.eq("No informado"))
+    non_routine_count = int(non_routine_mask.sum())
     if non_routine_count > 0:
         items.append(("No rutina", non_routine_count))
 
@@ -796,7 +961,7 @@ def apply_operational_status_filter(df: pd.DataFrame, selected_states: list[str]
 
     for state in selected_states:
         if state == "No rutina":
-            mask = mask | (~state_series.eq("Routine"))
+            mask = mask | ((~state_series.eq("Routine")) & (~state_series.eq("No informado")))
         else:
             mask = mask | state_series.eq(state)
 
@@ -2148,7 +2313,7 @@ def get_uploaded_file_signature(uploaded_file) -> str:
     if uploaded_file is None:
         return ""
     content = uploaded_file.getvalue()
-    raw = f"{uploaded_file.name}|{len(content)}|".encode("utf-8") + content
+    raw = f"{RECORDS_PARSER_VERSION}|{uploaded_file.name}|{len(content)}|".encode("utf-8") + content
     return hashlib.md5(raw).hexdigest()
 
 
@@ -2367,13 +2532,17 @@ def load_records(file_bytes: bytes) -> pd.DataFrame:
         normalized_rows.append(row)
 
     df = pd.DataFrame(normalized_rows, columns=clean_columns)
+    df = rename_known_column_aliases(df)
     df = adapt_uploaded_records_to_standard(df)
+    df = recover_operational_status_column(df)
 
     if "_blank" in df.columns:
         df = df.drop(columns=["_blank"])
 
     for missing in [c for c in CUSTOM_HEADERS if c != "_blank" and c not in df.columns]:
         df[missing] = pd.NA
+
+    df = recover_operational_status_column(df)
 
     # Reordenar primero las columnas oficiales y dejar al final cualquier columna extra del archivo.
     official_cols = [c for c in CUSTOM_HEADERS if c != "_blank" and c in df.columns]
@@ -2410,7 +2579,7 @@ def load_records(file_bytes: bytes) -> pd.DataFrame:
 
     today = pd.Timestamp(date.today())
     df["Age (years)"] = ((today - df["Installation date"]).dt.days / 365.25).round(1)
-    df["Is in routine"] = df["Operational status"].fillna("").astype(str).str.upper().eq("IN ROUTINE")
+    df["Is in routine"] = df["Operational status grouped"].eq("Routine")
     df["Has geolocation"] = df["Latitude"].notna() & df["Longitude"].notna()
 
     yes_map = {"yes", "y", "true", "1", "si", "sí"}
@@ -2464,7 +2633,9 @@ def parse_uploaded_records(uploaded_file) -> pd.DataFrame:
         return load_records(raw)
 
     table = read_table_any(uploaded_file)
+    table = rename_known_column_aliases(table)
     table = adapt_uploaded_records_to_standard(table)
+    table = recover_operational_status_column(table)
 
     df = table.copy()
 
@@ -2478,6 +2649,8 @@ def parse_uploaded_records(uploaded_file) -> pd.DataFrame:
 
     for missing in [c for c in CUSTOM_HEADERS if c != "_blank" and c not in df.columns]:
         df[missing] = pd.NA
+
+    df = recover_operational_status_column(df)
 
     def unexcel(value):
         if pd.isna(value):
@@ -2504,7 +2677,7 @@ def parse_uploaded_records(uploaded_file) -> pd.DataFrame:
 
     today = pd.Timestamp(date.today())
     df["Age (years)"] = ((today - df["Installation date"]).dt.days / 365.25).round(1)
-    df["Is in routine"] = df["Operational status"].fillna("").astype(str).str.upper().eq("IN ROUTINE")
+    df["Is in routine"] = df["Operational status grouped"].eq("Routine")
     df["Has geolocation"] = df["Latitude"].notna() & df["Longitude"].notna()
 
     yes_map = {"yes", "y", "true", "1"}
@@ -3545,6 +3718,12 @@ if raw_df.empty:
 raw_df, CONFIG_KEYS = parse_machine_configuration(raw_df)
 raw_df = add_operating_system_columns(raw_df, CONFIG_KEYS)
 st.sidebar.caption(f"Fuente activa: {source_label}")
+status_source = raw_df.attrs.get("operational_status_source", "Operational status") if hasattr(raw_df, "attrs") else "Operational status"
+valid_status_count = int(raw_df.get("Operational status", pd.Series(dtype=object)).dropna().astype(str).str.strip().ne("").sum()) if "Operational status" in raw_df.columns else 0
+if valid_status_count == 0:
+    st.sidebar.warning("No se detectaron valores en Operational status. Revisa que el archivo exportado incluya Instrument Status / Status.")
+else:
+    st.sidebar.caption(f"Estado operativo leído desde: {status_source}")
 st.sidebar.markdown('<div class="small-note">Usa los filtros como un panel de control para refinar región, país, distribuidor, instrumento y estado operativo.</div>', unsafe_allow_html=True)
 
 region_options = sorted(raw_df["Commercial Region"].dropna().unique().tolist())
