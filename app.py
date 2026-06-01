@@ -1,3 +1,43 @@
+hole=0.68,
+sort=False,
+marker=dict(colors=palette[:len(summary)], line=dict(color="rgba(255,255,255,0.20)", width=1.2)),
+textinfo="percent",
+textfont=dict(color="#ffffff", size=12),
+customdata=np.column_stack([summary["Distributor name"], summary["Count"]]),
+hovertemplate="<b>Modelo:</b> "
++ selected_model
++ "<br><b>Distribuidor:</b> %{customdata[0]}<br><b>Cantidad:</b> %{customdata[1]}<br><b>Participación:</b> %{percent}<extra></extra>",
+)
+)
+total_assets = int(model_df.shape[0])
+fig.add_annotation(
+text=f"<b>{total_assets:,}</b><br><span style='font-size:11px'>equipos</span>",
+x=0.5,
+y=0.52,
+xref="paper",
+yref="paper",
+showarrow=False,
+font=dict(color="#ffffff", size=17),
+)
+fig.update_layout(
+title=dict(text=wrap_chart_title(f"{selected_model} | Top 5", 26), x=0.03, y=0.96, xanchor="left", yanchor="top", font=dict(size=14, color="#f9fdff")),
+showlegend=True,
+height=430,
+margin=dict(t=72, b=96, l=8, r=8),
+legend=dict(
+orientation="h",
+yanchor="bottom",
+y=-0.10,
+xanchor="center",
+x=0.5,
+bgcolor="rgba(14,26,42,0.18)",
+bordercolor="rgba(124,221,255,0.16)",
+borderwidth=1,
+font=dict(color="#f8fbff", size=10),
+itemwidth=90,
+itemsizing="constant",
+),
+)
 return glow_layout(fig, 430, 15)
 
 
@@ -161,7 +201,87 @@ def build_manufacturing_match(
 st.markdown(
 """
    <div class="hero">
-@@ -3389,8 +3546,8 @@ def build_distributor_model_donut(df: pd.DataFrame, selected_model: str, top_n:
+       <div class="hero-top">
+           <div class="hero-brand">
+               <div class="brand-chip">DASHBOARD</div>
+               <div class="workspace-chip">Hi, Javier · Workspace de base instalada</div>
+           </div>
+           <div class="workspace-chip">Control visual · Devoryn dark mode</div>
+       </div>
+       <h1>Records List Intelligence Dashboard</h1>
+       <p>Panel ejecutivo para explorar la base instalada, configuration insights, sistema operativo, procesamiento y gap de repuestos con una apariencia oscura, limpia y premium.</p>
+       <div class="badge-row">
+           <span class="badge">Base instalada</span>
+           <span class="badge">Machine configuration</span>
+           <span class="badge">Operating system</span>
+           <span class="badge">PM & processing</span>
+           <span class="badge">Stock gap analysis</span>
+       </div>
+   </div>
+   """,
+unsafe_allow_html=True,
+)
+
+st.sidebar.markdown(
+"""
+   <div class="sidebar-top-card">
+       <h3>✦ Control center</h3>
+       <p>Explora la base instalada, filtra la operación y navega el dashboard con una experiencia visual alineada al estilo oscuro premium que definiste.</p>
+       <div class="sidebar-pill">Devoryn dark · active</div>
+   </div>
+   """,
+unsafe_allow_html=True,
+)
+uploaded_file = st.sidebar.file_uploader("Sube el archivo Records List", type=["csv", "xlsx", "xls"])
+
+base_dir = Path(__file__).resolve().parent
+sample_candidates = sorted(base_dir.glob("Records_List_Report*.csv"))
+default_master_candidates = sorted(base_dir.glob("New TP Spare*.xlsx"))
+
+raw_df, source_label = get_active_records_dataset(uploaded_file, sample_candidates)
+
+if raw_df.empty:
+@@ -3349,88 +3506,88 @@
+instrument_base = instrument_base[instrument_base["Country"].isin(selected_countries)]
+if selected_distributors:
+instrument_base = instrument_base[instrument_base["Distributor name"].isin(selected_distributors)]
+instrument_options = sorted(instrument_base["Instrument type"].dropna().unique().tolist())
+selected_instruments = st.sidebar.multiselect("Tipo de instrumento", options=instrument_options, default=[], placeholder="Selecciona uno o varios instrumentos")
+
+status_base = raw_df.copy()
+if selected_regions:
+status_base = status_base[status_base["Commercial Region"].isin(selected_regions)]
+if selected_countries:
+status_base = status_base[status_base["Country"].isin(selected_countries)]
+if selected_distributors:
+status_base = status_base[status_base["Distributor name"].isin(selected_distributors)]
+if selected_instruments:
+status_base = status_base[status_base["Instrument type"].isin(selected_instruments)]
+
+state_count_items = compute_state_filter_counts(status_base)
+state_option_map = {f"{state} ({count})": state for state, count in state_count_items}
+selected_state_labels = st.sidebar.multiselect(
+"Estado operativo",
+options=list(state_option_map.keys()),
+default=[],
+placeholder="Selecciona uno o varios estados",
+help="Incluye el estado especial 'No rutina' y cualquier otro estado disponible en la vista actual.",
+)
+selected_states = [state_option_map[label] for label in selected_state_labels]
+
+filtered = raw_df.copy()
+if selected_regions:
+filtered = filtered[filtered["Commercial Region"].isin(selected_regions)]
+if selected_countries:
+filtered = filtered[filtered["Country"].isin(selected_countries)]
+if selected_distributors:
+filtered = filtered[filtered["Distributor name"].isin(selected_distributors)]
+if selected_instruments:
+filtered = filtered[filtered["Instrument type"].isin(selected_instruments)]
+filtered = apply_operational_status_filter(filtered, selected_states)
+
+if filtered.empty:
+st.warning("No hay datos para la combinación de filtros actual.")
 st.stop()
 
 st.sidebar.markdown("---")
@@ -172,7 +292,87 @@ base_tab, machine_tab, os_tab, process_tab, stock_tab, manufacturing_tab, detail
 )
 
 with base_tab:
-@@ -4469,6 +4626,337 @@ def build_distributor_model_donut(df: pd.DataFrame, selected_model: str, top_n:
+st.subheader("Base instalada")
+st.caption("Mapa y analítica de base instalada con enfoque en cobertura geográfica, antigüedad de instalación y estado de despliegue.")
+geo_df = filtered.dropna(subset=["Latitude", "Longitude"]).copy()
+if geo_df.empty:
+st.info("No hay coordenadas válidas para mostrar en el mapa.")
+else:
+st.markdown('<div class="map-shell">', unsafe_allow_html=True)
+st.markdown('<div class="section-title">Vista global de la base instalada</div>', unsafe_allow_html=True)
+st.markdown('<div class="map-note">La proyección se muestra completa desde la carga inicial para conservar el efecto ovalado y el contraste con el fondo glass.</div>', unsafe_allow_html=True)
+
+fig_geo = px.scatter_geo(
+geo_df,
+lat="Latitude",
+lon="Longitude",
+hover_name="Customer name",
+hover_data={
+"Serial number": True,
+"Instrument type": True,
+"Country": True,
+"Distributor name": True,
+"Operational status": True,
+"Commercial Region": True,
+"Latitude": False,
+"Longitude": False,
+},
+height=560,
+projection="mollweide",
+)
+fig_geo.update_traces(
+marker=dict(
+size=7.0,
+color=ACCENT,
+opacity=0.98,
+line=dict(color="rgba(255,255,255,0.96)", width=1.25),
+),
+hovertemplate=(
+"<b>%{hovertext}</b><br>"
+"Serie: %{customdata[0]}<br>"
+"Instrumento: %{customdata[1]}<br>"
+"País: %{customdata[2]}<br>"
+@@ -4429,86 +4586,417 @@
+if not purchase_export.empty:
+purchase_total_row = {col: "" for col in purchase_export.columns}
+if "Required Part Number" in purchase_total_row:
+purchase_total_row["Required Part Number"] = "TOTAL"
+if "Option 2 Estimated Cost" in purchase_total_row:
+purchase_total_row["Option 2 Estimated Cost"] = round(option2_cost, 2)
+if "Currency" in purchase_total_row:
+purchase_total_row["Currency"] = option2_currency
+purchase_export = pd.concat([purchase_export, pd.DataFrame([purchase_total_row])], ignore_index=True)
+if not extra_df.empty:
+extras_export_final = extra_df[["Uploaded Part Number", "Uploaded Description", "Uploaded Qty", "Status"]].copy()
+extras_export_final["__sort_uploaded_part_number"] = extras_export_final["Uploaded Part Number"].astype("string").fillna("")
+extras_export_final = extras_export_final.sort_values(["__sort_uploaded_part_number"], ascending=[True], na_position="last").drop(columns=["__sort_uploaded_part_number"]).reset_index(drop=True)
+else:
+extras_export_final = pd.DataFrame(columns=["Uploaded Part Number", "Uploaded Description", "Uploaded Qty", "Status"])
+
+excel_bytes = dataframe_to_excel_bytes({
+"Gap analysis": export_df,
+"Purchase option 2": purchase_export,
+"Extras not required": extras_export_final,
+})
+
+st.download_button(
+"Descargar análisis de faltantes",
+data=excel_bytes,
+file_name=f"carstock_gap_{normalize_key_text(detected_distributor) or 'distribuidor'}_{'_'.join(selected_families_stock) or 'familia'}.xlsx",
+mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+)
+
+with st.expander("Guía para el archivo maestro consolidado"):
+st.markdown(
+"""
+                                       Formato recomendado para el archivo maestro único:
+                                       - `Distributor name`
+                                       - `Instrument family` o `Platform` (`LXL`, `LXS`, `MDX`, `EMX`)
+                                       - `Part Number`
+                                       - `Description`
+                                       - `Required Qty`
+
+                                       El archivo puede estar en una sola hoja o varias hojas. El dashboard intentará reconocer sinónimos de estas columnas automáticamente.
                                        """
 )
 
@@ -510,3 +710,43 @@ with manufacturing_tab:
 with detail_tab:
 st.subheader("Detalle por equipo")
 detail_df = filtered.copy()
+detail_df["selector"] = (
+detail_df["Serial number"].fillna("SIN SERIAL").astype(str)
++ " | "
++ detail_df["Customer name"].fillna("SIN CLIENTE").astype(str)
++ " | "
++ detail_df["Country"].fillna("SIN PAÍS").astype(str)
+)
+serial_search = st.text_input(
+"Buscar por serial",
+value="",
+placeholder="Escribe aquí un serial para encontrar el equipo",
+key="detail_serial_search",
+).strip()
+if serial_search:
+detail_options = detail_df[
+detail_df["Serial number"].astype(str).str.contains(serial_search, case=False, na=False)
+]["selector"].tolist()
+if not detail_options:
+st.warning("No encontré equipos con ese serial dentro del filtro actual.")
+detail_options = detail_df["selector"].tolist()
+else:
+detail_options = detail_df["selector"].tolist()
+selected = st.selectbox("Selecciona un equipo", options=detail_options)
+row = detail_df.loc[detail_df["selector"] == selected].iloc[0]
+
+d1, d2, d3, d4 = st.columns(4)
+with d1:
+metric_card("Serial", safe_text(row.get("Serial number")), safe_text(row.get("Instrument type"), ""))
+with d2:
+metric_card("Estado operativo", safe_text(row.get("Operational status")), safe_text(row.get("Asset condition"), ""))
+with d3:
+metric_card("Operating System", safe_text(row.get("Operating System")), safe_text(row.get("Country"), ""))
+with d4:
+metric_card("Tests / día", safe_number_text(row.get("Number of tests per day")), safe_text(row.get("Distributor name"), ""))
+
+detail_columns = [
+"Commercial Region",
+"Country",
+"Distributor name",
+"Customer name",
