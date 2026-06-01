@@ -695,6 +695,10 @@ def dataframe_to_excel_bytes(sheet_map: dict[str, pd.DataFrame]) -> bytes:
 
 
 def normalize_operational_status(value) -> str:
+    """
+    Normaliza el estado operativo sin perder estados críticos.
+    Incluye explícitamente To Be Scrapped / Warehouse to be scrapped para que aparezca en filtros.
+    """
     if pd.isna(value):
         return "No informado"
     text = str(value).strip()
@@ -706,10 +710,10 @@ def normalize_operational_status(value) -> str:
 
     if upper in {"NOT IN ROUTINE", "NOT ROUTINE", "NO ROUTINE"}:
         return "Not in routine"
-    if "scrap" in lower:
-        return "Scraped"
     if upper in {"IN ROUTINE", "ROUTINE"}:
         return "Routine"
+    if "to be scrapped" in lower or "to be scrap" in lower or "scrap" in lower:
+        return "To Be Scrapped"
     if "warehouse" in lower:
         return text.title()
     if "refurb" in lower:
@@ -736,6 +740,8 @@ def compute_state_filter_counts(df: pd.DataFrame) -> list[tuple[str, int]]:
     preferred_order = [
         "Routine",
         "Not in routine",
+        "To Be Scrapped",
+        "Scrapped",
         "Scraped",
         "Warehouse New System",
         "Warehouse To Be Refurbished",
@@ -805,6 +811,8 @@ def translate_status_value(value: str) -> str:
         'NOT IN ROUTINE': 'No en rutina',
         'IN ROUTINE': 'En rutina',
         'Scrapped': 'Descartado',
+        'Scraped': 'Descartado',
+        'To Be Scrapped': 'Por descartar',
         'Warehouse To Be Refurbished': 'Bodega por reacondicionar',
         'WAREHOUSE to be refurbished': 'Bodega por reacondicionar',
         'Warehouse Ready To Be Installed': 'Bodega lista para instalar',
@@ -1374,7 +1382,7 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
         'title': 'Configuración de equipo',
         'intro': 'Se consolidan los campos detectados en configuración de equipo y se muestran las distribuciones de los ítems con mayor visibilidad en el filtro activo. Banco de sangre se presenta primero como indicador ejecutivo principal.',
         'summary_pairs': cfg_pairs,
-        'charts': [_make_pdf_donut(pd.DataFrame({'Categoría':['Banco de sangre','Resto de equipos'],'Count':[blood_bank_yes,max(len(filtered_df)-blood_bank_yes,0)]}), 'Categoría', 'Count', 'Banco de sangre', max_rows=2), _make_pdf_barh(cfg_cov, 'Campo de configuración', 'Equipos con dato', 'Cobertura de campos de configuración', max_rows=10)] + cfg_charts,
+        'charts': [_make_pdf_donut(pd.DataFrame({'Categoría':['Equipos en banco de sangre','Total de equipos en todos los estados'],'Count':[blood_bank_yes,len(filtered_df)]}), 'Categoría', 'Count', 'Distribución banco de sangre vs total', max_rows=2), _make_pdf_barh(cfg_cov, 'Campo de configuración', 'Equipos con dato', 'Cobertura de campos de configuración', max_rows=10)] + cfg_charts,
         'table_title': 'Resumen de configuración de equipo',
         'table_df': cfg_value_df,
         'table_max_rows': 12,
@@ -1758,7 +1766,7 @@ def build_blood_bank_donut(df: pd.DataFrame) -> go.Figure:
     total_assets = int(len(df))
     yes_count = int(df.get("In Blood Bank", pd.Series(dtype=object)).map(is_blood_bank_yes).sum()) if total_assets else 0
     no_count = max(total_assets - yes_count, 0)
-    summary = pd.DataFrame({"Label": ["Banco de sangre", "Resto de equipos"], "Count": [yes_count, no_count]})
+    summary = pd.DataFrame({"Label": ["Equipos en banco de sangre", "Total de equipos en todos los estados"], "Count": [yes_count, total_assets]})
 
     fig = go.Figure()
     fig.add_trace(
@@ -1783,7 +1791,7 @@ def build_blood_bank_donut(df: pd.DataFrame) -> go.Figure:
         font=dict(color="#ffffff", size=18),
     )
     fig.update_layout(
-        title="Banco de sangre",
+        title="Banco de sangre dentro del total de equipos",
         showlegend=True,
         legend=dict(orientation="h", yanchor="bottom", y=-0.18, xanchor="center", x=0.5, bgcolor="rgba(14,26,42,0.36)", bordercolor="rgba(124,221,255,0.22)", borderwidth=1, font=dict(color="#f8fbff", size=11)),
     )
@@ -2401,9 +2409,310 @@ def add_operating_system_columns(df: pd.DataFrame, config_cols: list[str]) -> pd
     return df
 
 
+
 @st.cache_data(show_spinner=False)
 def to_csv_download(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode("utf-8-sig")
+
+
+def export_age_excel_bytes(age_df: pd.DataFrame) -> bytes:
+    """
+    Exportación profesional de la pestaña de antigüedad.
+    Reemplaza el CSV plano por un Excel ordenado, filtrable y con columnas autosize.
+    """
+    output = BytesIO()
+    preferred_cols = [
+        "Commercial Region", "Country", "Distributor name", "Customer name", "City", "Address",
+        "Instrument type", "Serial number", "Manufacturing Date", "Manufacturing year",
+        "Manufacturing age (years)", "Manufacturing age bucket", "Installation date",
+        "Operational status grouped", "Operational status", "Asset condition",
+        "Number of tests per day", "Product Line", "PM plan", "PM frequency",
+        "PM performed On", "PM last date", "PM next date", "Type of contract",
+        "Operating System", "Machine Configurations", "Manufacturing Source",
+        "Manufacturing Sheet", "Manufacturing Product", "Manufacturing matched",
+        "Manufacturing date conflict",
+    ]
+    cols = [c for c in preferred_cols if c in age_df.columns]
+    extra_cols = [c for c in age_df.columns if c not in cols and not str(c).startswith("FLAG::") and c != "Serial match key"]
+    export_df = age_df[cols + extra_cols].copy()
+
+    for col in export_df.columns:
+        col_lower = str(col).lower()
+        if "date" in col_lower or col in {"PM performed On"}:
+            export_df[col] = pd.to_datetime(export_df[col], errors="coerce").dt.strftime("%Y-%m-%d").fillna("")
+        elif pd.api.types.is_float_dtype(export_df[col]):
+            export_df[col] = export_df[col].round(2)
+
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        export_df.to_excel(writer, index=False, sheet_name="Edad equipos")
+        ws = writer.sheets["Edad equipos"]
+        ws.freeze_panes = "A2"
+        ws.auto_filter.ref = ws.dimensions
+
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        header_fill = PatternFill("solid", fgColor="1F3B64")
+        header_font = Font(color="FFFFFF", bold=True)
+        thin = Side(style="thin", color="D9E2F3")
+        for cell in ws[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            cell.border = Border(bottom=thin)
+
+        for idx, col in enumerate(export_df.columns, start=1):
+            letter = ws.cell(row=1, column=idx).column_letter
+            max_len = len(str(col))
+            if not export_df.empty:
+                max_len = max(max_len, int(export_df[col].astype(str).str.len().fillna(0).max()))
+            ws.column_dimensions[letter].width = min(max(max_len + 2, 14), 48)
+
+    output.seek(0)
+    return output.getvalue()
+
+
+def render_clickable_chart(
+    fig: go.Figure,
+    detail_df: pd.DataFrame,
+    key: str,
+    title: str = "Detalle filtrado por selección",
+    max_rows: int = 500,
+) -> pd.DataFrame:
+    """
+    Hace que una barra o punto de Plotly actúe como filtro visual.
+    Para filtrar de forma precisa, la gráfica debe llevar custom_data con:
+    [filter_column, filter_value, ...]
+    """
+    try:
+        event = st.plotly_chart(
+            fig,
+            use_container_width=True,
+            key=key,
+            on_select="rerun",
+            selection_mode="points",
+        )
+    except TypeError:
+        st.plotly_chart(fig, use_container_width=True, key=key)
+        return pd.DataFrame()
+
+    try:
+        points = event.get("selection", {}).get("points", [])
+    except Exception:
+        points = []
+
+    if not points:
+        return pd.DataFrame()
+
+    mask = pd.Series(False, index=detail_df.index)
+    applied = []
+    for point in points:
+        custom = point.get("customdata")
+        if custom is None or len(custom) < 2:
+            continue
+        col_name = custom[0]
+        value = custom[1]
+        if col_name in detail_df.columns:
+            mask = mask | detail_df[col_name].astype(str).fillna("").eq(str(value))
+            applied.append(f"{col_name} = {value}")
+
+    selected_df = detail_df[mask].copy()
+    if not selected_df.empty:
+        st.markdown(f"#### {title}")
+        st.caption("Filtro aplicado por clic: " + " | ".join(applied))
+        visible = [c for c in selected_df.columns if not str(c).startswith("FLAG::")]
+        st.dataframe(selected_df[visible].head(max_rows), use_container_width=True, hide_index=True)
+    return selected_df
+
+
+def build_model_status_stacked_chart(df: pd.DataFrame) -> go.Figure:
+    """
+    Gráfica de modelos apilada por estado: permite ver Routine, To Be Scrapped, etc.
+    en cada barra de modelo.
+    """
+    work = df.copy()
+    work["Operational status grouped"] = work["Operational status grouped"].fillna("No informado").astype(str)
+    summary = (
+        work.groupby(["Instrument type", "Operational status grouped"], dropna=False)
+        .size()
+        .reset_index(name="Count")
+    )
+    summary["filter_column"] = "Instrument type"
+    summary["filter_value"] = summary["Instrument type"].astype(str)
+
+    model_order = (
+        summary.groupby("Instrument type", as_index=False)["Count"]
+        .sum()
+        .sort_values("Count", ascending=False)["Instrument type"]
+        .tolist()
+    )
+
+    fig = px.bar(
+        summary,
+        x="Count",
+        y="Instrument type",
+        color="Operational status grouped",
+        orientation="h",
+        barmode="stack",
+        title="Base instalada por modelo y estado operativo",
+        text="Count",
+        custom_data=["filter_column", "filter_value", "Operational status grouped", "Count"],
+        category_orders={"Instrument type": model_order},
+    )
+    fig.update_traces(
+        textposition="inside",
+        hovertemplate=(
+            "Modelo: %{y}<br>"
+            "Estado: %{customdata[2]}<br>"
+            "Equipos: %{customdata[3]}<extra></extra>"
+        ),
+    )
+    fig.update_layout(
+        yaxis=dict(categoryorder="array", categoryarray=model_order[::-1]),
+        xaxis_title="Cantidad de equipos",
+        yaxis_title="Modelo",
+        legend_title="Estado operativo",
+    )
+    return glow_layout(fig, 520)
+
+
+def build_processing_data_quality_chart(df: pd.DataFrame) -> tuple[go.Figure, pd.DataFrame]:
+    """
+    Distingue claramente equipos con 0 test/día vs equipos con más de 0.
+    """
+    work = df.copy()
+    tests = pd.to_numeric(work["Number of tests per day"], errors="coerce").fillna(0)
+    work["Daily test data bucket"] = np.where(tests > 0, "Con registro > 0 test/día", "Sin registro / 0 test diario")
+    summary = work["Daily test data bucket"].value_counts().reset_index()
+    summary.columns = ["Grupo", "Count"]
+    total = int(summary["Count"].sum()) if not summary.empty else 0
+    summary["Porcentaje"] = np.where(total > 0, summary["Count"] / total * 100, 0)
+    summary["Texto"] = summary["Count"].astype(int).astype(str) + " equipos · " + summary["Porcentaje"].round(1).astype(str) + "%"
+    summary["filter_column"] = "Daily test data bucket"
+    summary["filter_value"] = summary["Grupo"]
+
+    fig = px.bar(
+        summary,
+        x="Grupo",
+        y="Count",
+        text="Texto",
+        title="Calidad del dato de procesamiento: 0 test diario vs > 0",
+        custom_data=["filter_column", "filter_value", "Count", "Porcentaje"],
+    )
+    fig.update_traces(
+        marker_color=ACCENT,
+        textposition="outside",
+        hovertemplate="Grupo: %{x}<br>Equipos: %{customdata[2]}<br>Porcentaje: %{customdata[3]:.1f}%<extra></extra>",
+    )
+    fig.update_layout(xaxis_title="", yaxis_title="Cantidad de equipos")
+    return glow_layout(fig, 430, 16), work
+
+
+def build_equipment_integral_pdf(row_df: pd.DataFrame, title: str = "Reporte integral del equipo") -> bytes:
+    """
+    Genera PDF integral por serial/hospital con toda la información disponible del dashboard:
+    datos generales, PM, antigüedad, OS, configuración y campos crudos.
+    """
+    if not REPORTLAB_AVAILABLE:
+        raise RuntimeError("reportlab no está instalado en el entorno.")
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=0.55 * inch,
+        rightMargin=0.55 * inch,
+        topMargin=0.55 * inch,
+        bottomMargin=0.55 * inch,
+        title=title,
+    )
+
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name="Detail_Title", parent=styles["Title"], fontName="Helvetica-Bold", fontSize=15, leading=19, alignment=TA_CENTER, spaceAfter=10))
+    styles.add(ParagraphStyle(name="Detail_Heading", parent=styles["Heading2"], fontName="Helvetica-Bold", fontSize=11, leading=14, spaceBefore=8, spaceAfter=5))
+    styles.add(ParagraphStyle(name="Detail_Cell", parent=styles["BodyText"], fontName="Helvetica", fontSize=7.4, leading=9.2, wordWrap="CJK"))
+    styles.add(ParagraphStyle(name="Detail_Header", parent=styles["BodyText"], fontName="Helvetica-Bold", fontSize=7.4, leading=9.2, textColor=colors.white))
+
+    def esc(v):
+        return _escape_pdf_text(v)
+
+    story = [Paragraph(esc(title), styles["Detail_Title"]), Spacer(1, 0.08 * inch)]
+    if row_df.empty:
+        story.append(Paragraph("No se encontró información para el criterio seleccionado.", styles["BodyText"]))
+    else:
+        for idx, (_, row) in enumerate(row_df.iterrows(), start=1):
+            if idx > 1:
+                story.append(PageBreak())
+            serial = safe_text(row.get("Serial number"), "N/A")
+            customer = safe_text(row.get("Customer name"), "N/A")
+            instrument = safe_text(row.get("Instrument type"), "N/A")
+            story.append(Paragraph(esc(f"Equipo {idx}: {serial} | {instrument}"), styles["Detail_Heading"]))
+            story.append(Paragraph(esc(f"Cliente / Hospital: {customer}"), styles["BodyText"]))
+
+            priority_sections = {
+                "Identificación general": [
+                    "Commercial Region", "Country", "Distributor name", "Customer name", "City", "Address",
+                    "Instrument type", "Serial number", "Product Line", "Installation date",
+                    "Operational status grouped", "Operational status", "Asset condition",
+                    "Type of contract", "Contract duration", "Tag", "Notes",
+                ],
+                "Mantenimiento preventivo y procesamiento": [
+                    "Number of tests per day", "PM plan", "PM frequency", "PM performed On", "PM last date", "PM next date",
+                ],
+                "Antigüedad y fabricación": [
+                    "Manufacturing Date", "Manufacturing year", "Manufacturing age (years)", "Manufacturing age bucket",
+                    "Manufacturing Source", "Manufacturing Sheet", "Manufacturing Product", "Manufacturing matched",
+                    "Manufacturing date conflict",
+                ],
+                "Sistema operativo y configuración": [
+                    "Operating System", "Operating System Raw", "Machine config fields populated", "Machine Configurations",
+                ],
+            }
+
+            used = set()
+            for section_name, cols in priority_sections.items():
+                available = [c for c in cols if c in row_df.columns]
+                if not available:
+                    continue
+                used.update(available)
+                data = [[Paragraph("<b>Campo</b>", styles["Detail_Header"]), Paragraph("<b>Valor</b>", styles["Detail_Header"])]]
+                for col in available:
+                    val = row.get(col)
+                    if "date" in col.lower() or col == "PM performed On":
+                        val = format_date_for_hover(val)
+                    else:
+                        val = safe_text(val, "")
+                    data.append([Paragraph(esc(col), styles["Detail_Cell"]), Paragraph(esc(val), styles["Detail_Cell"])])
+                table = Table(data, colWidths=[2.15 * inch, 4.6 * inch], repeatRows=1)
+                table.setStyle(TableStyle([
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F3B64")),
+                    ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#D9E2F3")),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F6F8FB")]),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                    ("TOPPADDING", (0, 0), (-1, -1), 3),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ]))
+                story.append(Paragraph(esc(section_name), styles["Detail_Heading"]))
+                story.append(table)
+
+            cfg_cols = [c for c in row_df.columns if str(c).startswith("CFG::") and safe_text(row.get(c), "") not in {"", "N/A"}]
+            if cfg_cols:
+                data = [[Paragraph("<b>Configuración</b>", styles["Detail_Header"]), Paragraph("<b>Valor</b>", styles["Detail_Header"])]]
+                for col in cfg_cols:
+                    data.append([Paragraph(esc(str(col).replace("CFG::", "")), styles["Detail_Cell"]), Paragraph(esc(row.get(col)), styles["Detail_Cell"])])
+                table = Table(data, colWidths=[2.55 * inch, 4.2 * inch], repeatRows=1)
+                table.setStyle(TableStyle([
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F3B64")),
+                    ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#D9E2F3")),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F6F8FB")]),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ]))
+                story.append(Paragraph("Machine configuration detallada", styles["Detail_Heading"]))
+                story.append(table)
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
 
 
 def load_table_file(file_bytes: bytes, filename: str) -> pd.DataFrame:
@@ -3633,12 +3942,13 @@ with base_tab:
 
     c1, c2 = st.columns(2)
     with c1:
-        type_df = filtered["Instrument type"].fillna("Unknown").value_counts().reset_index()
-        type_df.columns = ["Instrument type", "Count"]
-        fig_type = px.bar(type_df, x="Count", y="Instrument type", orientation="h", title="Base instalada por tipo de instrumento", text="Count")
-        fig_type.update_traces(marker_color=ACCENT, textposition="outside", hovertemplate="Instrumento: %{y}<br>Activos: %{x}<extra></extra>")
-        fig_type.update_layout(yaxis=dict(categoryorder="total ascending"))
-        st.plotly_chart(glow_layout(fig_type, 470), use_container_width=True)
+        fig_type = build_model_status_stacked_chart(filtered)
+        render_clickable_chart(
+            fig_type,
+            filtered,
+            key="click_model_status_base",
+            title="Equipos del modelo seleccionado",
+        )
 
     with c2:
         install_df = filtered.dropna(subset=["Installation date"]).copy()
@@ -3647,9 +3957,24 @@ with base_tab:
         else:
             install_df["Installation year"] = install_df["Installation date"].dt.year.astype(int)
             yearly = install_df.groupby("Installation year", dropna=False).size().reset_index(name="Count").sort_values("Installation year")
-            fig_year = px.bar(yearly, x="Installation year", y="Count", title="Instalaciones por año", text="Count")
+            yearly["filter_column"] = "Installation year"
+            yearly["filter_value"] = yearly["Installation year"].astype(str)
+            install_df["Installation year"] = install_df["Installation year"].astype(str)
+            fig_year = px.bar(
+                yearly,
+                x="Installation year",
+                y="Count",
+                title="Instalaciones por año",
+                text="Count",
+                custom_data=["filter_column", "filter_value", "Count"],
+            )
             fig_year.update_traces(marker_color=ACCENT_2, textposition="outside", hovertemplate="Año: %{x}<br>Instalaciones: %{y}<extra></extra>")
-            st.plotly_chart(glow_layout(fig_year, 470), use_container_width=True)
+            render_clickable_chart(
+                glow_layout(fig_year, 470),
+                install_df,
+                key="click_installation_year",
+                title="Equipos instalados en el año seleccionado",
+            )
 
     c3, c4 = st.columns(2)
     with c3:
@@ -3675,10 +4000,27 @@ with base_tab:
             .sort_values("Count", ascending=False)
             .head(15)
         )
-        fig_city = px.bar(city_df, x="Count", y="CityLabel", orientation="h", title="Análisis por ciudad", text="Count")
+        city_df["filter_column"] = "CityLabel"
+        city_df["filter_value"] = city_df["CityLabel"].astype(str)
+        city_detail_df = filtered.copy()
+        city_detail_df["CityLabel"] = city_detail_df["City"].fillna("No informado") + " | " + city_detail_df["Country"].fillna("No country")
+        fig_city = px.bar(
+            city_df,
+            x="Count",
+            y="CityLabel",
+            orientation="h",
+            title="Análisis por ciudad",
+            text="Count",
+            custom_data=["filter_column", "filter_value", "Count"],
+        )
         fig_city.update_traces(marker_color=ACCENT_3, textposition="outside", hovertemplate="Ciudad / País: %{y}<br>Activos: %{x}<extra></extra>")
         fig_city.update_layout(yaxis=dict(categoryorder="total ascending"))
-        st.plotly_chart(glow_layout(fig_city, 470), use_container_width=True)
+        render_clickable_chart(
+            glow_layout(fig_city, 470),
+            city_detail_df,
+            key="click_city",
+            title="Equipos de la ciudad seleccionada",
+        )
 
     st.markdown("### Vista corporativa por distribuidor")
     model_options = (
@@ -4049,6 +4391,14 @@ with process_tab:
         metric_card("Product lines", f"{product_lines_count}", "Líneas de producto detectadas")
     with p4:
         metric_card("PM próximos 90 días", f"{upcoming_pm:,}", f"{pm_ready:,} equipos con PM plan")
+
+    quality_fig, proc_df = build_processing_data_quality_chart(proc_df)
+    render_clickable_chart(
+        quality_fig,
+        proc_df,
+        key="click_processing_quality",
+        title="Equipos del grupo de procesamiento seleccionado",
+    )
 
     g1, g2 = st.columns(2)
     with g1:
@@ -4937,10 +5287,10 @@ with manufacturing_tab:
                 st.dataframe(age_table, use_container_width=True, hide_index=True)
 
                 st.download_button(
-                    "Descargar cruce de fechas de fabricación",
-                    data=to_csv_download(manufacturing_df.drop(columns=["Serial match key"], errors="ignore")),
-                    file_name="installed_base_manufacturing_age_filtered.csv",
-                    mime="text/csv",
+                    "Descargar reporte profesional de edad en Excel",
+                    data=export_age_excel_bytes(manufacturing_df),
+                    file_name=f"installed_base_manufacturing_age_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=False,
                     key="download_manufacturing_age_analysis",
                 )
@@ -4959,6 +5309,7 @@ with manufacturing_tab:
 
 with detail_tab:
     st.subheader("Detalle por equipo")
+    st.caption("Búsqueda integral por serial o por nombre de hospital / cliente. El PDF incluye toda la información disponible del dashboard para el equipo seleccionado.")
     detail_df = filtered.copy()
     detail_df["selector"] = (
         detail_df["Serial number"].fillna("SIN SERIAL").astype(str)
@@ -4968,22 +5319,23 @@ with detail_tab:
         + detail_df["Country"].fillna("SIN PAÍS").astype(str)
     )
     serial_search = st.text_input(
-        "Buscar por serial",
+        "Buscar por serial o nombre de hospital / cliente",
         value="",
-        placeholder="Escribe aquí un serial para encontrar el equipo",
+        placeholder="Ejemplo: 2210003334 o Hospital Central",
         key="detail_serial_search",
     ).strip()
     if serial_search:
-        detail_options = detail_df[
-            detail_df["Serial number"].astype(str).str.contains(serial_search, case=False, na=False)
-        ]["selector"].tolist()
+        mask_serial = detail_df["Serial number"].astype(str).str.contains(serial_search, case=False, na=False, regex=False)
+        mask_customer = detail_df["Customer name"].astype(str).str.contains(serial_search, case=False, na=False, regex=False)
+        detail_options = detail_df[mask_serial | mask_customer]["selector"].tolist()
         if not detail_options:
-            st.warning("No encontré equipos con ese serial dentro del filtro actual.")
+            st.warning("No encontré equipos con ese serial u hospital dentro del filtro actual.")
             detail_options = detail_df["selector"].tolist()
     else:
         detail_options = detail_df["selector"].tolist()
     selected = st.selectbox("Selecciona un equipo", options=detail_options)
-    row = detail_df.loc[detail_df["selector"] == selected].iloc[0]
+    selected_df = detail_df.loc[detail_df["selector"] == selected].copy()
+    row = selected_df.iloc[0]
 
     d1, d2, d3, d4 = st.columns(4)
     with d1:
@@ -5018,6 +5370,22 @@ with detail_tab:
             detail_values.append(safe_text(value, "N/A"))
 
     st.dataframe(pd.DataFrame({"Campo": detail_columns, "Valor": detail_values}), use_container_width=True, hide_index=True)
+
+    if REPORTLAB_AVAILABLE:
+        try:
+            equipment_pdf = build_equipment_integral_pdf(selected_df.drop(columns=["selector"], errors="ignore"), title=f"Reporte integral del equipo {safe_text(row.get('Serial number'), 'N/A')}")
+            st.download_button(
+                "⬇️ Descargar reporte integral del equipo en PDF",
+                data=equipment_pdf,
+                file_name=f"reporte_integral_equipo_{normalize_serial_match(row.get('Serial number')) or 'equipo'}.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                key="download_integral_equipment_pdf",
+            )
+        except Exception as pdf_error:
+            st.warning(f"No fue posible preparar el PDF integral del equipo: {pdf_error}")
+    else:
+        st.info("Para descargar el PDF integral agrega `reportlab` a requirements.txt.")
 
     applicable_row_fields = []
     for key in active_config_fields(detail_df.loc[[row.name]], CONFIG_KEYS):
