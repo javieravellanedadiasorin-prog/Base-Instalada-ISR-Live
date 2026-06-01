@@ -3462,16 +3462,44 @@ def build_distributor_global_overview(df: pd.DataFrame, top_n: int = 5) -> go.Fi
         fig.update_layout(title='Vista global por distribuidor')
         return glow_layout(fig, 520, 16)
 
-    dist_order = summary.groupby('Distributor name', as_index=False)['Count'].sum().sort_values(['Count', 'Distributor name'], ascending=[False, True])
+    dist_order = (
+        summary.groupby('Distributor name', as_index=False)['Count']
+        .sum()
+        .sort_values(['Count', 'Distributor name'], ascending=[False, True])
+    )
     top_distributors = dist_order['Distributor name'].tolist()[:top_n]
     summary = summary[summary['Distributor name'].isin(top_distributors)].copy()
-    label_map = {name: distributor_display_name(name, 18) for name in top_distributors}
+
+    # FIX: los nombres abreviados pueden repetirse. Pandas Categorical exige categorías únicas.
+    # Creamos etiquetas de leyenda únicas sin tocar el nombre real del distribuidor usado en hover/export.
+    base_labels = {name: distributor_display_name(name, 18) for name in top_distributors}
+    used_labels = {}
+    label_map = {}
+    for name in top_distributors:
+        base_label = base_labels.get(name, safe_text(name, 'No informado'))
+        if base_label not in used_labels:
+            used_labels[base_label] = 1
+            label_map[name] = base_label
+        else:
+            used_labels[base_label] += 1
+            # Sufijo corto y estable para evitar duplicados visuales y error de Pandas.
+            label_map[name] = f"{base_label} #{used_labels[base_label]}"
+
     legend_order = [label_map[name] for name in top_distributors]
     summary['Legend label'] = summary['Distributor name'].astype(str).map(label_map)
-    summary['Legend label'] = pd.Categorical(summary['Legend label'], categories=legend_order, ordered=True)
-    summary['Instrument type'] = pd.Categorical(summary['Instrument type'], categories=model_order, ordered=True)
-    summary = summary.sort_values(['Instrument type', 'Legend label', 'Count'], ascending=[True, True, False])
-    palette = build_long_palette(len(top_distributors))
+
+    # Asegurar unicidad por si algún dato inesperado queda fuera del mapa.
+    summary['Legend label'] = summary['Legend label'].fillna(summary['Distributor name'].astype(str))
+    legend_order = list(dict.fromkeys([str(x) for x in legend_order if str(x).strip()]))
+
+    # Evitar pd.Categorical sobre categorías no únicas. Ordenamos con mapas numéricos seguros.
+    model_rank = {name: idx for idx, name in enumerate(model_order)}
+    legend_rank = {name: idx for idx, name in enumerate(legend_order)}
+    summary['_model_order'] = summary['Instrument type'].map(model_rank).fillna(9999)
+    summary['_legend_order'] = summary['Legend label'].map(legend_rank).fillna(9999)
+    summary = summary.sort_values(['_model_order', '_legend_order', 'Count'], ascending=[True, True, False])
+
+    palette = build_long_palette(len(legend_order))
 
     fig = px.bar(
         summary,
@@ -3500,7 +3528,6 @@ def build_distributor_global_overview(df: pd.DataFrame, top_n: int = 5) -> go.Fi
     )
     fig.update_yaxes(categoryorder='array', categoryarray=model_order[::-1])
     return glow_layout(fig, 520, 16)
-
 
 def build_distributor_model_donut(df: pd.DataFrame, selected_model: str, top_n: int = 5) -> go.Figure:
     fig = go.Figure()
