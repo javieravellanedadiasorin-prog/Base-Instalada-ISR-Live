@@ -2112,7 +2112,7 @@ def normalize_instrument_type(value) -> str:
     return text.strip() or safe_text(value)
 
 
-PARSER_VERSION = "records-list-stable-positional-v12-20260504"
+PARSER_VERSION = "records-list-stable-v13-20260601-recovery"
 
 
 def get_uploaded_file_signature(uploaded_file) -> str:
@@ -2195,8 +2195,12 @@ def _align_records_row(row: list[str], expected_len: int) -> list[str]:
 
 
 def _finalize_records_df(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
     if "_blank" in df.columns:
         df = df.drop(columns=["_blank"])
+
+    for missing_col in [c for c in CUSTOM_HEADERS if c != "_blank" and c not in df.columns]:
+        df[missing_col] = pd.NA
 
     for col in df.columns:
         if df[col].dtype == object:
@@ -2253,13 +2257,60 @@ def _finalize_records_df(df: pd.DataFrame) -> pd.DataFrame:
 
 @st.cache_data(show_spinner=False)
 def load_records(file_bytes: bytes) -> pd.DataFrame:
-    content = file_bytes.decode("utf-8-sig", errors="replace").splitlines()
+    """Carga Records List CSV de forma tolerante.
+
+    El export histórico viene separado por punto y coma, pero algunos archivos
+    llegan desde Excel/GitHub con coma, tabulador o con encabezados ya limpios.
+    Esta función intenta detectar el delimitador sin romper la alineación
+    posicional que ya funcionaba para el Records List original.
+    """
+    raw_text = file_bytes.decode("utf-8-sig", errors="replace")
+    lines = [line for line in raw_text.splitlines() if line.strip()]
     expected_len = len(CUSTOM_HEADERS)
+
+    if not lines:
+        return _finalize_records_df(pd.DataFrame(columns=[c for c in CUSTOM_HEADERS if c != "_blank"]))
+
+    sample = "\n".join(lines[:20])
+    delimiter = ";"
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=";,\t|")
+        delimiter = dialect.delimiter
+    except Exception:
+        delimiter_counts = {sep: lines[0].count(sep) for sep in [";", ",", "\t", "|"]}
+        delimiter = max(delimiter_counts, key=delimiter_counts.get)
+
+    reader = csv.reader(lines, delimiter=delimiter)
+    parsed_rows = list(reader)
+    if not parsed_rows:
+        return _finalize_records_df(pd.DataFrame(columns=[c for c in CUSTOM_HEADERS if c != "_blank"]))
+
+    header = [str(c).strip() for c in parsed_rows[0]]
+    normalized_header = [normalize_column_label(c) for c in header]
+    normalized_custom = {normalize_column_label(c): c for c in CUSTOM_HEADERS if c != "_blank"}
+    header_matches = sum(1 for c in normalized_header if c in normalized_custom)
+
+    if header_matches >= 10:
+        body = parsed_rows[1:]
+        width = len(header)
+        aligned_body = [row + [""] * max(width - len(row), 0) for row in body]
+        aligned_body = [row[:width] for row in aligned_body]
+        df = pd.DataFrame(aligned_body, columns=header)
+        rename_map = {}
+        for col in df.columns:
+            normalized = normalize_column_label(col)
+            if normalized in normalized_custom:
+                rename_map[col] = normalized_custom[normalized]
+        df = df.rename(columns=rename_map)
+        df = adapt_uploaded_records_to_standard(df)
+        for missing in [c for c in CUSTOM_HEADERS if c != "_blank" and c not in df.columns]:
+            df[missing] = pd.NA
+        return _finalize_records_df(df)
+
     rows = []
-    for line in content[1:]:
-        if not line.strip():
+    for row in parsed_rows[1:]:
+        if not any(str(cell).strip() for cell in row):
             continue
-        row = line.rstrip("\n\r").split(";")
         rows.append(_align_records_row(row, expected_len))
 
     df = pd.DataFrame(rows, columns=CUSTOM_HEADERS)
@@ -2340,7 +2391,7 @@ def parse_machine_configuration(df: pd.DataFrame) -> tuple[pd.DataFrame, list[st
         row_dict = {}
         text = str(raw).strip()
         if text:
-            for part in [p.strip() for p in text.split("|") if p.strip()]:
+            for part in [p.strip() for p in re.split(r"\s*\|\s*|\r?\n|;(?=\s*[A-Za-z][A-Za-z0-9 /_-]{1,60}\s*:)", text) if p.strip()]:
                 if ":" in part:
                     key, value = part.split(":", 1)
                     key = key.strip()
@@ -2360,7 +2411,7 @@ def parse_machine_configuration(df: pd.DataFrame) -> tuple[pd.DataFrame, list[st
 
 @st.cache_data(show_spinner=False)
 def add_operating_system_columns(df: pd.DataFrame, config_cols: list[str]) -> pd.DataFrame:
-    os_candidates = ["CFG::Operative System", "CFG::ETI-Max 3000 Operative System", "CFG::LQS PC OS"]
+    os_candidates = ["CFG::Operative System", "CFG::Operating System", "CFG::ETI-Max 3000 Operative System", "CFG::LQS PC OS", "CFG::PC OS", "CFG::OS"]
     existing = [col for col in os_candidates if col in df.columns]
 
     def normalize_os(value):
@@ -3704,12 +3755,13 @@ with base_tab:
         for start in range(0, len(model_options), cards_per_row):
             row_models = model_options[start:start + cards_per_row]
             cols = st.columns(len(row_models))
-            for col, model_name in zip(cols, row_models):
+            for local_idx, (col, model_name) in enumerate(zip(cols, row_models)):
+                model_key = f"{start}_{local_idx}_{hashlib.md5(str(model_name).encode('utf-8', errors='ignore')).hexdigest()[:8]}"
                 with col:
                     st.plotly_chart(
                         build_distributor_model_donut(filtered, model_name, top_n=5),
                         use_container_width=True,
-                        key=f"donut_model_distributor_{normalize_key_text(model_name)}",
+                        key=f"donut_model_distributor_{model_key}",
                     )
 
         with st.expander("Ver detalle completo de todos los distribuidores por modelo", expanded=False):
@@ -3718,11 +3770,12 @@ with base_tab:
                 unsafe_allow_html=True,
             )
             st.dataframe(build_distributor_detail_table(filtered), use_container_width=True, hide_index=True)
-            for model_name in model_options:
+            for model_idx, model_name in enumerate(model_options):
+                model_key = f"{model_idx}_{hashlib.md5(str(model_name).encode('utf-8', errors='ignore')).hexdigest()[:8]}"
                 st.plotly_chart(
                     build_distributor_detail_bar(filtered, model_name),
                     use_container_width=True,
-                    key=f"detail_bar_model_{normalize_key_text(model_name)}",
+                    key=f"detail_bar_model_{model_key}",
                 )
 
     st.markdown("### Tabla general filtrada")
@@ -4959,43 +5012,92 @@ with manufacturing_tab:
 
 with detail_tab:
     st.subheader("Detalle por equipo")
-    detail_df = filtered.copy()
+    st.caption(
+        "Búsqueda ampliada por serial, hospital/cliente, ciudad, país, distribuidor o modelo. "
+        "La vista muestra toda la información disponible del registro seleccionado, incluyendo mantenimiento preventivo, antigüedad, configuración y campos técnicos."
+    )
+
+    detail_df = filtered.copy().reset_index(drop=False).rename(columns={"index": "_source_index"})
+
+    searchable_columns = [
+        "Serial number",
+        "Customer name",
+        "City",
+        "Country",
+        "Distributor name",
+        "Instrument type",
+        "Address",
+        "Operational status",
+    ]
+    for col in searchable_columns:
+        if col not in detail_df.columns:
+            detail_df[col] = pd.NA
+
     detail_df["selector"] = (
         detail_df["Serial number"].fillna("SIN SERIAL").astype(str)
         + " | "
-        + detail_df["Customer name"].fillna("SIN CLIENTE").astype(str)
+        + detail_df["Customer name"].fillna("SIN CLIENTE / HOSPITAL").astype(str)
+        + " | "
+        + detail_df["City"].fillna("SIN CIUDAD").astype(str)
         + " | "
         + detail_df["Country"].fillna("SIN PAÍS").astype(str)
     )
-    serial_search = st.text_input(
-        "Buscar por serial",
+
+    search_text = st.text_input(
+        "Buscar equipo",
         value="",
-        placeholder="Escribe aquí un serial para encontrar el equipo",
-        key="detail_serial_search",
+        placeholder="Escribe serial, hospital/cliente, ciudad, país, distribuidor o modelo",
+        key="detail_equipment_search",
     ).strip()
-    if serial_search:
-        detail_options = detail_df[
-            detail_df["Serial number"].astype(str).str.contains(serial_search, case=False, na=False)
-        ]["selector"].tolist()
+
+    if search_text:
+        search_norm = normalize_search_text(search_text)
+        search_blob = (
+            detail_df[searchable_columns]
+            .fillna("")
+            .astype(str)
+            .agg(" | ".join, axis=1)
+            .map(normalize_search_text)
+        )
+        matched_mask = search_blob.str.contains(re.escape(search_norm), na=False)
+        detail_options = detail_df.loc[matched_mask, "selector"].tolist()
+
         if not detail_options:
-            st.warning("No encontré equipos con ese serial dentro del filtro actual.")
+            st.warning("No encontré equipos con ese criterio dentro del filtro actual. Revisa si los filtros globales están limitando la búsqueda.")
             detail_options = detail_df["selector"].tolist()
+        else:
+            st.success(f"Coincidencias encontradas: {len(detail_options):,}")
     else:
         detail_options = detail_df["selector"].tolist()
-    selected = st.selectbox("Selecciona un equipo", options=detail_options)
+
+    if not detail_options:
+        st.info("No hay equipos disponibles para mostrar en la vista actual.")
+        st.stop()
+
+    selected = st.selectbox(
+        "Selecciona un equipo",
+        options=detail_options,
+        key="detail_equipment_selector",
+    )
     row = detail_df.loc[detail_df["selector"] == selected].iloc[0]
 
-    d1, d2, d3, d4 = st.columns(4)
+    install_age = row.get("Age (years)")
+    install_age_text = f"{float(install_age):.1f} años" if pd.notna(install_age) else "N/A"
+
+    d1, d2, d3, d4, d5 = st.columns(5)
     with d1:
         metric_card("Serial", safe_text(row.get("Serial number")), safe_text(row.get("Instrument type"), ""))
     with d2:
-        metric_card("Estado operativo", safe_text(row.get("Operational status")), safe_text(row.get("Asset condition"), ""))
+        metric_card("Cliente / hospital", safe_text(row.get("Customer name")), safe_text(row.get("City"), ""))
     with d3:
-        metric_card("Operating System", safe_text(row.get("Operating System")), safe_text(row.get("Country"), ""))
+        metric_card("Estado operativo", safe_text(row.get("Operational status")), safe_text(row.get("Asset condition"), ""))
     with d4:
-        metric_card("Tests / día", safe_number_text(row.get("Number of tests per day")), safe_text(row.get("Distributor name"), ""))
+        metric_card("Operating System", safe_text(row.get("Operating System")), safe_text(row.get("Country"), ""))
+    with d5:
+        metric_card("Antigüedad", install_age_text, "Desde fecha de instalación")
 
-    detail_columns = [
+    st.markdown("### Resumen ejecutivo del equipo")
+    executive_columns = [
         "Commercial Region",
         "Country",
         "Distributor name",
@@ -5004,32 +5106,104 @@ with detail_tab:
         "Address",
         "Instrument type",
         "Product Line",
+        "Serial number",
         "Installation date",
+        "Age (years)",
+        "Operational status grouped",
         "Operational status",
+        "Asset condition",
         "Type of contract",
+        "Contract duration",
         "Operating System",
+        "Operating System Raw",
+        "Number of tests per day",
+        "In Blood Bank",
+        "Data completeness %",
     ]
-    detail_values = []
-    for c in detail_columns:
+
+    executive_rows = []
+    for c in executive_columns:
+        if c not in detail_df.columns:
+            continue
         value = row.get(c)
         if "date" in c.lower():
-            detail_values.append(format_date_for_hover(value))
+            value = format_date_for_hover(value)
+        elif c in {"Age (years)", "Data completeness %", "Number of tests per day", "Contract duration"}:
+            value = safe_number_text(value, "N/A")
         else:
-            detail_values.append(safe_text(value, "N/A"))
+            value = safe_text(value, "N/A")
+        executive_rows.append({"Campo": c, "Valor": value})
+    st.dataframe(pd.DataFrame(executive_rows), use_container_width=True, hide_index=True)
 
-    st.dataframe(pd.DataFrame({"Campo": detail_columns, "Valor": detail_values}), use_container_width=True, hide_index=True)
+    st.markdown("### Mantenimiento preventivo / PM")
+    pm_columns = [
+        "PM plan",
+        "PM last date",
+        "PM frequency",
+        "PM next date",
+        "PM performed On",
+    ]
+    pm_rows = []
+    for c in pm_columns:
+        if c not in detail_df.columns:
+            continue
+        value = row.get(c)
+        if "date" in c.lower() or c == "PM performed On":
+            value = format_date_for_hover(value)
+        elif c == "PM frequency":
+            value = safe_number_text(value, "N/A")
+        else:
+            value = safe_text(value, "N/A")
+        pm_rows.append({"Campo PM": c, "Valor": value})
 
+    pm_next = pd.to_datetime(row.get("PM next date"), errors="coerce")
+    if pd.notna(pm_next):
+        days_to_pm = int((pm_next.normalize() - pd.Timestamp.today().normalize()).days)
+        pm_status = "Vencido" if days_to_pm < 0 else ("Próximos 90 días" if days_to_pm <= 90 else "Planificado")
+        pm_rows.append({"Campo PM": "PM status calculated", "Valor": pm_status})
+        pm_rows.append({"Campo PM": "Days to next PM", "Valor": str(days_to_pm)})
+
+    if pm_rows:
+        st.dataframe(pd.DataFrame(pm_rows), use_container_width=True, hide_index=True)
+    else:
+        st.info("Este registro no contiene campos de mantenimiento preventivo.")
+
+    st.markdown("### Machine configuration del equipo")
     applicable_row_fields = []
     for key in active_config_fields(detail_df.loc[[row.name]], CONFIG_KEYS):
         col = f"CFG::{key}"
         applicable_row_fields.append({"Campo": key, "Valor": safe_text(row.get(col), "N/A")})
 
     if applicable_row_fields:
-        st.markdown("### Machine configuration del equipo")
         st.dataframe(pd.DataFrame(applicable_row_fields), use_container_width=True, hide_index=True)
+    else:
+        st.info("No hay campos estructurados de machine configuration para este equipo.")
 
-    with st.expander("Machine configurations completas"):
+    with st.expander("Machine configurations completas", expanded=False):
         st.code(safe_text(row.get("Machine Configurations"), "No disponible"))
+
+    st.markdown("### Información completa del registro")
+    hidden_prefixes = ("FLAG::",)
+    all_rows = []
+    for c in detail_df.columns:
+        if c in {"selector", "_source_index"} or any(str(c).startswith(prefix) for prefix in hidden_prefixes):
+            continue
+        value = row.get(c)
+        if "date" in str(c).lower():
+            value = format_date_for_hover(value)
+        else:
+            value = safe_text(value, "N/A")
+        all_rows.append({"Campo": c, "Valor": value})
+    st.dataframe(pd.DataFrame(all_rows), use_container_width=True, hide_index=True)
+
+    st.download_button(
+        "Descargar detalle completo del equipo",
+        data=to_csv_download(pd.DataFrame(all_rows)),
+        file_name=f"equipment_detail_{normalize_serial_match(row.get('Serial number')) or 'selected'}.csv",
+        mime="text/csv",
+        use_container_width=False,
+        key="download_selected_equipment_detail",
+    )
 
 
 with st.sidebar:
