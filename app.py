@@ -2709,9 +2709,9 @@ def payload_from_manufacturing_year(point: dict) -> dict | None:
         f"Año de fabricación: {year_text}",
     )
 
-CODE_CREATED_AT = "2026-06-02 16:55:00 COT"
-CODE_VERSION_LABEL = "v25"
-PARSER_VERSION = "records-list-stable-v25-20260602-1655COT-status-alias-matrix-fix"
+CODE_CREATED_AT = "2026-06-02 17:28:00 COT"
+CODE_VERSION_LABEL = "v26"
+PARSER_VERSION = "records-list-stable-v26-20260602-1728COT-status-matrix-cache-bypass"
 
 
 def get_uploaded_file_signature(uploaded_file) -> str:
@@ -2793,6 +2793,82 @@ def _align_records_row(row: list[str], expected_len: int) -> list[str]:
     return row[:notes_idx] + [merged_note] + row[notes_idx + extra + 1 :]
 
 
+
+def recover_records_core_fields(df: pd.DataFrame) -> pd.DataFrame:
+    """Recover critical Records List fields using aliases and fixed export positions.
+
+    This is intentionally redundant with canonicalize_records_columns because Streamlit
+    cache/session reuse can preserve an older parsed DataFrame. The function repairs the
+    active DataFrame after parsing so the dashboard can still build the correct status matrix.
+    """
+    work = df.copy()
+    work.columns = [str(c).strip() for c in work.columns]
+
+    def first_existing_by_alias(alias_names: list[str]) -> pd.Series | None:
+        normalized_targets = {normalize_column_label(x) for x in alias_names}
+        matched = [c for c in work.columns if normalize_column_label(c) in normalized_targets]
+        if not matched:
+            return None
+        return _first_valid_series_from_columns(work, matched)
+
+    def has_useful_values(column: str) -> bool:
+        if column not in work.columns:
+            return False
+        vals = work[column].replace({"": pd.NA, "None": pd.NA, "nan": pd.NA, "<NA>": pd.NA})
+        return bool(vals.notna().any())
+
+    # Export typo: In Blook Bank -> In Blood Bank.
+    bb_series = first_existing_by_alias([
+        "In Blood Bank", "In Blook Bank", "In Bloock Bank", "In Blod Bank",
+        "Blood Bank", "Bloodbank", "Banco de sangre", "Banco sangre",
+    ])
+    if bb_series is not None and (not has_useful_values("In Blood Bank")):
+        work["In Blood Bank"] = bb_series
+
+    # Real Records List export: Status = operational status.
+    # This must remain independent from stock/carstock Status because this function only
+    # runs on Records List dataframes during parsing/finalization.
+    status_series = first_existing_by_alias([
+        "Operational status", "Status", "Operation status", "Estado operativo",
+        "Estado de operacion", "Estado de operación",
+    ])
+    if status_series is not None and (not has_useful_values("Operational status")):
+        work["Operational status"] = status_series
+
+    # Real Records List export: Instrument Status = asset condition.
+    asset_series = first_existing_by_alias([
+        "Asset condition", "Instrument Status", "Instrument asset status",
+        "Asset status", "Condicion del activo", "Condición del activo",
+    ])
+    if asset_series is not None and (not has_useful_values("Asset condition")):
+        work["Asset condition"] = asset_series
+
+    # Real Records List export: Volume is the column used by the dashboard as PM plan.
+    pm_series = first_existing_by_alias(["PM plan", "Volume", "Plan PM", "Plan de PM"])
+    if pm_series is not None and (not has_useful_values("PM plan")):
+        work["PM plan"] = pm_series
+
+    # Positional safety net for the standard semicolon Records List export.
+    # Header positions: 4=In Blook Bank, 16=Instrument Status, 17=Volume, 19=Status.
+    if (not has_useful_values("Operational status")) and work.shape[1] > 19:
+        candidate = work.iloc[:, 19].replace({"": pd.NA, "None": pd.NA, "nan": pd.NA, "<NA>": pd.NA})
+        if candidate.notna().any():
+            work["Operational status"] = candidate
+    if (not has_useful_values("In Blood Bank")) and work.shape[1] > 4:
+        candidate = work.iloc[:, 4].replace({"": pd.NA, "None": pd.NA, "nan": pd.NA, "<NA>": pd.NA})
+        if candidate.notna().any():
+            work["In Blood Bank"] = candidate
+    if (not has_useful_values("Asset condition")) and work.shape[1] > 16:
+        candidate = work.iloc[:, 16].replace({"": pd.NA, "None": pd.NA, "nan": pd.NA, "<NA>": pd.NA})
+        if candidate.notna().any():
+            work["Asset condition"] = candidate
+    if (not has_useful_values("PM plan")) and work.shape[1] > 17:
+        candidate = work.iloc[:, 17].replace({"": pd.NA, "None": pd.NA, "nan": pd.NA, "<NA>": pd.NA})
+        if candidate.notna().any():
+            work["PM plan"] = candidate
+
+    return work
+
 def _finalize_records_df(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
@@ -2802,6 +2878,7 @@ def _finalize_records_df(df: pd.DataFrame) -> pd.DataFrame:
     # "Operational status". Without this step, all operational status values
     # become blank/No informado and the model-status matrix is wrong.
     df = canonicalize_records_columns(df)
+    df = recover_records_core_fields(df)
 
     if "_blank" in df.columns:
         df = df.drop(columns=["_blank"])
@@ -2864,8 +2941,9 @@ def _finalize_records_df(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-@st.cache_data(show_spinner=False)
-def load_records(file_bytes: bytes) -> pd.DataFrame:
+def load_records(file_bytes: bytes, parser_version: str = PARSER_VERSION) -> pd.DataFrame:
+    # Do not cache this parser across builds; parser_version is an explicit cache/session breaker.
+    _ = parser_version
     """Carga Records List CSV de forma tolerante.
 
     El export histórico viene separado por punto y coma, pero algunos archivos
@@ -2954,7 +3032,7 @@ def parse_uploaded_records(uploaded_file) -> pd.DataFrame:
     raw = uploaded_file.getvalue()
 
     if name.endswith(".csv"):
-        return load_records(raw)
+        return load_records(raw, PARSER_VERSION)
 
     table = read_table_any(uploaded_file)
     table = adapt_uploaded_records_to_standard(table)
@@ -4477,7 +4555,7 @@ with base_tab:
         st.info("No hay datos de modelo y estado operativo para la vista actual.")
     else:
         if model_status_summary["Operational status grouped"].nunique(dropna=True) == 1 and str(model_status_summary["Operational status grouped"].iloc[0]) == "No informado":
-            st.warning("La matriz solo encontró 'No informado'. Revisa que estés ejecutando la versión v25 y que el archivo fuente tenga la columna Status/Operational status correctamente cargada.")
+            st.warning("La matriz solo encontró 'No informado'. Revisa que estés ejecutando la versión v26 y que el archivo fuente tenga la columna Status/Operational status correctamente cargada.")
         model_order = (
             model_status_summary.groupby("Instrument type", as_index=False)["Count"]
             .sum()
@@ -4507,7 +4585,7 @@ with base_tab:
         )
         render_drilldown_plotly_chart(
             glow_layout(fig_model_status, max(430, 82 + 46 * len(model_order))),
-            key="drill_model_operational_status_chart_v24",
+            key="drill_model_operational_status_chart_v26",
             source_label="Base instalada por modelo y estado operativo",
             payload_builder=payload_from_model_status_point,
             help_text="Filtro disponible: selecciona/clic en un segmento para ver únicamente ese modelo con ese estado operativo. Usa el panel superior para quitar o deshacer filtros.",
