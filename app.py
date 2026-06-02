@@ -255,6 +255,17 @@ section[data-testid="stSidebar"] div {
         0 0 18px rgba(58, 199, 255, 0.18);
 }
 
+.code-stamp {
+    font-size: 0.58rem !important;
+    font-weight: 500 !important;
+    letter-spacing: 0.02em !important;
+    color: rgba(235,245,255,0.62) !important;
+    margin-left: 0.55rem;
+    vertical-align: middle;
+    text-shadow: none !important;
+    white-space: nowrap;
+}
+
 .hero p {
     margin: 0.45rem 0 0 0;
     color: rgba(239,247,255,0.88) !important;
@@ -1361,7 +1372,7 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
             'table_max_rows': max(len(detail_corporate_df), 1),
         })
 
-    blood_bank_yes = int(filtered_df.get('In Blood Bank', pd.Series(dtype=object)).map(is_blood_bank_yes).sum())
+    blood_bank_yes = count_blood_bank_yes(filtered_df)
     cfg_pairs = [
         ('Equipos con configuración', f"{int(filtered_df['Machine Configurations'].notna().sum()):,}"),
         ('Equipos de banco de sangre', f"{blood_bank_yes:,} de {len(filtered_df):,} ({_safe_share_pct(blood_bank_yes, len(filtered_df)):.1f}% del total)"),
@@ -1745,18 +1756,72 @@ def safe_number_text(value, fallback: str = "0") -> str:
     return f"{int(val):,}" if float(val).is_integer() else f"{val:,.1f}"
 
 
+BLOOD_BANK_HEADER_ALIASES = {
+    "in blood bank",
+    "in blook bank",
+    "in bloock bank",
+    "in blod bank",
+    "blood bank",
+    "bloodbank",
+    "blook bank",
+    "banco de sangre",
+    "banco sangre",
+}
+
+
 def is_blood_bank_yes(value) -> bool:
     if pd.isna(value):
         return False
     txt = str(value).strip().lower()
     txt = txt.replace('="', '').replace('"', '').strip()
     txt = re.sub(r"\s+", " ", txt)
+    if not txt or txt in {"no", "n", "false", "0", "0.0", "nan", "none", "unknown", "data not available", "not applicable", "n.a.", "na"}:
+        return False
     return txt in {"yes", "y", "true", "1", "1.0", "si", "sí", "s", "x"}
+
+
+def _first_valid_series_from_columns(df: pd.DataFrame, columns: list[str]) -> pd.Series:
+    result = pd.Series(pd.NA, index=df.index, dtype="object")
+    for col in columns:
+        data = df[col]
+        if isinstance(data, pd.DataFrame):
+            data = data.bfill(axis=1).iloc[:, 0]
+        data = data.replace({"": pd.NA, "None": pd.NA, "nan": pd.NA, "<NA>": pd.NA})
+        result = result.fillna(data)
+    return result
+
+
+def standardize_blood_bank_column(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    candidate_cols = []
+    for col in df.columns:
+        normalized = normalize_column_label(col)
+        if normalized in BLOOD_BANK_HEADER_ALIASES:
+            candidate_cols.append(col)
+    # El export real de Records List trae el typo "In Blook Bank"; aquí se consolida
+    # siempre en la columna canónica usada por el dashboard.
+    if candidate_cols:
+        df["In Blood Bank"] = _first_valid_series_from_columns(df, candidate_cols)
+    elif "In Blood Bank" not in df.columns:
+        df["In Blood Bank"] = pd.NA
+    df["Blood Bank Raw"] = df["In Blood Bank"]
+    df["Blood Bank Flag"] = df["In Blood Bank"].map(is_blood_bank_yes).fillna(False).astype(bool)
+    return df
+
+
+def count_blood_bank_yes(df: pd.DataFrame) -> int:
+    if df is None or df.empty:
+        return 0
+    if "Blood Bank Flag" in df.columns:
+        return int(df["Blood Bank Flag"].fillna(False).astype(bool).sum())
+    if "In Blood Bank" in df.columns:
+        return int(df["In Blood Bank"].map(is_blood_bank_yes).fillna(False).sum())
+    return 0
 
 
 def build_blood_bank_donut(df: pd.DataFrame) -> go.Figure:
     total_assets = int(len(df))
-    yes_count = int(df.get("In Blood Bank", pd.Series(dtype=object)).map(is_blood_bank_yes).sum()) if total_assets else 0
+    yes_count = count_blood_bank_yes(df) if total_assets else 0
     no_count = max(total_assets - yes_count, 0)
     summary = pd.DataFrame({"Label": ["Banco de sangre", "Resto de equipos"], "Count": [yes_count, no_count]})
 
@@ -2112,7 +2177,9 @@ def normalize_instrument_type(value) -> str:
     return text.strip() or safe_text(value)
 
 
-PARSER_VERSION = "records-list-stable-v13-20260601-recovery"
+CODE_CREATED_AT = "2026-06-02 13:20:22 COT"
+CODE_VERSION_LABEL = "v21"
+PARSER_VERSION = "records-list-stable-v21-20260602-1320COT-blood-bank-definitive"
 
 
 def get_uploaded_file_signature(uploaded_file) -> str:
@@ -2198,6 +2265,8 @@ def _finalize_records_df(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     if "_blank" in df.columns:
         df = df.drop(columns=["_blank"])
+
+    df = standardize_blood_bank_column(df)
 
     for missing_col in [c for c in CUSTOM_HEADERS if c != "_blank" and c not in df.columns]:
         df[missing_col] = pd.NA
@@ -2438,9 +2507,7 @@ def add_operating_system_columns(df: pd.DataFrame, config_cols: list[str]) -> pd
         return text
 
     if existing:
-        os_raw = pd.Series(pd.NA, index=df.index, dtype="object")
-        for col in existing:
-            os_raw = os_raw.fillna(df[col])
+        os_raw = _first_valid_series_from_columns(df, existing)
         df["Operating System Raw"] = os_raw
         df["Operating System"] = os_raw.map(normalize_os)
     else:
@@ -3491,7 +3558,7 @@ st.markdown(
             </div>
             <div class="workspace-chip">Control visual · Devoryn dark mode</div>
         </div>
-        <h1>Records List Intelligence Dashboard</h1>
+        <h1>Records List Intelligence Dashboard <span class="code-stamp">Código creado: 2026-06-02 13:20:22 COT · v21</span></h1>
         <p>Panel ejecutivo para explorar la base instalada, configuration insights, sistema operativo, procesamiento y gap de repuestos con una apariencia oscura, limpia y premium.</p>
         <div class="badge-row">
             <span class="badge">Base instalada</span>
@@ -3529,8 +3596,10 @@ if raw_df.empty:
 
 raw_df, CONFIG_KEYS = parse_machine_configuration(raw_df)
 raw_df = add_operating_system_columns(raw_df, CONFIG_KEYS)
+raw_df = standardize_blood_bank_column(raw_df)
 st.sidebar.caption(f"Fuente activa: {source_label}")
 st.sidebar.caption(f"Build activo: {PARSER_VERSION}")
+st.sidebar.caption(f"Código creado: {CODE_CREATED_AT}")
 st.sidebar.markdown('<div class="small-note">Usa los filtros como un panel de control para refinar región, país, distribuidor, instrumento y estado operativo.</div>', unsafe_allow_html=True)
 
 region_options = sorted(raw_df["Commercial Region"].dropna().unique().tolist())
@@ -3809,7 +3878,7 @@ with machine_tab:
         avg_cfg_fields = filtered["Machine config fields populated"].mean()
         unique_cfg_fields = len(applicable_fields)
 
-        blood_bank_yes = int(filtered.get("In Blood Bank", pd.Series(dtype=object)).map(is_blood_bank_yes).sum())
+        blood_bank_yes = count_blood_bank_yes(filtered)
 
         mc1, mc2, mc3, mc4 = st.columns(4)
         with mc1:
@@ -3822,7 +3891,7 @@ with machine_tab:
             metric_card("Promedio de campos", f"{avg_cfg_fields:.1f}", "Campos poblados por equipo")
 
         st.markdown("### Banco de sangre")
-        st.markdown('<div class="small-note">Se cuentan como positivos únicamente los equipos con <b>In Blood Bank = Yes</b>.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="small-note">Conteo validado desde la columna <b>In Blood Bank</b> y aliases del export como <b>In Blook Bank</b>.</div>', unsafe_allow_html=True)
         st.plotly_chart(build_blood_bank_donut(filtered), use_container_width=True, key="blood_bank_donut_main")
 
         coverage_df = pd.DataFrame(
