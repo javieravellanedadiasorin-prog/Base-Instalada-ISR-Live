@@ -9,6 +9,7 @@ import textwrap
 import hashlib
 import csv
 import math
+import unicodedata
 
 import numpy as np
 import pandas as pd
@@ -1361,7 +1362,7 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
             'table_max_rows': max(len(detail_corporate_df), 1),
         })
 
-    blood_bank_yes = int(filtered_df.get('In Blood Bank', pd.Series(dtype=object)).map(is_blood_bank_yes).sum())
+    blood_bank_yes = count_blood_bank_yes(filtered_df)
     cfg_pairs = [
         ('Equipos con configuración', f"{int(filtered_df['Machine Configurations'].notna().sum()):,}"),
         ('Equipos de banco de sangre', f"{blood_bank_yes:,} de {len(filtered_df):,} ({_safe_share_pct(blood_bank_yes, len(filtered_df)):.1f}% del total)"),
@@ -1745,18 +1746,194 @@ def safe_number_text(value, fallback: str = "0") -> str:
     return f"{int(val):,}" if float(val).is_integer() else f"{val:,.1f}"
 
 
+def _normalize_boolean_text(value) -> str:
+    """Normaliza valores de Sí/No exportados desde Excel, CSV o ISR-Live."""
+    try:
+        if pd.isna(value):
+            return ""
+    except Exception:
+        pass
+
+    text_value = str(value).strip()
+    if not text_value:
+        return ""
+
+    if text_value.startswith('="') and text_value.endswith('"'):
+        text_value = text_value[2:-1]
+
+    text_value = text_value.strip().strip('"').strip("'")
+    text_value = unicodedata.normalize("NFKD", text_value)
+    text_value = "".join(ch for ch in text_value if not unicodedata.combining(ch))
+    text_value = text_value.lower()
+    text_value = re.sub(r"[^a-z0-9]+", " ", text_value).strip()
+    text_value = re.sub(r"\s+", " ", text_value)
+    return text_value
+
+
 def is_blood_bank_yes(value) -> bool:
-    if pd.isna(value):
+    """Devuelve True para todos los formatos positivos conocidos de banco de sangre.
+
+    La versión anterior solo contaba valores exactamente iguales a "Yes". En los
+    exports reales pueden aparecer "YES", "Yes - Blood Bank", "Si", "Sí",
+    "Banco de sangre", valores de Excel tipo ="Yes" o banderas 1/true.
+    """
+    txt = _normalize_boolean_text(value)
+    if not txt:
         return False
-    txt = str(value).strip().lower()
-    txt = txt.replace('="', '').replace('"', '').strip()
-    txt = re.sub(r"\s+", " ", txt)
-    return txt in {"yes", "y", "true", "1", "1.0", "si", "sí", "s", "x"}
+
+    negative_exact = {
+        "no", "n", "false", "0", "0 0", "none", "null", "nan",
+        "na", "n a", "no aplica", "not applicable", "dont know",
+        "don t know", "unknown", "data not available", "not done",
+    }
+    if txt in negative_exact:
+        return False
+
+    negative_patterns = [
+        r"\bno\b",
+        r"\bnot\b",
+        r"\bfalse\b",
+        r"\bunknown\b",
+        r"\bdont know\b",
+        r"\bdata not available\b",
+        r"\bnot applicable\b",
+    ]
+    if any(re.search(pattern, txt) for pattern in negative_patterns):
+        if not re.match(r"^(yes|si|s|y|true|1)\b", txt):
+            return False
+
+    positive_exact = {"yes", "y", "true", "1", "1 0", "si", "s", "x"}
+    if txt in positive_exact:
+        return True
+
+    if re.match(r"^(yes|si|s|y|true|1)\b", txt):
+        return True
+
+    if "blood bank" in txt or "banco sangre" in txt or "banco de sangre" in txt:
+        return True
+
+    return False
+
+
+def _is_blood_bank_candidate_column(column_name) -> bool:
+    norm = _normalize_boolean_text(column_name)
+    if not norm:
+        return False
+
+    computed_columns = {
+        "blood bank flag",
+        "blood bank raw",
+        "blood bank source",
+    }
+    if norm in computed_columns:
+        return False
+
+    exact_candidates = {
+        "in blood bank",
+        "blood bank",
+        "bloodbank",
+        "banco de sangre",
+        "banco sangre",
+        "in banco de sangre",
+    }
+    if norm in exact_candidates:
+        return True
+
+    return (
+        ("blood" in norm and "bank" in norm)
+        or ("banco" in norm and "sangre" in norm)
+    )
+
+
+def _iter_column_series(df: pd.DataFrame, column_name):
+    """Devuelve Series incluso si el DataFrame tiene nombres de columnas duplicados."""
+    selected = df.loc[:, column_name]
+    if isinstance(selected, pd.DataFrame):
+        for idx in range(selected.shape[1]):
+            yield selected.iloc[:, idx]
+    else:
+        yield selected
+
+
+def _extract_blood_bank_value_from_configuration(value):
+    try:
+        if pd.isna(value):
+            return pd.NA
+    except Exception:
+        pass
+
+    text_value = str(value)
+    if not text_value.strip():
+        return pd.NA
+
+    patterns = [
+        r"(?:in\s*)?blood\s*bank\s*[:=]\s*([^;|\n\r,]+)",
+        r"banco\s*(?:de\s*)?sangre\s*[:=]\s*([^;|\n\r,]+)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text_value, flags=re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+
+    return pd.NA
+
+
+@st.cache_data(show_spinner=False)
+def add_blood_bank_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Agrega columnas normalizadas para contar banco de sangre sin depender de un único formato."""
+    out = df.copy()
+
+    if out.empty:
+        out["Blood Bank Flag"] = pd.Series(dtype=bool)
+        out["Blood Bank Raw"] = pd.Series(dtype="object")
+        out["Blood Bank Source"] = pd.Series(dtype="object")
+        return out
+
+    flag = pd.Series(False, index=out.index, dtype=bool)
+    raw_value = pd.Series(pd.NA, index=out.index, dtype="object")
+    source_value = pd.Series(pd.NA, index=out.index, dtype="object")
+
+    candidate_columns = [col for col in out.columns if _is_blood_bank_candidate_column(col)]
+
+    for column_name in candidate_columns:
+        for series in _iter_column_series(out, column_name):
+            aligned = series.reindex(out.index)
+            candidate_flag = aligned.map(is_blood_bank_yes).fillna(False).astype(bool)
+            new_positive = candidate_flag & ~flag
+            if new_positive.any():
+                raw_value.loc[new_positive] = aligned.loc[new_positive].astype("object")
+                source_value.loc[new_positive] = str(column_name)
+            flag = flag | candidate_flag
+
+    if "Machine Configurations" in out.columns:
+        extracted = out["Machine Configurations"].map(_extract_blood_bank_value_from_configuration)
+        extracted_flag = extracted.map(is_blood_bank_yes).fillna(False).astype(bool)
+        new_positive = extracted_flag & ~flag
+        if new_positive.any():
+            raw_value.loc[new_positive] = extracted.loc[new_positive].astype("object")
+            source_value.loc[new_positive] = "Machine Configurations"
+        flag = flag | extracted_flag
+
+    out["Blood Bank Flag"] = flag.fillna(False).astype(bool)
+    out["Blood Bank Raw"] = raw_value
+    out["Blood Bank Source"] = source_value.fillna("No positive source detected")
+    return out
+
+
+def count_blood_bank_yes(df: pd.DataFrame) -> int:
+    """Conteo único y consistente usado por tarjetas, donut y PDF."""
+    if df is None or df.empty:
+        return 0
+
+    if "Blood Bank Flag" in df.columns:
+        return int(df["Blood Bank Flag"].fillna(False).astype(bool).sum())
+
+    return int(add_blood_bank_columns(df)["Blood Bank Flag"].sum())
 
 
 def build_blood_bank_donut(df: pd.DataFrame) -> go.Figure:
     total_assets = int(len(df))
-    yes_count = int(df.get("In Blood Bank", pd.Series(dtype=object)).map(is_blood_bank_yes).sum()) if total_assets else 0
+    yes_count = count_blood_bank_yes(df) if total_assets else 0
     no_count = max(total_assets - yes_count, 0)
     summary = pd.DataFrame({"Label": ["Banco de sangre", "Resto de equipos"], "Count": [yes_count, no_count]})
 
@@ -2112,7 +2289,7 @@ def normalize_instrument_type(value) -> str:
     return text.strip() or safe_text(value)
 
 
-PARSER_VERSION = "records-list-stable-v13-20260601-recovery"
+PARSER_VERSION = "records-list-stable-v14-20260602-blood-bank-fix"
 
 
 def get_uploaded_file_signature(uploaded_file) -> str:
@@ -2440,7 +2617,9 @@ def add_operating_system_columns(df: pd.DataFrame, config_cols: list[str]) -> pd
     if existing:
         os_raw = pd.Series(pd.NA, index=df.index, dtype="object")
         for col in existing:
-            os_raw = os_raw.fillna(df[col])
+            for candidate_series in _iter_column_series(df, col):
+                aligned = candidate_series.reindex(df.index)
+                os_raw = os_raw.where(os_raw.notna(), aligned)
         df["Operating System Raw"] = os_raw
         df["Operating System"] = os_raw.map(normalize_os)
     else:
@@ -3529,6 +3708,7 @@ if raw_df.empty:
 
 raw_df, CONFIG_KEYS = parse_machine_configuration(raw_df)
 raw_df = add_operating_system_columns(raw_df, CONFIG_KEYS)
+raw_df = add_blood_bank_columns(raw_df)
 st.sidebar.caption(f"Fuente activa: {source_label}")
 st.sidebar.caption(f"Build activo: {PARSER_VERSION}")
 st.sidebar.markdown('<div class="small-note">Usa los filtros como un panel de control para refinar región, país, distribuidor, instrumento y estado operativo.</div>', unsafe_allow_html=True)
@@ -3792,6 +3972,9 @@ with base_tab:
         "Installation date",
         "Number of tests per day",
         "Operating System",
+        "In Blood Bank",
+        "Blood Bank Flag",
+        "Blood Bank Source",
         "Machine Configurations",
     ]
     st.dataframe(filtered[visible_columns].copy(), use_container_width=True, hide_index=True)
@@ -3809,7 +3992,7 @@ with machine_tab:
         avg_cfg_fields = filtered["Machine config fields populated"].mean()
         unique_cfg_fields = len(applicable_fields)
 
-        blood_bank_yes = int(filtered.get("In Blood Bank", pd.Series(dtype=object)).map(is_blood_bank_yes).sum())
+        blood_bank_yes = count_blood_bank_yes(filtered)
 
         mc1, mc2, mc3, mc4 = st.columns(4)
         with mc1:
@@ -3822,8 +4005,41 @@ with machine_tab:
             metric_card("Promedio de campos", f"{avg_cfg_fields:.1f}", "Campos poblados por equipo")
 
         st.markdown("### Banco de sangre")
-        st.markdown('<div class="small-note">Se cuentan como positivos únicamente los equipos con <b>In Blood Bank = Yes</b>.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="small-note">Conteo normalizado desde <b>In Blood Bank</b> y, cuando aplica, desde campos equivalentes detectados en <b>Machine Configurations</b>.</div>', unsafe_allow_html=True)
         st.plotly_chart(build_blood_bank_donut(filtered), use_container_width=True, key="blood_bank_donut_main")
+
+        with st.expander("Validación del conteo de banco de sangre", expanded=False):
+            if "Blood Bank Flag" in filtered.columns:
+                validation_cols = [
+                    col for col in [
+                        "Commercial Region",
+                        "Country",
+                        "Distributor name",
+                        "Customer name",
+                        "Instrument type",
+                        "Serial number",
+                        "In Blood Bank",
+                        "Blood Bank Flag",
+                        "Blood Bank Raw",
+                        "Blood Bank Source",
+                    ] if col in filtered.columns
+                ]
+                source_summary = (
+                    filtered[filtered["Blood Bank Flag"]]
+                    .get("Blood Bank Source", pd.Series(dtype=object))
+                    .fillna("No positive source detected")
+                    .astype(str)
+                    .value_counts()
+                    .reset_index()
+                )
+                if not source_summary.empty:
+                    source_summary.columns = ["Origen detectado", "Equipos positivos"]
+                    st.dataframe(source_summary, use_container_width=True, hide_index=True)
+                st.dataframe(
+                    filtered.loc[filtered["Blood Bank Flag"], validation_cols].copy(),
+                    use_container_width=True,
+                    hide_index=True,
+                )
 
         coverage_df = pd.DataFrame(
             [{"Config field": col.replace("CFG::", ""), "Populated assets": int(filtered[col].notna().sum())} for col in cfg_cols_prefixed]
@@ -4075,6 +4291,9 @@ with os_tab:
         "Instrument type",
         "Serial number",
         "Operating System",
+        "In Blood Bank",
+        "Blood Bank Flag",
+        "Blood Bank Source",
         "Machine Configurations",
     ]].copy()
     st.dataframe(os_table, use_container_width=True, hide_index=True)
