@@ -2177,9 +2177,278 @@ def normalize_instrument_type(value) -> str:
     return text.strip() or safe_text(value)
 
 
-CODE_CREATED_AT = "2026-06-02 13:20:22 COT"
-CODE_VERSION_LABEL = "v21"
-PARSER_VERSION = "records-list-stable-v21-20260602-1320COT-blood-bank-definitive"
+# =============================================================================
+# FILTRO INTERACTIVO DESDE GRÁFICAS
+# =============================================================================
+CHART_DRILL_SESSION_KEY = "active_chart_drill_filter_v22"
+CHART_DRILL_RESET_COUNTER_KEY = "chart_drill_reset_counter_v22"
+
+
+def ensure_chart_drill_state() -> None:
+    if CHART_DRILL_SESSION_KEY not in st.session_state:
+        st.session_state[CHART_DRILL_SESSION_KEY] = None
+    if CHART_DRILL_RESET_COUNTER_KEY not in st.session_state:
+        st.session_state[CHART_DRILL_RESET_COUNTER_KEY] = 0
+
+
+def compute_installation_stage(df: pd.DataFrame) -> pd.Series:
+    status_series = df.get("Operational status", pd.Series("No informado", index=df.index)).fillna("No informado").astype(str)
+    stage = pd.Series("Installed / Active", index=df.index, dtype="object")
+    stage = stage.mask(status_series.str.contains("ready", case=False, na=False), "Ready to install")
+    stage = stage.mask(status_series.str.contains("transit|customs|shipping", case=False, na=False), "Transit / Customs")
+    stage = stage.mask(status_series.str.contains("warehouse|stock", case=False, na=False), "Warehouse")
+    return stage
+
+
+def build_city_label_series(df: pd.DataFrame) -> pd.Series:
+    city = df.get("City", pd.Series("No informado", index=df.index)).fillna("No informado").astype(str).str.strip()
+    country = df.get("Country", pd.Series("No country", index=df.index)).fillna("No country").astype(str).str.strip()
+    city = city.replace("", "No informado")
+    country = country.replace("", "No country")
+    return city + " | " + country
+
+
+def get_active_chart_drill_filter() -> dict | None:
+    ensure_chart_drill_state()
+    active = st.session_state.get(CHART_DRILL_SESSION_KEY)
+    return active if isinstance(active, dict) and active.get("filters") else None
+
+
+def clear_chart_drill_filter() -> None:
+    ensure_chart_drill_state()
+    st.session_state[CHART_DRILL_SESSION_KEY] = None
+    st.session_state[CHART_DRILL_RESET_COUNTER_KEY] = int(st.session_state.get(CHART_DRILL_RESET_COUNTER_KEY, 0)) + 1
+    st.rerun()
+
+
+def _drill_payload_signature(payload: dict | None) -> tuple:
+    if not isinstance(payload, dict):
+        return tuple()
+    normalized_filters = []
+    for item in payload.get("filters", []):
+        if isinstance(item, dict):
+            normalized_filters.append((str(item.get("column", "")), str(item.get("value", ""))))
+    return (str(payload.get("source", "")), tuple(normalized_filters))
+
+
+def set_chart_drill_filter(payload: dict | None) -> None:
+    if not payload or not payload.get("filters"):
+        return
+    ensure_chart_drill_state()
+    current = st.session_state.get(CHART_DRILL_SESSION_KEY)
+    if _drill_payload_signature(current) != _drill_payload_signature(payload):
+        st.session_state[CHART_DRILL_SESSION_KEY] = payload
+        st.rerun()
+
+
+def make_chart_drill_payload(source: str, filters: list[dict], label: str) -> dict:
+    clean_filters = []
+    for item in filters:
+        if not isinstance(item, dict):
+            continue
+        column = safe_text(item.get("column"), "").strip()
+        value = safe_text(item.get("value"), "").strip()
+        if column and value:
+            clean_filters.append({"column": column, "value": value})
+    return {"source": source, "filters": clean_filters, "label": label}
+
+
+def apply_chart_drill_filter(df: pd.DataFrame) -> tuple[pd.DataFrame, bool]:
+    active = get_active_chart_drill_filter()
+    if not active:
+        return df.copy(), False
+
+    mask = pd.Series(True, index=df.index)
+    for item in active.get("filters", []):
+        column = safe_text(item.get("column"), "")
+        value = safe_text(item.get("value"), "")
+
+        if column == "Installation year":
+            years = pd.to_datetime(df.get("Installation date", pd.Series(pd.NaT, index=df.index)), errors="coerce").dt.year
+            try:
+                mask = mask & years.eq(int(float(value)))
+            except Exception:
+                mask = mask & pd.Series(False, index=df.index)
+        elif column == "Installation stage":
+            mask = mask & compute_installation_stage(df).astype(str).eq(value)
+        elif column == "CityLabel":
+            mask = mask & build_city_label_series(df).astype(str).eq(value)
+        elif column in df.columns:
+            series = df[column].fillna("No informado").astype(str).str.strip().replace("", "No informado")
+            mask = mask & series.eq(value)
+        else:
+            mask = mask & pd.Series(False, index=df.index)
+
+    return df[mask].copy(), True
+
+
+def render_chart_drill_filter_banner(base_df: pd.DataFrame, current_df: pd.DataFrame) -> None:
+    active = get_active_chart_drill_filter()
+    if not active:
+        return
+
+    source = safe_text(active.get("source"), "Gráfica")
+    label = safe_text(active.get("label"), "Filtro interactivo")
+    total_before = len(base_df)
+    total_after = len(current_df)
+    pct = _safe_share_pct(total_after, total_before)
+
+    st.markdown(
+        f'''
+        <div style="border:1px solid rgba(113,225,255,0.30);border-radius:18px;padding:0.85rem 1rem;margin:0.7rem 0 1rem 0;background:rgba(113,225,255,0.08);box-shadow:0 0 18px rgba(53,200,255,0.08);">
+            <div style="font-size:0.78rem;text-transform:uppercase;letter-spacing:0.12em;color:rgba(235,245,255,0.70);">Filtro interactivo activo desde gráfica</div>
+            <div style="font-size:1rem;font-weight:700;color:#ffffff;margin-top:0.15rem;">{label}</div>
+            <div style="font-size:0.86rem;color:rgba(235,245,255,0.82);margin-top:0.18rem;">Origen: {source} · Mostrando {total_after:,} de {total_before:,} registros ({pct:.1f}%).</div>
+        </div>
+        ''',
+        unsafe_allow_html=True,
+    )
+    if st.button("← Volver a la vista completa / quitar filtro de gráfica", key="clear_chart_drill_filter_button_v22"):
+        clear_chart_drill_filter()
+
+
+def extract_plotly_selected_point(event) -> dict | None:
+    if event is None:
+        return None
+    points = None
+    try:
+        points = event.selection.points
+    except Exception:
+        pass
+    if points is None and isinstance(event, dict):
+        points = event.get("selection", {}).get("points", [])
+    if points is None:
+        return None
+    try:
+        if len(points) == 0:
+            return None
+        point = points[0]
+    except Exception:
+        return None
+    if isinstance(point, dict):
+        return point
+    try:
+        return dict(point)
+    except Exception:
+        return None
+
+
+def _get_customdata(point: dict, index: int, default=""):
+    custom = point.get("customdata")
+    try:
+        if custom is not None and len(custom) > index:
+            return custom[index]
+    except Exception:
+        pass
+    return default
+
+
+def render_drilldown_plotly_chart(fig: go.Figure, key: str, source_label: str, payload_builder) -> None:
+    ensure_chart_drill_state()
+    counter = int(st.session_state.get(CHART_DRILL_RESET_COUNTER_KEY, 0))
+    widget_key = f"{key}_r{counter}"
+    try:
+        event = st.plotly_chart(
+            fig,
+            use_container_width=True,
+            key=widget_key,
+            on_select="rerun",
+            selection_mode="points",
+        )
+    except TypeError:
+        st.plotly_chart(fig, use_container_width=True, key=widget_key)
+        st.caption("La versión actual de Streamlit no expone selección directa para esta gráfica; el dashboard conserva la visualización normal.")
+        return
+
+    point = extract_plotly_selected_point(event)
+    if point:
+        payload = payload_builder(point)
+        if payload:
+            set_chart_drill_filter(payload)
+
+
+def payload_from_instrument_point(point: dict, source_label: str) -> dict | None:
+    instrument = safe_text(_get_customdata(point, 0, point.get("y")), "").strip()
+    if not instrument:
+        return None
+    return make_chart_drill_payload(
+        source_label,
+        [{"column": "Instrument type", "value": instrument}],
+        f"Instrumento: {instrument}",
+    )
+
+
+def payload_from_installation_year_point(point: dict) -> dict | None:
+    year_value = _get_customdata(point, 0, point.get("x"))
+    try:
+        year_text = str(int(float(year_value)))
+    except Exception:
+        return None
+    return make_chart_drill_payload(
+        "Instalaciones por año",
+        [{"column": "Installation year", "value": year_text}],
+        f"Año de instalación: {year_text}",
+    )
+
+
+def payload_from_pipeline_point(point: dict) -> dict | None:
+    instrument = safe_text(_get_customdata(point, 0, point.get("x")), "").strip()
+    stage = safe_text(_get_customdata(point, 1, ""), "").strip()
+    if not instrument or not stage:
+        return None
+    return make_chart_drill_payload(
+        "Sistemas instalados vs listos / pipeline",
+        [
+            {"column": "Instrument type", "value": instrument},
+            {"column": "Installation stage", "value": stage},
+        ],
+        f"Instrumento: {instrument} · Etapa: {stage}",
+    )
+
+
+def payload_from_city_point(point: dict) -> dict | None:
+    city_label = safe_text(_get_customdata(point, 0, point.get("y")), "").strip()
+    if not city_label:
+        return None
+    return make_chart_drill_payload(
+        "Análisis por ciudad",
+        [{"column": "CityLabel", "value": city_label}],
+        f"Ciudad / país: {city_label}",
+    )
+
+
+def payload_from_global_distributor_point(point: dict) -> dict | None:
+    instrument = safe_text(_get_customdata(point, 0, ""), "").strip()
+    distributor = safe_text(_get_customdata(point, 1, ""), "").strip()
+    if not instrument or not distributor:
+        return None
+    return make_chart_drill_payload(
+        "Vista global por distribuidor",
+        [
+            {"column": "Instrument type", "value": instrument},
+            {"column": "Distributor name", "value": distributor},
+        ],
+        f"Modelo: {instrument} · Distribuidor: {distributor}",
+    )
+
+
+def payload_from_detail_distributor_point(selected_model: str, point: dict) -> dict | None:
+    distributor = safe_text(_get_customdata(point, 0, ""), "").strip()
+    if not selected_model or not distributor:
+        return None
+    return make_chart_drill_payload(
+        f"Detalle completo | {selected_model}",
+        [
+            {"column": "Instrument type", "value": selected_model},
+            {"column": "Distributor name", "value": distributor},
+        ],
+        f"Modelo: {selected_model} · Distribuidor: {distributor}",
+    )
+
+
+CODE_CREATED_AT = "2026-06-02 13:52:44 COT"
+CODE_VERSION_LABEL = "v22"
+PARSER_VERSION = "records-list-stable-v22-20260602-1352COT-interactive-chart-drilldown"
 
 
 def get_uploaded_file_signature(uploaded_file) -> str:
@@ -3558,7 +3827,7 @@ st.markdown(
             </div>
             <div class="workspace-chip">Control visual · Devoryn dark mode</div>
         </div>
-        <h1>Records List Intelligence Dashboard <span class="code-stamp">Código creado: 2026-06-02 13:20:22 COT · v21</span></h1>
+        <h1>Records List Intelligence Dashboard <span class="code-stamp">Código creado: 2026-06-02 13:52:44 COT · v22</span></h1>
         <p>Panel ejecutivo para explorar la base instalada, configuration insights, sistema operativo, procesamiento y gap de repuestos con una apariencia oscura, limpia y premium.</p>
         <div class="badge-row">
             <span class="badge">Base instalada</span>
@@ -3593,6 +3862,8 @@ raw_df, source_label = get_active_records_dataset(uploaded_file, sample_candidat
 if raw_df.empty:
     st.info("Sube el archivo Records List para activar el dashboard.")
     st.stop()
+
+ensure_chart_drill_state()
 
 raw_df, CONFIG_KEYS = parse_machine_configuration(raw_df)
 raw_df = add_operating_system_columns(raw_df, CONFIG_KEYS)
@@ -3661,9 +3932,15 @@ if selected_instruments:
     filtered = filtered[filtered["Instrument type"].isin(selected_instruments)]
 filtered = apply_operational_status_filter(filtered, selected_states)
 
+sidebar_filtered = filtered.copy()
+filtered, chart_drill_active = apply_chart_drill_filter(filtered)
+
 if filtered.empty:
+    render_chart_drill_filter_banner(sidebar_filtered, filtered)
     st.warning("No hay datos para la combinación de filtros actual.")
     st.stop()
+
+render_chart_drill_filter_banner(sidebar_filtered, filtered)
 
 st.sidebar.markdown("---")
 base_tab, machine_tab, os_tab, process_tab, stock_tab, manufacturing_tab, detail_tab = st.tabs(
@@ -3755,10 +4032,15 @@ with base_tab:
     with c1:
         type_df = filtered["Instrument type"].fillna("Unknown").value_counts().reset_index()
         type_df.columns = ["Instrument type", "Count"]
-        fig_type = px.bar(type_df, x="Count", y="Instrument type", orientation="h", title="Base instalada por tipo de instrumento", text="Count")
-        fig_type.update_traces(marker_color=ACCENT, textposition="outside", hovertemplate="Instrumento: %{y}<br>Activos: %{x}<extra></extra>")
+        fig_type = px.bar(type_df, x="Count", y="Instrument type", orientation="h", title="Base instalada por tipo de instrumento", text="Count", custom_data=["Instrument type", "Count"])
+        fig_type.update_traces(marker_color=ACCENT, textposition="outside", hovertemplate="Instrumento: %{customdata[0]}<br>Activos: %{customdata[1]}<extra></extra>")
         fig_type.update_layout(yaxis=dict(categoryorder="total ascending"))
-        st.plotly_chart(glow_layout(fig_type, 470), use_container_width=True)
+        render_drilldown_plotly_chart(
+            glow_layout(fig_type, 470),
+            key="drill_base_type_chart_v22",
+            source_label="Base instalada por tipo de instrumento",
+            payload_builder=lambda point: payload_from_instrument_point(point, "Base instalada por tipo de instrumento"),
+        )
 
     with c2:
         install_df = filtered.dropna(subset=["Installation date"]).copy()
@@ -3767,38 +4049,55 @@ with base_tab:
         else:
             install_df["Installation year"] = install_df["Installation date"].dt.year.astype(int)
             yearly = install_df.groupby("Installation year", dropna=False).size().reset_index(name="Count").sort_values("Installation year")
-            fig_year = px.bar(yearly, x="Installation year", y="Count", title="Instalaciones por año", text="Count")
-            fig_year.update_traces(marker_color=ACCENT_2, textposition="outside", hovertemplate="Año: %{x}<br>Instalaciones: %{y}<extra></extra>")
-            st.plotly_chart(glow_layout(fig_year, 470), use_container_width=True)
+            fig_year = px.bar(yearly, x="Installation year", y="Count", title="Instalaciones por año", text="Count", custom_data=["Installation year", "Count"])
+            fig_year.update_traces(marker_color=ACCENT_2, textposition="outside", hovertemplate="Año: %{customdata[0]}<br>Instalaciones: %{customdata[1]}<extra></extra>")
+            render_drilldown_plotly_chart(
+                glow_layout(fig_year, 470),
+                key="drill_installation_year_chart_v22",
+                source_label="Instalaciones por año",
+                payload_builder=payload_from_installation_year_point,
+            )
 
     c3, c4 = st.columns(2)
     with c3:
-        status_series = filtered["Operational status"].fillna("No informado").astype(str)
-        status_class = pd.Series("Installed / Active", index=filtered.index)
-        status_class = status_class.mask(status_series.str.contains("ready", case=False, na=False), "Ready to install")
-        status_class = status_class.mask(status_series.str.contains("transit|customs|shipping", case=False, na=False), "Transit / Customs")
-        status_class = status_class.mask(status_series.str.contains("warehouse|stock", case=False, na=False), "Warehouse")
         pipeline_df = filtered.copy()
-        pipeline_df["Installation stage"] = status_class
+        pipeline_df["Installation stage"] = compute_installation_stage(filtered)
         pipeline_summary = pipeline_df.groupby(["Instrument type", "Installation stage"], dropna=False).size().reset_index(name="Count")
-        fig_ready = px.bar(pipeline_summary, x="Instrument type", y="Count", color="Installation stage", title="Sistemas instalados vs listos / pipeline")
-        fig_ready.update_traces(hovertemplate="Instrumento: %{x}<br>Etapa: %{fullData.name}<br>Cantidad: %{y}<extra></extra>")
+        fig_ready = px.bar(
+            pipeline_summary,
+            x="Instrument type",
+            y="Count",
+            color="Installation stage",
+            title="Sistemas instalados vs listos / pipeline",
+            custom_data=["Instrument type", "Installation stage", "Count"],
+        )
+        fig_ready.update_traces(hovertemplate="Instrumento: %{customdata[0]}<br>Etapa: %{customdata[1]}<br>Cantidad: %{customdata[2]}<extra></extra>")
         fig_ready.update_xaxes(tickangle=-28)
-        st.plotly_chart(glow_layout(fig_ready, 470), use_container_width=True)
+        render_drilldown_plotly_chart(
+            glow_layout(fig_ready, 470),
+            key="drill_pipeline_chart_v22",
+            source_label="Sistemas instalados vs listos / pipeline",
+            payload_builder=payload_from_pipeline_point,
+        )
 
     with c4:
         city_df = (
-            filtered.assign(CityLabel=filtered["City"].fillna("No informado") + " | " + filtered["Country"].fillna("No country"))
+            filtered.assign(CityLabel=build_city_label_series(filtered))
             .groupby("CityLabel", dropna=False)
             .size()
             .reset_index(name="Count")
             .sort_values("Count", ascending=False)
             .head(15)
         )
-        fig_city = px.bar(city_df, x="Count", y="CityLabel", orientation="h", title="Análisis por ciudad", text="Count")
-        fig_city.update_traces(marker_color=ACCENT_3, textposition="outside", hovertemplate="Ciudad / País: %{y}<br>Activos: %{x}<extra></extra>")
+        fig_city = px.bar(city_df, x="Count", y="CityLabel", orientation="h", title="Análisis por ciudad", text="Count", custom_data=["CityLabel", "Count"])
+        fig_city.update_traces(marker_color=ACCENT_3, textposition="outside", hovertemplate="Ciudad / País: %{customdata[0]}<br>Activos: %{customdata[1]}<extra></extra>")
         fig_city.update_layout(yaxis=dict(categoryorder="total ascending"))
-        st.plotly_chart(glow_layout(fig_city, 470), use_container_width=True)
+        render_drilldown_plotly_chart(
+            glow_layout(fig_city, 470),
+            key="drill_city_chart_v22",
+            source_label="Análisis por ciudad",
+            payload_builder=payload_from_city_point,
+        )
 
     st.markdown("### Vista corporativa por distribuidor")
     model_options = (
@@ -3814,10 +4113,11 @@ with base_tab:
             '<div class="small-note">Primero se muestra un resumen ejecutivo con los distribuidores más relevantes. Debajo aparecen gráficos circulares Top 5 por modelo. El detalle completo de todos los distribuidores se puede abrir más abajo sin saturar la vista principal.</div>',
             unsafe_allow_html=True,
         )
-        st.plotly_chart(
+        render_drilldown_plotly_chart(
             build_distributor_global_overview(filtered, top_n=5),
-            use_container_width=True,
-            key="global_distributor_overview_bar",
+            key="drill_global_distributor_overview_bar_v22",
+            source_label="Vista global por distribuidor",
+            payload_builder=payload_from_global_distributor_point,
         )
 
         cards_per_row = 3
@@ -3841,10 +4141,11 @@ with base_tab:
             st.dataframe(build_distributor_detail_table(filtered), use_container_width=True, hide_index=True)
             for model_idx, model_name in enumerate(model_options):
                 model_key = f"{model_idx}_{hashlib.md5(str(model_name).encode('utf-8', errors='ignore')).hexdigest()[:8]}"
-                st.plotly_chart(
+                render_drilldown_plotly_chart(
                     build_distributor_detail_bar(filtered, model_name),
-                    use_container_width=True,
-                    key=f"detail_bar_model_{model_key}",
+                    key=f"drill_detail_bar_model_{model_key}_v22",
+                    source_label=f"Detalle completo | {model_name}",
+                    payload_builder=lambda point, selected_model=model_name: payload_from_detail_distributor_point(selected_model, point),
                 )
 
     st.markdown("### Tabla general filtrada")
