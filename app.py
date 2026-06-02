@@ -2709,9 +2709,9 @@ def payload_from_manufacturing_year(point: dict) -> dict | None:
         f"Año de fabricación: {year_text}",
     )
 
-CODE_CREATED_AT = "2026-06-02 15:00:20 COT"
-CODE_VERSION_LABEL = "v24"
-PARSER_VERSION = "records-list-stable-v24-20260602-1500COT-model-status-matrix"
+CODE_CREATED_AT = "2026-06-02 16:55:00 COT"
+CODE_VERSION_LABEL = "v25"
+PARSER_VERSION = "records-list-stable-v25-20260602-1655COT-status-alias-matrix-fix"
 
 
 def get_uploaded_file_signature(uploaded_file) -> str:
@@ -2795,6 +2795,14 @@ def _align_records_row(row: list[str], expected_len: int) -> list[str]:
 
 def _finalize_records_df(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
+
+    # Critical standardization for Records List exports:
+    # The real CSV uses headers like "Instrument Status", "Volume" and "Status",
+    # while the dashboard model expects "Asset condition", "PM plan" and
+    # "Operational status". Without this step, all operational status values
+    # become blank/No informado and the model-status matrix is wrong.
+    df = canonicalize_records_columns(df)
+
     if "_blank" in df.columns:
         df = df.drop(columns=["_blank"])
 
@@ -3945,6 +3953,73 @@ def normalize_column_label(value) -> str:
     return re.sub(r"[^a-z0-9]+", " ", str(value).lower()).strip()
 
 
+RECORDS_COLUMN_ALIASES = {
+    # Real Records List export headers and common variants mapped to dashboard canonical fields.
+    "in blook bank": "In Blood Bank",
+    "in bloock bank": "In Blood Bank",
+    "in blod bank": "In Blood Bank",
+    "blood bank": "In Blood Bank",
+    "bloodbank": "In Blood Bank",
+    "blook bank": "In Blood Bank",
+    "banco de sangre": "In Blood Bank",
+    "banco sangre": "In Blood Bank",
+
+    # This is the root cause of the incorrect chart: the CSV header is "Status",
+    # not "Operational status". It must be mapped before the dashboard groups states.
+    "status": "Operational status",
+    "operational status": "Operational status",
+    "operation status": "Operational status",
+    "estado operativo": "Operational status",
+    "estado de operacion": "Operational status",
+    "estado de operación": "Operational status",
+
+    # The export uses "Instrument Status" for the asset/new-used condition.
+    "instrument status": "Asset condition",
+    "instrument asset status": "Asset condition",
+    "asset status": "Asset condition",
+    "asset condition": "Asset condition",
+    "condicion del activo": "Asset condition",
+    "condición del activo": "Asset condition",
+
+    # The export uses "Volume" in the position historically used by PM plan.
+    "volume": "PM plan",
+    "pm plan": "PM plan",
+    "plan pm": "PM plan",
+    "plan de pm": "PM plan",
+}
+
+
+def canonicalize_records_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize real Records List headers into the canonical names used by the dashboard.
+
+    This function also coalesces duplicate/alias columns by taking the first non-empty
+    value per row, so existing canonical columns are preserved and alias columns fill gaps.
+    """
+    if df is None or df.empty:
+        return df.copy()
+
+    work = df.copy()
+    work.columns = [str(c).strip() for c in work.columns]
+
+    grouped_columns: dict[str, list[str]] = {}
+    for col in list(work.columns):
+        normalized = normalize_column_label(col)
+        target = RECORDS_COLUMN_ALIASES.get(normalized, col)
+        grouped_columns.setdefault(target, []).append(col)
+
+    canonical = pd.DataFrame(index=work.index)
+    for target, source_cols in grouped_columns.items():
+        if len(source_cols) == 1 and source_cols[0] == target:
+            data = work[source_cols[0]]
+            if isinstance(data, pd.DataFrame):
+                data = data.bfill(axis=1).iloc[:, 0]
+            canonical[target] = data
+        else:
+            canonical[target] = _first_valid_series_from_columns(work, source_cols)
+
+    return canonical
+
+
 def guess_column_index(columns, keywords: list[str]) -> int:
     normalized = [normalize_column_label(col) for col in columns]
     for keyword in keywords:
@@ -4090,7 +4165,7 @@ st.markdown(
             </div>
             <div class="workspace-chip">Control visual · Devoryn dark mode</div>
         </div>
-        <h1>Records List Intelligence Dashboard <span class="code-stamp">Código creado: 2026-06-02 15:00:20 COT · v24</span></h1>
+        <h1>Records List Intelligence Dashboard <span class="code-stamp">Código creado: 2026-06-02 16:55:00 COT · v25</span></h1>
         <p>Panel ejecutivo para explorar la base instalada, configuration insights, sistema operativo, procesamiento y gap de repuestos con una apariencia oscura, limpia y premium.</p>
         <div class="badge-row">
             <span class="badge">Base instalada</span>
@@ -4383,6 +4458,14 @@ with base_tab:
     st.caption("Vista matricial de la base instalada: cada fila representa un modelo y cada segmento muestra el estado operativo. Selecciona un segmento para filtrar ese modelo en ese estado.")
     model_status_df = filtered.copy()
     model_status_df["Instrument type"] = model_status_df["Instrument type"].fillna("No informado").astype(str).str.strip().replace("", "No informado")
+
+    # Defensive rebuild of grouped status. This prevents the matrix from collapsing into
+    # a single "No informado" segment if the source file used the export header "Status".
+    if "Operational status" in model_status_df.columns:
+        model_status_df["Operational status grouped"] = model_status_df["Operational status"].map(normalize_operational_status)
+    elif "Status" in model_status_df.columns:
+        model_status_df["Operational status grouped"] = model_status_df["Status"].map(normalize_operational_status)
+
     model_status_df["Operational status grouped"] = model_status_df["Operational status grouped"].fillna("No informado").astype(str).str.strip().replace("", "No informado")
     model_status_summary = (
         model_status_df
@@ -4393,6 +4476,8 @@ with base_tab:
     if model_status_summary.empty:
         st.info("No hay datos de modelo y estado operativo para la vista actual.")
     else:
+        if model_status_summary["Operational status grouped"].nunique(dropna=True) == 1 and str(model_status_summary["Operational status grouped"].iloc[0]) == "No informado":
+            st.warning("La matriz solo encontró 'No informado'. Revisa que estés ejecutando la versión v25 y que el archivo fuente tenga la columna Status/Operational status correctamente cargada.")
         model_order = (
             model_status_summary.groupby("Instrument type", as_index=False)["Count"]
             .sum()
