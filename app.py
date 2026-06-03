@@ -2182,16 +2182,26 @@ def normalize_instrument_type(value) -> str:
 # =============================================================================
 # FILTRO INTERACTIVO DESDE GRÁFICAS
 # =============================================================================
-CHART_DRILL_SESSION_KEY = "active_chart_drill_filter_stack_v29"
-CHART_DRILL_RESET_COUNTER_KEY = "chart_drill_reset_counter_v29"
-SIDEBAR_CLEAR_PENDING_KEY = "sidebar_filter_clear_pending_v29"
-SIDEBAR_CLEAR_COUNTER_KEY = "sidebar_filter_clear_counter_v29"
+CHART_DRILL_SESSION_KEY = "active_chart_drill_filter_stack_v30"
+CHART_DRILL_RESET_COUNTER_KEY = "chart_drill_reset_counter_v30"
+SIDEBAR_CLEAR_PENDING_KEY = "sidebar_filter_clear_pending_v30"
+SIDEBAR_CLEAR_COUNTER_KEY = "sidebar_filter_clear_counter_v30"
 
-SIDEBAR_REGION_KEY = "sidebar_regions_v29"
-SIDEBAR_COUNTRY_KEY = "sidebar_countries_v29"
-SIDEBAR_DISTRIBUTOR_KEY = "sidebar_distributors_v29"
-SIDEBAR_INSTRUMENT_KEY = "sidebar_instruments_v29"
-SIDEBAR_STATE_KEY = "sidebar_states_v29"
+SIDEBAR_REGION_KEY = "sidebar_regions_v30"
+SIDEBAR_COUNTRY_KEY = "sidebar_countries_v30"
+SIDEBAR_DISTRIBUTOR_KEY = "sidebar_distributors_v30"
+SIDEBAR_INSTRUMENT_KEY = "sidebar_instruments_v30"
+SIDEBAR_STATE_KEY = "sidebar_states_v30"
+ACTIVE_DASHBOARD_TAB_KEY = "active_dashboard_tab_v30"
+DASHBOARD_TABS = [
+    "Base instalada",
+    "Machine configuration",
+    "Sistema operativo",
+    "Procesamiento / PM",
+    "Stock / Carstock gap",
+    "Antigüedad / fabricación",
+    "Detalle por equipo",
+]
 SIDEBAR_FILTER_KEYS = [
     SIDEBAR_REGION_KEY,
     SIDEBAR_COUNTRY_KEY,
@@ -2452,18 +2462,18 @@ def render_chart_drill_filter_banner(base_df: pd.DataFrame, current_df: pd.DataF
             with cols[0]:
                 st.markdown(f"{idx + 1}. **{label}**  \nOrigen: `{source}`")
             with cols[1]:
-                if st.button("Quitar", key=f"remove_chart_filter_{idx}_v29"):
+                if st.button("Quitar", key=f"remove_chart_filter_{idx}_v30"):
                     remove_chart_drill_filter_at(idx)
 
     action_cols = st.columns(3)
     with action_cols[0]:
-        if active and st.button("← Deshacer último filtro gráfico", key="undo_last_chart_filter_button_v29"):
+        if active and st.button("← Deshacer último filtro gráfico", key="undo_last_chart_filter_button_v30"):
             pop_last_chart_drill_filter()
     with action_cols[1]:
-        if active and st.button("Limpiar filtros gráficos", key="clear_chart_drill_filter_button_v29"):
+        if active and st.button("Limpiar filtros gráficos", key="clear_chart_drill_filter_button_v30"):
             clear_chart_drill_filter()
     with action_cols[2]:
-        if st.button("Limpiar todos los filtros", key="clear_all_filters_button_v29"):
+        if st.button("Limpiar todos los filtros", key="clear_all_filters_button_v30"):
             clear_all_dashboard_filters()
 
 
@@ -2556,15 +2566,28 @@ def render_pie_filter_fallback_buttons(
     if not clean_options:
         return
 
-    st.caption("Filtro alternativo de esta gráfica circular: usa estos botones si el clic directo sobre el segmento no aplica el filtro en tu navegador.")
+    st.caption("Filtro alternativo de esta gráfica circular: selecciona un valor y aplica el filtro. Este control no depende del clic directo sobre el donut.")
     visible_options = clean_options[:max_options]
+    selector_digest = hashlib.md5(str(key_prefix).encode("utf-8", errors="ignore")).hexdigest()[:10]
+    selected_option = st.selectbox(
+        "Valor para filtrar",
+        options=["— Selecciona un valor —"] + visible_options,
+        key=f"pie_filter_select_{key_prefix}_{selector_digest}_v30",
+        label_visibility="collapsed",
+    )
+    if selected_option != "— Selecciona un valor —":
+        if st.button(f"Aplicar filtro: {selected_option}", key=f"pie_filter_apply_{key_prefix}_{selector_digest}_v30", use_container_width=True):
+            payload = payload_from_value(selected_option)
+            if payload:
+                set_chart_drill_filter(payload)
+
     n_cols = min(3, max(1, len(visible_options)))
     cols = st.columns(n_cols)
     for idx, label in enumerate(visible_options):
         short_label = label if len(label) <= 26 else label[:23] + "..."
         digest = hashlib.md5(f"{key_prefix}|{label}".encode("utf-8", errors="ignore")).hexdigest()[:10]
         with cols[idx % n_cols]:
-            if st.button(f"Filtrar: {short_label}", key=f"pie_filter_{key_prefix}_{digest}_v29", use_container_width=True):
+            if st.button(f"Filtrar: {short_label}", key=f"pie_filter_{key_prefix}_{digest}_v30", use_container_width=True):
                 payload = payload_from_value(label)
                 if payload:
                     set_chart_drill_filter(payload)
@@ -2775,9 +2798,9 @@ def payload_from_manufacturing_year(point: dict) -> dict | None:
         f"Año de fabricación: {year_text}",
     )
 
-CODE_CREATED_AT = "2026-06-02 19:52:00 COT"
-CODE_VERSION_LABEL = "v29"
-PARSER_VERSION = "records-list-stable-v29-20260602-1952COT-pie-filter-fallback"
+CODE_CREATED_AT = "2026-06-02 20:20:00 COT"
+CODE_VERSION_LABEL = "v30"
+PARSER_VERSION = "records-list-stable-v30-20260602-2020COT-tab-persistence-machine-config-filters"
 
 
 def get_uploaded_file_signature(uploaded_file) -> str:
@@ -4367,7 +4390,7 @@ st.sidebar.markdown('<div class="small-note">Usa los filtros como un panel de co
 # Aplica limpiezas pendientes antes de crear cualquier multiselect del sidebar.
 consume_pending_sidebar_filter_clear()
 
-if st.sidebar.button("Limpiar filtros laterales", key="clear_sidebar_filters_button_v29"):
+if st.sidebar.button("Limpiar filtros laterales", key="clear_sidebar_filters_button_v30"):
     clear_sidebar_filter_widgets()
 
 region_options = sorted(raw_df["Commercial Region"].dropna().unique().tolist())
@@ -4448,11 +4471,17 @@ if filtered.empty:
 render_chart_drill_filter_banner(sidebar_filtered, filtered, filter_summary_for_panel)
 
 st.sidebar.markdown("---")
-base_tab, machine_tab, os_tab, process_tab, stock_tab, manufacturing_tab, detail_tab = st.tabs(
-    ["Base instalada", "Machine configuration", "Sistema operativo", "Procesamiento / PM", "Stock / Carstock gap", "Antigüedad / fabricación", "Detalle por equipo"]
+st.markdown("### Navegación del dashboard")
+active_dashboard_tab = st.radio(
+    "Selecciona la pestaña activa",
+    options=DASHBOARD_TABS,
+    horizontal=True,
+    key=ACTIVE_DASHBOARD_TAB_KEY,
+    label_visibility="collapsed",
 )
+st.caption("La pestaña activa se conserva al aplicar filtros desde gráficas o botones; ya no debe regresar automáticamente a Base instalada.")
 
-with base_tab:
+if active_dashboard_tab == "Base instalada":
     st.subheader("Base instalada")
     st.caption("Mapa y analítica de base instalada con enfoque en cobertura geográfica, antigüedad de instalación y estado de despliegue.")
     geo_df = filtered.dropna(subset=["Latitude", "Longitude"]).copy()
@@ -4532,7 +4561,7 @@ with base_tab:
         )
         render_drilldown_plotly_chart(
             fig_geo,
-            key="geo_map_serial_chart_v29",
+            key="geo_map_serial_chart_v30",
             source_label="Mapa geográfico de base instalada",
             payload_builder=payload_from_geo_point,
             help_text="Filtro disponible: selecciona/clic en un punto del mapa para filtrar ese serial."
@@ -4548,7 +4577,7 @@ with base_tab:
         fig_type.update_layout(yaxis=dict(categoryorder="total ascending"))
         render_drilldown_plotly_chart(
             glow_layout(fig_type, 470),
-            key="drill_base_type_chart_v29",
+            key="drill_base_type_chart_v30",
             source_label="Base instalada por tipo de instrumento",
             payload_builder=lambda point: payload_from_instrument_point(point, "Base instalada por tipo de instrumento"),
         )
@@ -4564,7 +4593,7 @@ with base_tab:
             fig_year.update_traces(marker_color=ACCENT_2, textposition="outside", hovertemplate="Año: %{customdata[0]}<br>Instalaciones: %{customdata[1]}<extra></extra>")
             render_drilldown_plotly_chart(
                 glow_layout(fig_year, 470),
-                key="drill_installation_year_chart_v29",
+                key="drill_installation_year_chart_v30",
                 source_label="Instalaciones por año",
                 payload_builder=payload_from_installation_year_point,
             )
@@ -4586,7 +4615,7 @@ with base_tab:
         fig_ready.update_xaxes(tickangle=-28)
         render_drilldown_plotly_chart(
             glow_layout(fig_ready, 470),
-            key="drill_pipeline_chart_v29",
+            key="drill_pipeline_chart_v30",
             source_label="Sistemas instalados vs listos / pipeline",
             payload_builder=payload_from_pipeline_point,
         )
@@ -4605,7 +4634,7 @@ with base_tab:
         fig_city.update_layout(yaxis=dict(categoryorder="total ascending"))
         render_drilldown_plotly_chart(
             glow_layout(fig_city, 470),
-            key="drill_city_chart_v29",
+            key="drill_city_chart_v30",
             source_label="Análisis por ciudad",
             payload_builder=payload_from_city_point,
         )
@@ -4663,7 +4692,7 @@ with base_tab:
         )
         render_drilldown_plotly_chart(
             glow_layout(fig_model_status, max(430, 82 + 46 * len(model_order))),
-            key="drill_model_operational_status_chart_v29",
+            key="drill_model_operational_status_chart_v30",
             source_label="Base instalada por modelo y estado operativo",
             payload_builder=payload_from_model_status_point,
             help_text="Filtro disponible: selecciona/clic en un segmento para ver únicamente ese modelo con ese estado operativo. Usa el panel superior para quitar o deshacer filtros.",
@@ -4698,7 +4727,7 @@ with base_tab:
         )
         render_drilldown_plotly_chart(
             build_distributor_global_overview(filtered, top_n=5),
-            key="drill_global_distributor_overview_bar_v29",
+            key="drill_global_distributor_overview_bar_v30",
             source_label="Vista global por distribuidor",
             payload_builder=payload_from_global_distributor_point,
         )
@@ -4712,7 +4741,7 @@ with base_tab:
                 with col:
                     render_drilldown_plotly_chart(
                         build_distributor_model_donut(filtered, model_name, top_n=5),
-                        key=f"donut_model_distributor_{model_key}_v29",
+                        key=f"donut_model_distributor_{model_key}_v30",
                         source_label=f"Distribución por distribuidor | {model_name}",
                         payload_builder=lambda point, selected_model=model_name: payload_from_distributor_model_donut(selected_model, point),
                     )
@@ -4727,7 +4756,7 @@ with base_tab:
                 model_key = f"{model_idx}_{hashlib.md5(str(model_name).encode('utf-8', errors='ignore')).hexdigest()[:8]}"
                 render_drilldown_plotly_chart(
                     build_distributor_detail_bar(filtered, model_name),
-                    key=f"drill_detail_bar_model_{model_key}_v29",
+                    key=f"drill_detail_bar_model_{model_key}_v30",
                     source_label=f"Detalle completo | {model_name}",
                     payload_builder=lambda point, selected_model=model_name: payload_from_detail_distributor_point(selected_model, point),
                 )
@@ -4750,7 +4779,7 @@ with base_tab:
     ]
     st.dataframe(filtered[visible_columns].copy(), use_container_width=True, hide_index=True)
 
-with machine_tab:
+if active_dashboard_tab == "Machine configuration":
     st.subheader("Machine configuration")
     st.caption("Vista ejecutiva por ítem de configuración, con Banco de sangre como indicador principal y gráficas separadas para cada campo aplicable.")
     applicable_fields = active_config_fields(filtered, CONFIG_KEYS)
@@ -4779,7 +4808,7 @@ with machine_tab:
         st.markdown('<div class="small-note">Conteo validado desde la columna <b>In Blood Bank</b> y aliases del export como <b>In Blook Bank</b>.</div>', unsafe_allow_html=True)
         render_drilldown_plotly_chart(
             build_blood_bank_donut(filtered),
-            key="blood_bank_donut_main_v29",
+            key="blood_bank_donut_main_v30",
             source_label="Banco de sangre",
             payload_builder=payload_from_blood_bank_point,
         )
@@ -4812,7 +4841,7 @@ with machine_tab:
         fig_cfg_fill.update_layout(yaxis=dict(categoryorder="total ascending"))
         render_drilldown_plotly_chart(
             glow_layout(fig_cfg_fill, 520),
-            key="config_coverage_chart_v29",
+            key="config_coverage_chart_v30",
             source_label="Cobertura por campo aplicable",
             payload_builder=payload_from_config_coverage_point,
         )
@@ -4836,7 +4865,7 @@ with machine_tab:
                     with col_ui:
                         render_drilldown_plotly_chart(
                             build_config_donut(field_name, item_series, total_assets),
-                            key=f"config_donut_{hashlib.md5(str(field_name).encode('utf-8', errors='ignore')).hexdigest()[:10]}_v29",
+                            key=f"config_donut_{hashlib.md5(str(field_name).encode('utf-8', errors='ignore')).hexdigest()[:10]}_v30",
                             source_label=f"Configuración | {field_name}",
                             payload_builder=lambda point, selected_field=field_name: payload_from_config_value_point(selected_field, point),
                         )
@@ -4890,7 +4919,7 @@ with machine_tab:
             machine_table = filtered[detail_columns].copy().rename(columns={f"CFG::{field}": field for field in donut_fields})
             st.dataframe(machine_table, use_container_width=True, hide_index=True)
 
-with os_tab:
+if active_dashboard_tab == "Sistema operativo":
     st.subheader("Sistema operativo")
     st.caption("Vista diseñada para identificar instrumentos con sistemas operativos legacy y priorizar migraciones urgentes a Windows 10.")
     os_df = filtered.copy()
@@ -4926,7 +4955,7 @@ with os_tab:
         fig_os.update_xaxes(tickangle=-28)
         render_drilldown_plotly_chart(
             glow_layout(fig_os, 500, title_size=16),
-            key="os_distribution_chart_v29",
+            key="os_distribution_chart_v30",
             source_label="Distribución detallada de sistemas operativos",
             payload_builder=lambda point: payload_from_axis_value(point, "Operating System", "Distribución detallada de sistemas operativos", "Sistema operativo", axis="x"),
         )
@@ -4987,7 +5016,7 @@ with os_tab:
         fig_os_type.update_xaxes(tickangle=-28)
         render_drilldown_plotly_chart(
             glow_layout(fig_os_type, 620, title_size=16),
-            key="os_serial_scatter_v29",
+            key="os_serial_scatter_v30",
             source_label="Qué seriales tienen cada sistema operativo",
             payload_builder=lambda point: payload_from_serial_axis(point, "Qué seriales tienen cada sistema operativo", axis="y"),
         )
@@ -5043,7 +5072,7 @@ with os_tab:
             fig_urgent.update_xaxes(tickangle=-18)
             render_drilldown_plotly_chart(
                 glow_layout(fig_urgent, 620, title_size=16),
-                key="os_urgent_serials_chart_v29",
+                key="os_urgent_serials_chart_v30",
                 source_label="Seriales que requieren actualización urgente a Windows 10",
                 payload_builder=lambda point: payload_from_serial_axis(point, "Seriales que requieren actualización urgente a Windows 10", axis="y"),
             )
@@ -5058,7 +5087,7 @@ with os_tab:
         fig_bucket.update_xaxes(tickangle=-18)
         render_drilldown_plotly_chart(
             glow_layout(fig_bucket, 520, title_size=16),
-            key="os_upgrade_bucket_chart_v29",
+            key="os_upgrade_bucket_chart_v30",
             source_label="Priorización de acción para upgrade",
             payload_builder=lambda point: payload_from_axis_value(point, "OS Upgrade Bucket", "Priorización de acción para upgrade", "Prioridad OS", axis="x"),
         )
@@ -5086,7 +5115,7 @@ with os_tab:
     ]].copy()
     st.dataframe(os_table, use_container_width=True, hide_index=True)
 
-with process_tab:
+if active_dashboard_tab == "Procesamiento / PM":
     st.subheader("Procesamiento, product line y PM planner")
     st.caption("Nueva pestaña para revisar volumen de procesamiento por serie, líneas de producto activas y planeación de mantenimiento preventivo.")
 
@@ -5142,7 +5171,7 @@ with process_tab:
             fig_tests.update_xaxes(tickangle=-60)
             render_drilldown_plotly_chart(
                 glow_layout(fig_tests, 520),
-                key="tests_per_day_serial_chart_v29",
+                key="tests_per_day_serial_chart_v30",
                 source_label="Number of tests/day por cada serie",
                 payload_builder=lambda point: payload_from_serial_axis(point, "Number of tests/day por cada serie", axis="x"),
             )
@@ -5179,7 +5208,7 @@ with process_tab:
             fig_product.update_layout(yaxis=dict(categoryorder="total ascending"))
             render_drilldown_plotly_chart(
                 glow_layout(fig_product, 520),
-                key="product_line_chart_v29",
+                key="product_line_chart_v30",
                 source_label="Product line performed on the analyzer",
                 payload_builder=payload_from_product_line_point,
             )
@@ -5204,7 +5233,7 @@ with process_tab:
         fig_pm_plan.update_xaxes(tickangle=-28)
         render_drilldown_plotly_chart(
             glow_layout(fig_pm_plan, 500),
-            key="pm_plan_distribution_chart_v29",
+            key="pm_plan_distribution_chart_v30",
             source_label="PM planner | distribución de PM plan",
             payload_builder=lambda point: payload_from_axis_value(point, "PM plan", "PM planner | distribución de PM plan", "PM plan", axis="x"),
         )
@@ -5247,7 +5276,7 @@ with process_tab:
             )
             render_drilldown_plotly_chart(
                 glow_layout(fig_pm_timeline, 500),
-                key="pm_timeline_serial_chart_v29",
+                key="pm_timeline_serial_chart_v30",
                 source_label="PM planner | calendario por serie",
                 payload_builder=lambda point: payload_from_serial_axis(point, "PM planner | calendario por serie", axis="y"),
             )
@@ -5270,7 +5299,7 @@ with process_tab:
     ]
     st.dataframe(proc_df[process_table_cols].copy(), use_container_width=True, hide_index=True)
 
-with stock_tab:
+if active_dashboard_tab == "Stock / Carstock gap":
     st.subheader("Gap analysis de stock vs carstock requerido")
     st.session_state.setdefault("pdf_stock_context", {"available": False})
     st.caption(
@@ -5709,7 +5738,7 @@ with stock_tab:
                                     )
 
 
-with manufacturing_tab:
+if active_dashboard_tab == "Antigüedad / fabricación":
     st.subheader("Antigüedad de la base instalada por fecha de fabricación")
     st.caption(
         "Esta pestaña cruza el serial de la vista filtrada actual con los archivos de fabricación que cargues manualmente. "
@@ -5921,7 +5950,7 @@ with manufacturing_tab:
                     )
                     render_drilldown_plotly_chart(
                         glow_layout(fig_age_distribution, 475, title_size=16),
-                        key="manufacturing_age_bucket_chart_v29",
+                        key="manufacturing_age_bucket_chart_v30",
                         source_label="Estado de la base instalada por rango de edad",
                         payload_builder=payload_from_manufacturing_age_bucket,
                         help_text="Filtro disponible si la vista ya contiene datos de fabricación cargados; selecciona un rango para aplicar filtro por rango de edad."
@@ -5953,7 +5982,7 @@ with manufacturing_tab:
                     )
                     render_drilldown_plotly_chart(
                         glow_layout(fig_oldest, 475, title_size=16),
-                        key="manufacturing_oldest_serial_chart_v29",
+                        key="manufacturing_oldest_serial_chart_v30",
                         source_label="Top 15 equipos más antiguos",
                         payload_builder=lambda point: payload_from_serial_axis(point, "Top 15 equipos más antiguos", axis="y"),
                     )
@@ -5993,7 +6022,7 @@ with manufacturing_tab:
                     fig_timeline.update_layout(legend_title="Rango de edad")
                     render_drilldown_plotly_chart(
                         glow_layout(fig_timeline, 600, title_size=16),
-                        key="manufacturing_timeline_serial_chart_v29",
+                        key="manufacturing_timeline_serial_chart_v30",
                         source_label="Línea de tiempo de fabricación por serial",
                         payload_builder=lambda point: payload_from_serial_axis(point, "Línea de tiempo de fabricación por serial", axis="y"),
                     )
@@ -6013,7 +6042,7 @@ with manufacturing_tab:
                     )
                     render_drilldown_plotly_chart(
                         glow_layout(fig_annual, 600, title_size=16),
-                        key="manufacturing_year_chart_v29",
+                        key="manufacturing_year_chart_v30",
                         source_label="Equipos por año de fabricación",
                         payload_builder=payload_from_manufacturing_year,
                         help_text="Filtro disponible si la vista ya contiene datos de fabricación cargados; selecciona un año para aplicar filtro por año de fabricación."
@@ -6061,7 +6090,7 @@ with manufacturing_tab:
                     ]
                     st.dataframe(unmatched_df[missing_columns], use_container_width=True, hide_index=True)
 
-with detail_tab:
+if active_dashboard_tab == "Detalle por equipo":
     st.subheader("Detalle por equipo")
     st.caption(
         "Búsqueda ampliada por serial, hospital/cliente, ciudad, país, distribuidor o modelo. "
