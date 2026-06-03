@@ -2709,9 +2709,9 @@ def payload_from_manufacturing_year(point: dict) -> dict | None:
         f"Año de fabricación: {year_text}",
     )
 
-CODE_CREATED_AT = "2026-06-02 17:28:00 COT"
-CODE_VERSION_LABEL = "v26"
-PARSER_VERSION = "records-list-stable-v26-20260602-1728COT-status-matrix-cache-bypass"
+CODE_CREATED_AT = "2026-06-02 18:45:00 COT"
+CODE_VERSION_LABEL = "v27"
+PARSER_VERSION = "records-list-stable-v27-20260602-1845COT-visible-build-status-matrix-fix"
 
 
 def get_uploaded_file_signature(uploaded_file) -> str:
@@ -4234,7 +4234,7 @@ def build_manufacturing_match(
 
 
 st.markdown(
-    """
+    f"""
     <div class="hero">
         <div class="hero-top">
             <div class="hero-brand">
@@ -4243,7 +4243,7 @@ st.markdown(
             </div>
             <div class="workspace-chip">Control visual · Devoryn dark mode</div>
         </div>
-        <h1>Records List Intelligence Dashboard <span class="code-stamp">Código creado: 2026-06-02 16:55:00 COT · v25</span></h1>
+        <h1>Records List Intelligence Dashboard <span class="code-stamp">Código creado: {CODE_CREATED_AT} · {CODE_VERSION_LABEL}</span></h1>
         <p>Panel ejecutivo para explorar la base instalada, configuration insights, sistema operativo, procesamiento y gap de repuestos con una apariencia oscura, limpia y premium.</p>
         <div class="badge-row">
             <span class="badge">Base instalada</span>
@@ -4252,6 +4252,15 @@ st.markdown(
             <span class="badge">PM & processing</span>
             <span class="badge">Stock gap analysis</span>
         </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.markdown(
+    f"""
+    <div style="border:1px solid rgba(113,225,255,0.38); border-radius:14px; padding:0.65rem 0.9rem; margin:0.45rem 0 0.9rem 0; background:rgba(113,225,255,0.08); font-size:0.78rem; color:#eafaff;">
+        ✅ BUILD ACTIVO CONFIRMADO: <b>{CODE_VERSION_LABEL}</b> · {CODE_CREATED_AT} · <code>{PARSER_VERSION}</code>
     </div>
     """,
     unsafe_allow_html=True,
@@ -4555,7 +4564,7 @@ with base_tab:
         st.info("No hay datos de modelo y estado operativo para la vista actual.")
     else:
         if model_status_summary["Operational status grouped"].nunique(dropna=True) == 1 and str(model_status_summary["Operational status grouped"].iloc[0]) == "No informado":
-            st.warning("La matriz solo encontró 'No informado'. Revisa que estés ejecutando la versión v26 y que el archivo fuente tenga la columna Status/Operational status correctamente cargada.")
+            st.warning("La matriz solo encontró 'No informado'. Revisa que estés ejecutando la versión v27 y que el archivo fuente tenga la columna Status/Operational status correctamente cargada.")
         model_order = (
             model_status_summary.groupby("Instrument type", as_index=False)["Count"]
             .sum()
@@ -4585,7 +4594,7 @@ with base_tab:
         )
         render_drilldown_plotly_chart(
             glow_layout(fig_model_status, max(430, 82 + 46 * len(model_order))),
-            key="drill_model_operational_status_chart_v26",
+            key="drill_model_operational_status_chart_v27",
             source_label="Base instalada por modelo y estado operativo",
             payload_builder=payload_from_model_status_point,
             help_text="Filtro disponible: selecciona/clic en un segmento para ver únicamente ese modelo con ese estado operativo. Usa el panel superior para quitar o deshacer filtros.",
