@@ -2180,14 +2180,16 @@ def normalize_instrument_type(value) -> str:
 # =============================================================================
 # FILTRO INTERACTIVO DESDE GRÁFICAS
 # =============================================================================
-CHART_DRILL_SESSION_KEY = "active_chart_drill_filter_stack_v24"
-CHART_DRILL_RESET_COUNTER_KEY = "chart_drill_reset_counter_v24"
+CHART_DRILL_SESSION_KEY = "active_chart_drill_filter_stack_v28"
+CHART_DRILL_RESET_COUNTER_KEY = "chart_drill_reset_counter_v28"
+SIDEBAR_CLEAR_PENDING_KEY = "sidebar_filter_clear_pending_v28"
+SIDEBAR_CLEAR_COUNTER_KEY = "sidebar_filter_clear_counter_v28"
 
-SIDEBAR_REGION_KEY = "sidebar_regions_v24"
-SIDEBAR_COUNTRY_KEY = "sidebar_countries_v24"
-SIDEBAR_DISTRIBUTOR_KEY = "sidebar_distributors_v24"
-SIDEBAR_INSTRUMENT_KEY = "sidebar_instruments_v24"
-SIDEBAR_STATE_KEY = "sidebar_states_v24"
+SIDEBAR_REGION_KEY = "sidebar_regions_v28"
+SIDEBAR_COUNTRY_KEY = "sidebar_countries_v28"
+SIDEBAR_DISTRIBUTOR_KEY = "sidebar_distributors_v28"
+SIDEBAR_INSTRUMENT_KEY = "sidebar_instruments_v28"
+SIDEBAR_STATE_KEY = "sidebar_states_v28"
 SIDEBAR_FILTER_KEYS = [
     SIDEBAR_REGION_KEY,
     SIDEBAR_COUNTRY_KEY,
@@ -2269,15 +2271,34 @@ def remove_chart_drill_filter_at(index: int) -> None:
         st.rerun()
 
 
+def request_sidebar_filter_clear() -> None:
+    """Marca los filtros laterales para limpieza segura en el siguiente rerun.
+
+    Streamlit no permite modificar st.session_state de widgets ya renderizados
+    durante el mismo ciclo. Por eso no se limpian directamente desde botones
+    ubicados después de los multiselect; se deja una bandera y se aplica antes
+    de crear los widgets en el siguiente rerun.
+    """
+    st.session_state[SIDEBAR_CLEAR_PENDING_KEY] = True
+    st.session_state[SIDEBAR_CLEAR_COUNTER_KEY] = int(st.session_state.get(SIDEBAR_CLEAR_COUNTER_KEY, 0)) + 1
+
+
+def consume_pending_sidebar_filter_clear() -> None:
+    """Limpia los multiselect del sidebar antes de que sean instanciados."""
+    if bool(st.session_state.get(SIDEBAR_CLEAR_PENDING_KEY, False)):
+        for key in SIDEBAR_FILTER_KEYS:
+            st.session_state[key] = []
+        st.session_state[SIDEBAR_CLEAR_PENDING_KEY] = False
+
+
 def clear_sidebar_filter_widgets() -> None:
-    for key in SIDEBAR_FILTER_KEYS:
-        st.session_state[key] = []
+    request_sidebar_filter_clear()
     st.rerun()
 
 
 def clear_all_dashboard_filters() -> None:
-    for key in SIDEBAR_FILTER_KEYS:
-        st.session_state[key] = []
+    # No modificar directamente las keys de widgets ya renderizados.
+    request_sidebar_filter_clear()
     st.session_state[CHART_DRILL_SESSION_KEY] = []
     st.session_state[CHART_DRILL_RESET_COUNTER_KEY] = int(st.session_state.get(CHART_DRILL_RESET_COUNTER_KEY, 0)) + 1
     st.rerun()
@@ -2429,18 +2450,18 @@ def render_chart_drill_filter_banner(base_df: pd.DataFrame, current_df: pd.DataF
             with cols[0]:
                 st.markdown(f"{idx + 1}. **{label}**  \nOrigen: `{source}`")
             with cols[1]:
-                if st.button("Quitar", key=f"remove_chart_filter_{idx}_v24"):
+                if st.button("Quitar", key=f"remove_chart_filter_{idx}_v28"):
                     remove_chart_drill_filter_at(idx)
 
     action_cols = st.columns(3)
     with action_cols[0]:
-        if active and st.button("← Deshacer último filtro gráfico", key="undo_last_chart_filter_button_v24"):
+        if active and st.button("← Deshacer último filtro gráfico", key="undo_last_chart_filter_button_v28"):
             pop_last_chart_drill_filter()
     with action_cols[1]:
-        if active and st.button("Limpiar filtros gráficos", key="clear_chart_drill_filter_button_v24"):
+        if active and st.button("Limpiar filtros gráficos", key="clear_chart_drill_filter_button_v28"):
             clear_chart_drill_filter()
     with action_cols[2]:
-        if st.button("Limpiar todos los filtros", key="clear_all_filters_button_v24"):
+        if st.button("Limpiar todos los filtros", key="clear_all_filters_button_v28"):
             clear_all_dashboard_filters()
 
 
@@ -2709,9 +2730,9 @@ def payload_from_manufacturing_year(point: dict) -> dict | None:
         f"Año de fabricación: {year_text}",
     )
 
-CODE_CREATED_AT = "2026-06-02 18:45:00 COT"
-CODE_VERSION_LABEL = "v27"
-PARSER_VERSION = "records-list-stable-v27-20260602-1845COT-visible-build-status-matrix-fix"
+CODE_CREATED_AT = "2026-06-02 19:20:00 COT"
+CODE_VERSION_LABEL = "v28"
+PARSER_VERSION = "records-list-stable-v28-20260602-1920COT-safe-filter-clear"
 
 
 def get_uploaded_file_signature(uploaded_file) -> str:
@@ -4298,7 +4319,10 @@ st.sidebar.caption(f"Build activo: {PARSER_VERSION}")
 st.sidebar.caption(f"Código creado: {CODE_CREATED_AT}")
 st.sidebar.markdown('<div class="small-note">Usa los filtros como un panel de control para refinar región, país, distribuidor, instrumento y estado operativo.</div>', unsafe_allow_html=True)
 
-if st.sidebar.button("Limpiar filtros laterales", key="clear_sidebar_filters_button_v24"):
+# Aplica limpiezas pendientes antes de crear cualquier multiselect del sidebar.
+consume_pending_sidebar_filter_clear()
+
+if st.sidebar.button("Limpiar filtros laterales", key="clear_sidebar_filters_button_v28"):
     clear_sidebar_filter_widgets()
 
 region_options = sorted(raw_df["Commercial Region"].dropna().unique().tolist())
