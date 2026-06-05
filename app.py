@@ -799,8 +799,43 @@ def _preferred_export_columns(df: pd.DataFrame) -> list[str]:
 
 
 def _excel_style_workbook(wb) -> None:
+    """Apply global workbook styling and normalize worksheet views.
+
+    Excel is very sensitive to duplicated <selection> nodes in sheet views.
+    Those duplicates can be created when freeze panes are changed several
+    times in the same sheet while multiple tables/charts are written. Excel
+    then opens the file with a repair warning such as "Vista de
+    /xl/worksheets/sheet1.xml". This routine keeps one valid selection per
+    worksheet and prevents the repair dialog without changing the report data.
+    """
+    from openpyxl.worksheet.views import Selection
+    from openpyxl.utils.cell import coordinate_to_tuple
+
     for ws in wb.worksheets:
         ws.sheet_view.showGridLines = False
+
+        freeze = ws.freeze_panes
+        if freeze:
+            try:
+                row_idx, col_idx = coordinate_to_tuple(str(freeze))
+            except Exception:
+                row_idx, col_idx = 1, 1
+
+            if row_idx > 1 and col_idx > 1:
+                pane = "bottomRight"
+            elif row_idx > 1:
+                pane = "bottomLeft"
+            elif col_idx > 1:
+                pane = "topRight"
+            else:
+                pane = None
+
+            if pane:
+                ws.sheet_view.selection = [Selection(pane=pane, activeCell="A1", sqref="A1")]
+            else:
+                ws.sheet_view.selection = [Selection(activeCell="A1", sqref="A1")]
+        else:
+            ws.sheet_view.selection = [Selection(activeCell="A1", sqref="A1")]
 
 
 def _excel_autofit_and_style(ws, start_row: int, start_col: int, n_rows: int, n_cols: int, title_row: int | None = None) -> None:
@@ -846,7 +881,12 @@ def _excel_autofit_and_style(ws, start_row: int, start_col: int, n_rows: int, n_
         width = min(max(max(values or [12]) + 2, 12), 42)
         ws.column_dimensions[letter].width = width
 
-    ws.freeze_panes = ws.cell(start_row + 1, start_col).coordinate
+    # Freeze panes must only be assigned once per worksheet. Reassigning
+    # freeze panes multiple times can create duplicated worksheet-view
+    # selections that Microsoft Excel repairs on open. Only freeze tables
+    # that start in column A; helper tables placed to the right remain normal.
+    if not ws.freeze_panes and start_col == 1:
+        ws.freeze_panes = ws.cell(start_row + 1, start_col).coordinate
     ws.auto_filter.ref = f"{ws.cell(start_row, start_col).coordinate}:{ws.cell(max_row, start_col + n_cols - 1).coordinate}"
 
 
@@ -3939,9 +3979,9 @@ def payload_from_manufacturing_year(point: dict) -> dict | None:
         f"Año de fabricación: {year_text}",
     )
 
-CODE_CREATED_AT = "2026-06-05 12:54:00 COT"
-CODE_VERSION_LABEL = "v41"
-PARSER_VERSION = "records-list-stable-v41-20260605-1254COT-corporate-report-simple-base-projection"
+CODE_CREATED_AT = "2026-06-05 13:18:00 COT"
+CODE_VERSION_LABEL = "v42"
+PARSER_VERSION = "records-list-stable-v42-20260605-1318COT-excel-sheet-view-repair"
 
 
 def get_uploaded_file_signature(uploaded_file) -> str:
@@ -5676,7 +5716,7 @@ if active_dashboard_tab == "Base instalada":
         file_name=f"informe_corporativo_mensual_LATAM_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
         mime=EXCEL_MIME,
         use_container_width=False,
-        key="download_monthly_corporate_latam_report_v41",
+        key="download_monthly_corporate_latam_report_v42",
         help="Genera un Excel solo LATAM con base instalada actualizada, equipos en rutina, recién comprados y base proyectada = rutina + recién comprados.",
     )
     st.caption("Informe corporativo mensual solo LATAM: base instalada actualizada, equipos en rutina, recién comprados y base proyectada = rutina + recién comprados.")
