@@ -2808,9 +2808,9 @@ def payload_from_manufacturing_year(point: dict) -> dict | None:
         f"Año de fabricación: {year_text}",
     )
 
-CODE_CREATED_AT = "2026-06-05 09:52:00 COT"
-CODE_VERSION_LABEL = "v32"
-PARSER_VERSION = "records-list-stable-v32-20260605-0952COT-operational-status-to-be-scrapped-filter"
+CODE_CREATED_AT = "2026-06-05 10:10:00 COT"
+CODE_VERSION_LABEL = "v33"
+PARSER_VERSION = "records-list-stable-v33-20260605-1010COT-processing-zero-tests-annotation"
 
 
 def get_uploaded_file_signature(uploaded_file) -> str:
@@ -5221,6 +5221,30 @@ if active_dashboard_tab == "Procesamiento / PM":
                     "Product line: %{customdata[4]}<br>"
                     "Estado: %{customdata[5]}<extra></extra>"
                 )
+            )
+            zero_tests_total = int(tests_df.shape[0])
+            zero_tests_count = int(pd.to_numeric(tests_df["Number of tests per day"], errors="coerce").fillna(np.nan).eq(0).sum())
+            zero_tests_pct = _safe_share_pct(zero_tests_count, zero_tests_total)
+            zero_tests_text = (
+                "<span style='font-size:11px;color:rgba(235,245,255,0.86)'>Tests/día = 0</span><br>"
+                f"<b>{zero_tests_count:,}</b> de {zero_tests_total:,}<br>"
+                f"<span style='font-size:12px'>{zero_tests_pct:.1f}% del filtro</span>"
+            )
+            fig_tests.add_annotation(
+                text=zero_tests_text,
+                x=0.985,
+                y=0.875,
+                xref="paper",
+                yref="paper",
+                xanchor="right",
+                yanchor="top",
+                align="right",
+                showarrow=False,
+                bordercolor="rgba(113,225,255,0.46)",
+                borderwidth=1,
+                borderpad=8,
+                bgcolor="rgba(8,17,27,0.82)",
+                font=dict(color="#f8fcff", size=13),
             )
             fig_tests.update_xaxes(tickangle=-60)
             render_drilldown_plotly_chart(
