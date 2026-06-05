@@ -683,24 +683,395 @@ def compute_mapbox_center_zoom(df: pd.DataFrame, lat_col: str = "Latitude", lon_
     return center, zoom
 
 
+EXCEL_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _excel_safe_sheet_name(sheet_name: str) -> str:
+    safe_name = re.sub(r"[\\/*?:\[\]]", "_", str(sheet_name)).strip()[:31]
+    return safe_name or "Sheet1"
+
+
+def _excel_clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    clean_df = df.copy() if isinstance(df, pd.DataFrame) else pd.DataFrame()
+    if clean_df.empty:
+        return clean_df
+    for col in clean_df.columns:
+        if str(col).startswith("FLAG::"):
+            continue
+        if clean_df[col].dtype == object:
+            clean_df[col] = clean_df[col].map(lambda value: "" if pd.isna(value) else str(value))
+    return clean_df
+
+
+def _preferred_export_columns(df: pd.DataFrame) -> list[str]:
+    preferred = [
+        "Commercial Region", "Country", "Distributor name", "Customer name", "City", "Address",
+        "Instrument type", "Serial number", "Installation date", "Age (years)",
+        "Operational status grouped", "Operational status", "Asset condition", "Type of contract",
+        "Contract duration", "In Blood Bank", "Blood Bank Flag", "Product Line",
+        "Number of tests per day", "PM plan", "PM frequency", "PM last date", "PM next date", "PM performed On",
+        "Operating System", "Operating System Raw", "Machine config fields populated", "Data completeness %",
+        "Latitude", "Longitude", "Machine Configurations", "Tag", "Notes",
+    ]
+    manufacturing = [
+        "Manufacturing Date", "Manufacturing year", "Manufacturing age (years)",
+        "Manufacturing age bucket", "Manufacturing Source", "Manufacturing Sheet",
+        "Manufacturing Product", "Manufacturing matched", "Manufacturing date conflict",
+    ]
+    cfg_cols = sorted([c for c in df.columns if str(c).startswith("CFG::")])
+    hidden_prefixes = ("FLAG::",)
+    ordered = [c for c in preferred + manufacturing if c in df.columns]
+    ordered += [c for c in cfg_cols if c not in ordered]
+    ordered += [c for c in df.columns if c not in ordered and not any(str(c).startswith(p) for p in hidden_prefixes)]
+    return ordered
+
+
+def _excel_style_workbook(wb) -> None:
+    for ws in wb.worksheets:
+        ws.sheet_view.showGridLines = False
+
+
+def _excel_autofit_and_style(ws, start_row: int, start_col: int, n_rows: int, n_cols: int, title_row: int | None = None) -> None:
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    header_fill = PatternFill("solid", fgColor="17324A")
+    title_fill = PatternFill("solid", fgColor="0B1B2A")
+    header_font = Font(color="FFFFFF", bold=True)
+    title_font = Font(color="FFFFFF", bold=True, size=13)
+    thin = Side(style="thin", color="D9EAF7")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    if title_row is not None:
+        title_cell = ws.cell(title_row, start_col)
+        title_cell.font = title_font
+        title_cell.fill = title_fill
+        title_cell.alignment = Alignment(horizontal="left")
+
+    if n_cols <= 0:
+        return
+
+    header_row = start_row
+    for col_idx in range(start_col, start_col + n_cols):
+        cell = ws.cell(header_row, col_idx)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = border
+
+    max_row = start_row + max(n_rows, 1)
+    for row in ws.iter_rows(min_row=start_row + 1, max_row=max_row, min_col=start_col, max_col=start_col + n_cols - 1):
+        for cell in row:
+            cell.alignment = Alignment(vertical="top", wrap_text=True)
+            cell.border = border
+
+    for col_idx in range(start_col, start_col + n_cols):
+        letter = get_column_letter(col_idx)
+        values = []
+        for row_idx in range(max(1, header_row), min(ws.max_row, max_row) + 1):
+            value = ws.cell(row_idx, col_idx).value
+            values.append(len(str(value)) if value is not None else 0)
+        width = min(max(max(values or [12]) + 2, 12), 42)
+        ws.column_dimensions[letter].width = width
+
+    ws.freeze_panes = ws.cell(start_row + 1, start_col).coordinate
+    ws.auto_filter.ref = f"{ws.cell(start_row, start_col).coordinate}:{ws.cell(max_row, start_col + n_cols - 1).coordinate}"
+
+
+def _excel_write_df(ws, df: pd.DataFrame, start_row: int = 1, start_col: int = 1, title: str | None = None) -> tuple[int, int, int, int]:
+    from openpyxl.utils.dataframe import dataframe_to_rows
+
+    clean_df = _excel_clean_dataframe(df)
+    title_row = None
+    if title:
+        title_row = start_row
+        ws.cell(start_row, start_col, title)
+        start_row += 1
+
+    for r_offset, row in enumerate(dataframe_to_rows(clean_df, index=False, header=True), start=0):
+        for c_offset, value in enumerate(row, start=0):
+            ws.cell(start_row + r_offset, start_col + c_offset, value)
+
+    n_rows = len(clean_df)
+    n_cols = max(len(clean_df.columns), 1)
+    _excel_autofit_and_style(ws, start_row, start_col, n_rows, n_cols, title_row=title_row)
+    return start_row, start_col, n_rows, n_cols
+
+
+def _excel_add_bar_chart(ws, data_start_row: int, data_start_col: int, n_rows: int, n_cols: int, title: str, anchor: str, stacked: bool = False) -> None:
+    if n_rows <= 0 or n_cols < 2:
+        return
+    from openpyxl.chart import BarChart, Reference
+
+    chart = BarChart()
+    chart.type = "bar"
+    chart.style = 10
+    chart.title = title
+    chart.y_axis.title = "Categoría"
+    chart.x_axis.title = "Cantidad"
+    chart.height = 8
+    chart.width = 16
+    if stacked:
+        chart.grouping = "stacked"
+        chart.overlap = 100
+
+    data = Reference(ws, min_col=data_start_col + 1, max_col=data_start_col + n_cols - 1, min_row=data_start_row, max_row=data_start_row + n_rows)
+    cats = Reference(ws, min_col=data_start_col, min_row=data_start_row + 1, max_row=data_start_row + n_rows)
+    chart.add_data(data, titles_from_data=True)
+    chart.set_categories(cats)
+    ws.add_chart(chart, anchor)
+
+
+def _excel_add_pie_chart(ws, data_start_row: int, data_start_col: int, n_rows: int, title: str, anchor: str) -> None:
+    if n_rows <= 0:
+        return
+    from openpyxl.chart import PieChart, Reference
+
+    chart = PieChart()
+    chart.title = title
+    chart.height = 8
+    chart.width = 12
+    labels = Reference(ws, min_col=data_start_col, min_row=data_start_row + 1, max_row=data_start_row + n_rows)
+    data = Reference(ws, min_col=data_start_col + 1, min_row=data_start_row, max_row=data_start_row + n_rows)
+    chart.add_data(data, titles_from_data=True)
+    chart.set_categories(labels)
+    ws.add_chart(chart, anchor)
+
+
+def _excel_value_counts_df(df: pd.DataFrame, column: str, label_name: str = "Categoría", top_n: int | None = None) -> pd.DataFrame:
+    if df is None or df.empty or column not in df.columns:
+        return pd.DataFrame(columns=[label_name, "Cantidad"])
+    counts = (
+        df[column]
+        .fillna("No informado")
+        .astype(str)
+        .str.strip()
+        .replace("", "No informado")
+        .value_counts()
+        .reset_index()
+    )
+    counts.columns = [label_name, "Cantidad"]
+    if top_n:
+        counts = counts.head(top_n)
+    return counts
+
+
+def _excel_prepare_model_status_matrix(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame()
+    if "Instrument type" not in df.columns or "Operational status grouped" not in df.columns:
+        return pd.DataFrame()
+    work = df.copy()
+    work["Instrument type"] = work["Instrument type"].fillna("No informado").astype(str)
+    work["Operational status grouped"] = work["Operational status grouped"].fillna("No informado").astype(str)
+    pivot = pd.pivot_table(work, index="Instrument type", columns="Operational status grouped", values="Serial number", aggfunc="count", fill_value=0)
+    pivot["Total"] = pivot.sum(axis=1)
+    pivot = pivot.sort_values("Total", ascending=False)
+    total = pivot.pop("Total")
+    pivot.insert(0, "Modelo", pivot.index)
+    pivot["Total"] = total.values
+    return pivot.reset_index(drop=True)
+
+
+def _excel_prepare_config_summary(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    cfg_cols = [c for c in df.columns if str(c).startswith("CFG::")]
+    coverage_rows = []
+    value_rows = []
+    for col in cfg_cols:
+        field_name = str(col).replace("CFG::", "")
+        series = df[col].dropna().astype(str).str.strip()
+        series = series[series.ne("")]
+        if series.empty:
+            continue
+        coverage_rows.append({"Campo": field_name, "Equipos con dato": int(series.shape[0]), "% del filtro": round(series.shape[0] * 100 / max(len(df), 1), 1)})
+        counts = series.value_counts().head(10).reset_index()
+        counts.columns = ["Valor", "Cantidad"]
+        for _, row in counts.iterrows():
+            value_rows.append({"Campo": field_name, "Valor": row["Valor"], "Cantidad": int(row["Cantidad"])})
+    return pd.DataFrame(coverage_rows).sort_values("Equipos con dato", ascending=False) if coverage_rows else pd.DataFrame(columns=["Campo", "Equipos con dato", "% del filtro"]), pd.DataFrame(value_rows)
+
+
+def _excel_add_readme(ws, filter_summary: dict[str, str], total_rows: int, active_tab: str, source_label_value: str = "") -> None:
+    from openpyxl.styles import Font, PatternFill, Alignment
+
+    ws["A1"] = "Records List Intelligence Dashboard - Export filtrado"
+    ws["A1"].font = Font(bold=True, size=16, color="FFFFFF")
+    ws["A1"].fill = PatternFill("solid", fgColor="0B1B2A")
+    ws.merge_cells("A1:H1")
+    ws["A2"] = f"Código creado: {CODE_CREATED_AT} · {CODE_VERSION_LABEL}"
+    ws["A3"] = f"Build: {PARSER_VERSION}"
+    ws["A4"] = f"Fecha de exportación: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    ws["A5"] = f"Pestaña activa al exportar: {active_tab}"
+    ws["A6"] = f"Fuente activa: {source_label_value}"
+    ws["A7"] = f"Registros incluidos después de filtros: {total_rows:,}"
+    ws["A9"] = "Filtros aplicados"
+    ws["A9"].font = Font(bold=True, color="FFFFFF")
+    ws["A9"].fill = PatternFill("solid", fgColor="17324A")
+    ws["A9"].alignment = Alignment(horizontal="left")
+    ws.merge_cells("A9:B9")
+    row = 10
+    for key, value in (filter_summary or {}).items():
+        ws.cell(row, 1, key)
+        ws.cell(row, 2, value)
+        row += 1
+    ws.column_dimensions["A"].width = 28
+    ws.column_dimensions["B"].width = 55
+
+
 def dataframe_to_excel_bytes(sheet_map: dict[str, pd.DataFrame]) -> bytes:
+    """Exporta múltiples tablas a un Excel ordenado y con formato básico.
+
+    Se mantiene como función genérica para los exports de carstock existentes,
+    pero ahora entrega un archivo más claro que un volcado plano.
+    """
+    from openpyxl import Workbook
+
     output = BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        for sheet_name, df in sheet_map.items():
-            safe_name = re.sub(r"[\\/*?:\[\]]", "_", str(sheet_name))[:31] or "Sheet1"
-            clean_df = df.copy()
-            clean_df.to_excel(writer, sheet_name=safe_name, index=False)
-            ws = writer.sheets[safe_name]
-            ws.freeze_panes = "A2"
-            for idx, col in enumerate(clean_df.columns, start=1):
-                max_len = len(str(col))
-                if not clean_df.empty:
-                    series = clean_df[col].astype("string").fillna("")
-                    series = series.str.replace("<NA>", "", regex=False).str.replace("nan", "", regex=False)
-                    lengths = series.str.len().fillna(0)
-                    series_max_len = int(lengths.max()) if len(lengths) else 0
-                    max_len = max(max_len, series_max_len)
-                ws.column_dimensions[ws.cell(row=1, column=idx).column_letter].width = min(max(max_len + 2, 12), 42)
+    wb = Workbook()
+    first_sheet = True
+    for sheet_name, df in sheet_map.items():
+        safe_name = _excel_safe_sheet_name(sheet_name)
+        if first_sheet:
+            ws = wb.active
+            ws.title = safe_name
+            first_sheet = False
+        else:
+            ws = wb.create_sheet(safe_name)
+        _excel_write_df(ws, df.copy() if isinstance(df, pd.DataFrame) else pd.DataFrame(), start_row=1, start_col=1, title=safe_name)
+    _excel_style_workbook(wb)
+    wb.save(output)
+    output.seek(0)
+    return output.getvalue()
+
+
+def build_dashboard_excel_export(
+    filtered_df: pd.DataFrame,
+    filter_summary: dict[str, str] | None,
+    active_tab: str,
+    source_label_value: str = "",
+    stock_context: dict | None = None,
+) -> bytes:
+    """Genera un Excel ejecutivo con datos filtrados, tablas resumen y gráficas.
+
+    El contenido respeta todos los filtros laterales y filtros aplicados desde gráficas.
+    """
+    from openpyxl import Workbook
+
+    output = BytesIO()
+    wb = Workbook()
+    summary_ws = wb.active
+    summary_ws.title = "00_Resumen"
+    _excel_add_readme(summary_ws, filter_summary or {}, len(filtered_df), active_tab, source_label_value)
+
+    export_df = filtered_df.drop(columns=[c for c in filtered_df.columns if str(c).startswith("FLAG::")], errors="ignore").copy()
+    export_df = export_df[_preferred_export_columns(export_df)]
+    data_ws = wb.create_sheet("01_Datos_filtrados")
+    _excel_write_df(data_ws, export_df, title="Datos filtrados y ordenados")
+
+    # Base instalada
+    base_ws = wb.create_sheet("02_Base_instalada")
+    row = 1
+    type_df = _excel_value_counts_df(filtered_df, "Instrument type", "Modelo")
+    r, c, n, nc = _excel_write_df(base_ws, type_df, row, 1, "Base instalada por tipo de instrumento")
+    _excel_add_bar_chart(base_ws, r, c, n, nc, "Base instalada por tipo de instrumento", "E2")
+    row = r + n + 4
+    country_df = _excel_value_counts_df(filtered_df, "Country", "País", top_n=15)
+    r, c, n, nc = _excel_write_df(base_ws, country_df, row, 1, "Top países")
+    _excel_add_bar_chart(base_ws, r, c, n, nc, "Top países", "E20")
+    row = r + n + 4
+    city_df = _excel_value_counts_df(filtered_df.assign(CityLabel=build_city_label_series(filtered_df)), "CityLabel", "Ciudad | País", top_n=20) if "City" in filtered_df.columns else pd.DataFrame()
+    _excel_write_df(base_ws, city_df, row, 1, "Top ciudades")
+
+    # Modelo por estado operativo
+    matrix_ws = wb.create_sheet("03_Modelo_estado")
+    model_status_df = _excel_prepare_model_status_matrix(filtered_df)
+    r, c, n, nc = _excel_write_df(matrix_ws, model_status_df, 1, 1, "Base instalada por modelo y estado operativo")
+    _excel_add_bar_chart(matrix_ws, r, c, n, nc - 1 if nc > 2 else nc, "Modelo por estado operativo", "K2", stacked=True)
+
+    # Machine configuration
+    cfg_ws = wb.create_sheet("04_Machine_config")
+    blood_bank_yes = count_blood_bank_yes(filtered_df)
+    blood_df = pd.DataFrame({"Categoría": ["Banco de sangre", "Equipos en laboratorio"], "Cantidad": [blood_bank_yes, max(len(filtered_df) - blood_bank_yes, 0)]})
+    r, c, n, nc = _excel_write_df(cfg_ws, blood_df, 1, 1, "Banco de sangre")
+    _excel_add_pie_chart(cfg_ws, r, c, n, "Banco de sangre", "E2")
+    cfg_coverage, cfg_values = _excel_prepare_config_summary(filtered_df)
+    r2, c2, n2, nc2 = _excel_write_df(cfg_ws, cfg_coverage, n + 5, 1, "Cobertura por campo de configuración")
+    _excel_add_bar_chart(cfg_ws, r2, c2, min(n2, 20), nc2, "Cobertura por campo", "E20")
+    _excel_write_df(cfg_ws, cfg_values, r2 + n2 + 4, 1, "Top valores por campo de configuración")
+
+    # OS y procesamiento / PM
+    os_pm_ws = wb.create_sheet("05_OS_PM")
+    os_df = _excel_value_counts_df(filtered_df, "Operating System", "Sistema operativo") if "Operating System" in filtered_df.columns else pd.DataFrame(columns=["Sistema operativo", "Cantidad"])
+    r, c, n, nc = _excel_write_df(os_pm_ws, os_df, 1, 1, "Sistema operativo")
+    _excel_add_bar_chart(os_pm_ws, r, c, n, nc, "Sistema operativo", "E2")
+    tests = pd.to_numeric(filtered_df.get("Number of tests per day", pd.Series(dtype=float)), errors="coerce").fillna(0)
+    zero_count = int(tests.eq(0).sum())
+    tests_summary = pd.DataFrame({
+        "Métrica": ["Equipos evaluados", "Equipos con tests/día = 0", "% con tests/día = 0", "Promedio tests/día", "Máximo tests/día"],
+        "Valor": [len(filtered_df), zero_count, round(zero_count * 100 / max(len(filtered_df), 1), 1), round(float(tests.mean()), 1) if len(tests) else 0, round(float(tests.max()), 1) if len(tests) else 0],
+    })
+    r2, c2, n2, nc2 = _excel_write_df(os_pm_ws, tests_summary, n + 5, 1, "Resumen de procesamiento")
+    tests_by_model = filtered_df.assign(**{"Number of tests per day": tests}).groupby("Instrument type", dropna=False)["Number of tests per day"].agg(["count", "sum", "mean", "max"]).reset_index()
+    tests_by_model.columns = ["Modelo", "Equipos", "Tests/día total", "Promedio tests/día", "Máximo tests/día"]
+    r3, c3, n3, nc3 = _excel_write_df(os_pm_ws, tests_by_model, r2 + n2 + 4, 1, "Procesamiento por modelo")
+    _excel_add_bar_chart(os_pm_ws, r3, c3, n3, 3, "Tests/día total por modelo", "E22")
+    if "PM next date" in filtered_df.columns:
+        pm_next = pd.to_datetime(filtered_df["PM next date"], errors="coerce")
+        today = pd.Timestamp.today().normalize()
+        pm_status = pd.Series(np.where(pm_next < today, "Vencido", np.where(pm_next <= today + pd.Timedelta(days=90), "Próximos 90 días", "Planificado más adelante")), index=filtered_df.index)
+        pm_df = pm_status.value_counts().reset_index()
+        pm_df.columns = ["Estado PM", "Cantidad"]
+        r4, c4, n4, nc4 = _excel_write_df(os_pm_ws, pm_df, r3 + n3 + 4, 1, "Estado PM")
+        _excel_add_pie_chart(os_pm_ws, r4, c4, n4, "Estado PM", "E40")
+
+    # Antigüedad / fabricación si está disponible en la vista.
+    manuf_cols = ["Manufacturing Date", "Manufacturing year", "Manufacturing age (years)", "Manufacturing age bucket"]
+    if any(col in filtered_df.columns for col in manuf_cols):
+        manuf_ws = wb.create_sheet("06_Fabricacion")
+        manuf_export_cols = [c for c in _preferred_export_columns(filtered_df) if c in filtered_df.columns and (c.startswith("Manufacturing") or c in ["Commercial Region", "Country", "Distributor name", "Customer name", "Instrument type", "Serial number", "Operational status"])]
+        manuf_export = filtered_df[manuf_export_cols].copy() if manuf_export_cols else pd.DataFrame()
+        year_df = _excel_value_counts_df(filtered_df, "Manufacturing year", "Año fabricación") if "Manufacturing year" in filtered_df.columns else pd.DataFrame()
+        bucket_df = _excel_value_counts_df(filtered_df, "Manufacturing age bucket", "Rango edad") if "Manufacturing age bucket" in filtered_df.columns else pd.DataFrame()
+        r, c, n, nc = _excel_write_df(manuf_ws, bucket_df, 1, 1, "Rangos de antigüedad por fabricación")
+        _excel_add_bar_chart(manuf_ws, r, c, n, nc, "Rangos de antigüedad", "E2")
+        r2, c2, n2, nc2 = _excel_write_df(manuf_ws, year_df, n + 5, 1, "Equipos por año de fabricación")
+        _excel_add_bar_chart(manuf_ws, r2, c2, n2, nc2, "Equipos por año de fabricación", "E22")
+        _excel_write_df(manuf_ws, manuf_export, r2 + n2 + 4, 1, "Detalle fabricación")
+
+    stock_context = stock_context or {}
+    if stock_context.get("available"):
+        stock_ws = wb.create_sheet("07_Carstock")
+        stock_pairs = pd.DataFrame({
+            "Métrica": ["Distribuidor", "SKUs requeridos", "SKUs OK", "SKUs LOW", "SKUs faltantes", "Costo opción 2"],
+            "Valor": [
+                stock_context.get("detected_distributor", "N/A"),
+                stock_context.get("required_skus", 0),
+                stock_context.get("ok_skus", 0),
+                stock_context.get("low_skus", 0),
+                stock_context.get("missing_skus", 0),
+                stock_context.get("option2_cost", 0),
+            ],
+        })
+        _excel_write_df(stock_ws, stock_pairs, 1, 1, "Resumen carstock")
+        full_comparison_df = stock_context.get("full_comparison_df", pd.DataFrame())
+        if isinstance(full_comparison_df, pd.DataFrame) and not full_comparison_df.empty:
+            _excel_write_df(stock_ws, full_comparison_df, 10, 1, "Comparación completa carstock")
+
+    _excel_style_workbook(wb)
+    wb.save(output)
+    output.seek(0)
+    return output.getvalue()
+
+
+def build_equipment_detail_excel(all_rows_df: pd.DataFrame, serial_label: str = "selected") -> bytes:
+    from openpyxl import Workbook
+    output = BytesIO()
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Detalle_equipo"
+    _excel_write_df(ws, all_rows_df.copy(), 1, 1, f"Detalle completo del equipo {serial_label}")
+    _excel_style_workbook(wb)
+    wb.save(output)
     output.seek(0)
     return output.getvalue()
 
@@ -2808,9 +3179,9 @@ def payload_from_manufacturing_year(point: dict) -> dict | None:
         f"Año de fabricación: {year_text}",
     )
 
-CODE_CREATED_AT = "2026-06-05 10:10:00 COT"
-CODE_VERSION_LABEL = "v33"
-PARSER_VERSION = "records-list-stable-v33-20260605-1010COT-processing-zero-tests-annotation"
+CODE_CREATED_AT = "2026-06-05 10:32:00 COT"
+CODE_VERSION_LABEL = "v34"
+PARSER_VERSION = "records-list-stable-v34-20260605-1032COT-excel-export-with-charts"
 
 
 def get_uploaded_file_signature(uploaded_file) -> str:
@@ -6148,12 +6519,18 @@ if active_dashboard_tab == "Antigüedad / fabricación":
                 st.dataframe(age_table, use_container_width=True, hide_index=True)
 
                 st.download_button(
-                    "Descargar cruce de fechas de fabricación",
-                    data=to_csv_download(manufacturing_df.drop(columns=["Serial match key"], errors="ignore")),
-                    file_name="installed_base_manufacturing_age_filtered.csv",
-                    mime="text/csv",
+                    "Descargar cruce de fechas de fabricación en Excel",
+                    data=build_dashboard_excel_export(
+                        manufacturing_df.drop(columns=["Serial match key"], errors="ignore"),
+                        filter_summary_for_panel,
+                        active_dashboard_tab="Antigüedad / fabricación",
+                        source_label_value=source_label,
+                        stock_context=st.session_state.get("pdf_stock_context", {"available": False}),
+                    ),
+                    file_name=f"installed_base_manufacturing_age_filtered_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                    mime=EXCEL_MIME,
                     use_container_width=False,
-                    key="download_manufacturing_age_analysis",
+                    key="download_manufacturing_age_analysis_excel",
                 )
 
             if not unmatched_df.empty:
@@ -6355,12 +6732,12 @@ if active_dashboard_tab == "Detalle por equipo":
     st.dataframe(pd.DataFrame(all_rows), use_container_width=True, hide_index=True)
 
     st.download_button(
-        "Descargar detalle completo del equipo",
-        data=to_csv_download(pd.DataFrame(all_rows)),
-        file_name=f"equipment_detail_{normalize_serial_match(row.get('Serial number')) or 'selected'}.csv",
-        mime="text/csv",
+        "Descargar detalle completo del equipo en Excel",
+        data=build_equipment_detail_excel(pd.DataFrame(all_rows), normalize_serial_match(row.get('Serial number')) or 'selected'),
+        file_name=f"equipment_detail_{normalize_serial_match(row.get('Serial number')) or 'selected'}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+        mime=EXCEL_MIME,
         use_container_width=False,
-        key="download_selected_equipment_detail",
+        key="download_selected_equipment_detail_excel",
     )
 
 
@@ -6429,9 +6806,16 @@ with foot_l:
     )
 with foot_r:
     st.download_button(
-        "Descargar vista filtrada",
-        data=to_csv_download(filtered.drop(columns=[c for c in filtered.columns if c.startswith("FLAG::")], errors="ignore")),
-        file_name="records_list_filtered.csv",
-        mime="text/csv",
+        "Descargar vista filtrada en Excel",
+        data=build_dashboard_excel_export(
+            filtered,
+            filter_summary_for_panel,
+            active_dashboard_tab=active_dashboard_tab,
+            source_label_value=source_label,
+            stock_context=st.session_state.get("pdf_stock_context", {"available": False}),
+        ),
+        file_name=f"records_list_filtered_dashboard_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+        mime=EXCEL_MIME,
         use_container_width=True,
+        key="download_filtered_excel_dashboard_v34",
     )
