@@ -714,14 +714,22 @@ def normalize_operational_status(value) -> str:
         return "No informado"
 
     upper = re.sub(r"\s+", " ", text.upper()).strip()
-    lower = text.lower()
+    lower = re.sub(r"\s+", " ", text.lower()).strip()
 
     if upper in {"NOT IN ROUTINE", "NOT ROUTINE", "NO ROUTINE"}:
         return "Not in routine"
-    if "scrap" in lower:
-        return "Scraped"
     if upper in {"IN ROUTINE", "ROUTINE"}:
         return "Routine"
+
+    # Separar equipos ya descartados de equipos pendientes por descartar.
+    # El export real usa variantes como "WAREHOUSE to be scrapped" y
+    # "CUSTOMER to be scrapped". Antes se agrupaban dentro de "Scraped"
+    # porque la regla genérica buscaba cualquier texto con "scrap".
+    if re.search(r"\bto be scrap(?:ped|ed)?\b", lower):
+        return "To Be Scrapped"
+    if "scrap" in lower:
+        return "Scraped"
+
     if "warehouse" in lower:
         return text.title()
     if "refurb" in lower:
@@ -749,6 +757,7 @@ def compute_state_filter_counts(df: pd.DataFrame) -> list[tuple[str, int]]:
         "Routine",
         "Not in routine",
         "Scraped",
+        "To Be Scrapped",
         "Warehouse New System",
         "Warehouse To Be Refurbished",
         "Warehouse Ready To Be Installed",
@@ -817,6 +826,7 @@ def translate_status_value(value: str) -> str:
         'NOT IN ROUTINE': 'No en rutina',
         'IN ROUTINE': 'En rutina',
         'Scrapped': 'Descartado',
+        'To Be Scrapped': 'Por descartar',
         'Warehouse To Be Refurbished': 'Bodega por reacondicionar',
         'WAREHOUSE to be refurbished': 'Bodega por reacondicionar',
         'Warehouse Ready To Be Installed': 'Bodega lista para instalar',
@@ -2798,9 +2808,9 @@ def payload_from_manufacturing_year(point: dict) -> dict | None:
         f"Año de fabricación: {year_text}",
     )
 
-CODE_CREATED_AT = "2026-06-05 09:18:36 COT"
-CODE_VERSION_LABEL = "v31"
-PARSER_VERSION = "records-list-stable-v31-20260605-0918COT-hide-parser-message-lab-label"
+CODE_CREATED_AT = "2026-06-05 09:52:00 COT"
+CODE_VERSION_LABEL = "v32"
+PARSER_VERSION = "records-list-stable-v32-20260605-0952COT-operational-status-to-be-scrapped-filter"
 
 
 def get_uploaded_file_signature(uploaded_file) -> str:
@@ -2882,6 +2892,52 @@ def _align_records_row(row: list[str], expected_len: int) -> list[str]:
     return row[:notes_idx] + [merged_note] + row[notes_idx + extra + 1 :]
 
 
+def _operational_status_like_score(series: pd.Series) -> int:
+    """Cuenta valores que parecen realmente estados operativos del Records List."""
+    if series is None:
+        return 0
+    values = series.dropna().astype(str).str.strip().str.lower()
+    if values.empty:
+        return 0
+    pattern = r"routine|scrap|warehouse|customer\s+to\s+be|transit|customs|ready\s+to\s+be\s+installed|new\s+system|refurb"
+    return int(values.str.contains(pattern, regex=True, na=False).sum())
+
+
+def _best_operational_status_series(work: pd.DataFrame) -> pd.Series | None:
+    """Selecciona la columna que realmente contiene el estado operativo.
+
+    En algunos exports de Records List el encabezado visible viene desplazado:
+    la columna llamada "Number of tests per day" contiene valores como
+    IN ROUTINE, NOT IN ROUTINE, WAREHOUSE to be scrapped, etc., mientras
+    la columna "Status" contiene el tipo de contrato. Esta función evita
+    que el filtro de estado operativo use la columna contractual equivocada.
+    """
+    candidate_names = [
+        "Operational status",
+        "Status",
+        " Status",
+        "Number of tests per day",
+        " Number of tests per day",
+        "Estado operativo",
+    ]
+    candidates = []
+    for name in candidate_names:
+        if name in work.columns:
+            data = work[name]
+            if isinstance(data, pd.DataFrame):
+                data = data.bfill(axis=1).iloc[:, 0]
+            score = _operational_status_like_score(data)
+            non_empty = int(data.replace({"": pd.NA, "None": pd.NA, "nan": pd.NA, "<NA>": pd.NA}).notna().sum())
+            candidates.append((score, non_empty, name, data))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    best_score, _, _, best_data = candidates[0]
+    if best_score <= 0:
+        return None
+    return best_data
+
+
 
 def recover_records_core_fields(df: pd.DataFrame) -> pd.DataFrame:
     """Recover critical Records List fields using aliases and fixed export positions.
@@ -2914,14 +2970,16 @@ def recover_records_core_fields(df: pd.DataFrame) -> pd.DataFrame:
     if bb_series is not None and (not has_useful_values("In Blood Bank")):
         work["In Blood Bank"] = bb_series
 
-    # Real Records List export: Status = operational status.
-    # This must remain independent from stock/carstock Status because this function only
-    # runs on Records List dataframes during parsing/finalization.
-    status_series = first_existing_by_alias([
-        "Operational status", "Status", "Operation status", "Estado operativo",
-        "Estado de operacion", "Estado de operación",
-    ])
-    if status_series is not None and (not has_useful_values("Operational status")):
+    # Real Records List export: choose the column that contains true operational
+    # states. Some exports have the values under "Number of tests per day" and
+    # the column named "Status" contains contract information.
+    status_series = _best_operational_status_series(work)
+    if status_series is None:
+        status_series = first_existing_by_alias([
+            "Operational status", "Status", "Operation status", "Estado operativo",
+            "Estado de operacion", "Estado de operación",
+        ])
+    if status_series is not None:
         work["Operational status"] = status_series
 
     # Real Records List export: Instrument Status = asset condition.
