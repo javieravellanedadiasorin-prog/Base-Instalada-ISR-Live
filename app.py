@@ -1139,18 +1139,81 @@ def build_dashboard_excel_export(
         _excel_add_pie_chart(os_pm_ws, r4, c4, n4, "Estado PM", "E40")
 
     # Antigüedad / fabricación si está disponible en la vista.
-    manuf_cols = ["Manufacturing Date", "Manufacturing year", "Manufacturing age (years)", "Manufacturing age bucket"]
+    manuf_cols = ["Manufacturing Date", "Manufacturing year", "Manufacturing age (years)", "Manufacturing age bucket", "Manufacturing matched"]
     if any(col in filtered_df.columns for col in manuf_cols):
         manuf_ws = wb.create_sheet("06_Fabricacion")
-        manuf_export_cols = [c for c in _preferred_export_columns(filtered_df) if c in filtered_df.columns and (c.startswith("Manufacturing") or c in ["Commercial Region", "Country", "Distributor name", "Customer name", "Instrument type", "Serial number", "Operational status"])]
+        manuf_export_cols = [
+            c for c in _preferred_export_columns(filtered_df)
+            if c in filtered_df.columns
+            and (
+                c.startswith("Manufacturing")
+                or c in [
+                    "Commercial Region", "Country", "Distributor name", "Customer name",
+                    "Instrument type", "Serial number", "Installation date",
+                    "Operational status", "Operational status grouped", "Asset condition",
+                    "Number of tests per day", "Operating System",
+                ]
+            )
+        ]
         manuf_export = filtered_df[manuf_export_cols].copy() if manuf_export_cols else pd.DataFrame()
+
+        matched_series = filtered_df.get("Manufacturing matched", pd.Series(False, index=filtered_df.index))
+        try:
+            matched_series = matched_series.fillna(False).astype(bool)
+        except Exception:
+            matched_series = matched_series.astype(str).str.lower().isin({"true", "1", "yes", "si", "sí"})
+
+        total_manuf = int(len(filtered_df))
+        matched_count = int(matched_series.sum()) if total_manuf else 0
+        unmatched_count = max(total_manuf - matched_count, 0)
+        age_series = pd.to_numeric(filtered_df.get("Manufacturing age (years)", pd.Series(dtype=float)), errors="coerce")
+        avg_age = round(float(age_series.dropna().mean()), 1) if age_series.notna().any() else "No informado"
+        oldest_age = round(float(age_series.dropna().max()), 1) if age_series.notna().any() else "No informado"
+        newest_age = round(float(age_series.dropna().min()), 1) if age_series.notna().any() else "No informado"
+        match_pct = round(matched_count * 100 / max(total_manuf, 1), 1)
+
+        manuf_summary = pd.DataFrame({
+            "Métrica": [
+                "Equipos evaluados",
+                "Equipos con fecha de fabricación",
+                "Equipos sin coincidencia de fabricación",
+                "% con fecha de fabricación",
+                "Edad promedio de fabricación",
+                "Equipo más antiguo - años",
+                "Equipo más nuevo - años",
+            ],
+            "Valor": [
+                total_manuf,
+                matched_count,
+                unmatched_count,
+                match_pct,
+                avg_age,
+                oldest_age,
+                newest_age,
+            ],
+        })
+        r0, c0, n0, nc0 = _excel_write_df(manuf_ws, manuf_summary, 1, 1, "Resumen antigüedad / fabricación")
+
+        match_df = pd.DataFrame({
+            "Estado": ["Con fecha de fabricación", "Sin coincidencia"],
+            "Cantidad": [matched_count, unmatched_count],
+        })
+        r_match, c_match, n_match, nc_match = _excel_write_df(manuf_ws, match_df, r0 + n0 + 4, 1, "Cobertura de cruce por serial")
+        _excel_add_pie_chart(manuf_ws, r_match, c_match, n_match, "Cobertura de fabricación", "E2")
+
         year_df = _excel_value_counts_df(filtered_df, "Manufacturing year", "Año fabricación") if "Manufacturing year" in filtered_df.columns else pd.DataFrame()
         bucket_df = _excel_value_counts_df(filtered_df, "Manufacturing age bucket", "Rango edad") if "Manufacturing age bucket" in filtered_df.columns else pd.DataFrame()
-        r, c, n, nc = _excel_write_df(manuf_ws, bucket_df, 1, 1, "Rangos de antigüedad por fabricación")
-        _excel_add_bar_chart(manuf_ws, r, c, n, nc, "Rangos de antigüedad", "E2")
-        r2, c2, n2, nc2 = _excel_write_df(manuf_ws, year_df, n + 5, 1, "Equipos por año de fabricación")
-        _excel_add_bar_chart(manuf_ws, r2, c2, n2, nc2, "Equipos por año de fabricación", "E22")
-        _excel_write_df(manuf_ws, manuf_export, r2 + n2 + 4, 1, "Detalle fabricación")
+
+        r_bucket, c_bucket, n_bucket, nc_bucket = _excel_write_df(manuf_ws, bucket_df, r_match + n_match + 4, 1, "Rangos de antigüedad por fabricación")
+        _excel_add_bar_chart(manuf_ws, r_bucket, c_bucket, n_bucket, nc_bucket, "Rangos de antigüedad", "E20")
+
+        r_year, c_year, n_year, nc_year = _excel_write_df(manuf_ws, year_df, r_bucket + n_bucket + 4, 1, "Equipos por año de fabricación")
+        _excel_add_bar_chart(manuf_ws, r_year, c_year, n_year, nc_year, "Equipos por año de fabricación", "E38")
+
+        detail_start_row = r_year + n_year + 4
+        if not manuf_export.empty and "Manufacturing age (years)" in manuf_export.columns:
+            manuf_export = manuf_export.sort_values(["Manufacturing age (years)", "Manufacturing Date"], ascending=[False, True], na_position="last")
+        _excel_write_df(manuf_ws, manuf_export, detail_start_row, 1, "Detalle completo antigüedad / fabricación")
 
     stock_context = stock_context or {}
     if stock_context.get("available"):
@@ -2688,6 +2751,8 @@ SIDEBAR_DISTRIBUTOR_KEY = "sidebar_distributors_v30"
 SIDEBAR_INSTRUMENT_KEY = "sidebar_instruments_v30"
 SIDEBAR_STATE_KEY = "sidebar_states_v30"
 ACTIVE_DASHBOARD_TAB_KEY = "active_dashboard_tab_v30"
+MANUFACTURING_EXCEL_EXPORT_SESSION_KEY = "manufacturing_excel_export_df_v38"
+MANUFACTURING_EXCEL_EXPORT_SOURCE_KEY = "manufacturing_excel_export_source_v38"
 DASHBOARD_TABS = [
     "Base instalada",
     "Machine configuration",
@@ -3293,9 +3358,9 @@ def payload_from_manufacturing_year(point: dict) -> dict | None:
         f"Año de fabricación: {year_text}",
     )
 
-CODE_CREATED_AT = "2026-06-05 11:22:00 COT"
-CODE_VERSION_LABEL = "v37"
-PARSER_VERSION = "records-list-stable-v37-20260605-1122COT-excel-export-nullable-dtype-fix"
+CODE_CREATED_AT = "2026-06-05 11:38:00 COT"
+CODE_VERSION_LABEL = "v38"
+PARSER_VERSION = "records-list-stable-v38-20260605-1138COT-manufacturing-excel-export-fix"
 
 
 def get_uploaded_file_signature(uploaded_file) -> str:
@@ -6444,6 +6509,12 @@ if active_dashboard_tab == "Antigüedad / fabricación":
             st.info("Aún no hay una fuente válida con serial y fecha para realizar la comparación.")
         else:
             manufacturing_df, manufacturing_reference = build_manufacturing_match(filtered, prepared_sources)
+            # Mantener disponible la vista enriquecida de fabricación para el botón
+            # global de descarga Excel al final del dashboard. Así, cuando la pestaña
+            # activa es Antigüedad / fabricación, el descargable incluye exactamente
+            # los campos calculados en esta pestaña y no solo el Records List base.
+            st.session_state[MANUFACTURING_EXCEL_EXPORT_SESSION_KEY] = manufacturing_df.drop(columns=["Serial match key"], errors="ignore").copy()
+            st.session_state[MANUFACTURING_EXCEL_EXPORT_SOURCE_KEY] = source_label
             matched_df = manufacturing_df[manufacturing_df["Manufacturing matched"]].copy()
             unmatched_df = manufacturing_df[~manufacturing_df["Manufacturing matched"]].copy()
             future_date_count = int((matched_df["Manufacturing Date"] > pd.Timestamp(date.today())).sum()) if not matched_df.empty else 0
@@ -6919,17 +6990,27 @@ with foot_l:
         unsafe_allow_html=True,
     )
 with foot_r:
+    excel_export_df = filtered
+    excel_export_source_label = source_label
+    excel_export_button_label = "Descargar vista filtrada en Excel"
+    if active_dashboard_tab == "Antigüedad / fabricación":
+        manufacturing_export_df = st.session_state.get(MANUFACTURING_EXCEL_EXPORT_SESSION_KEY)
+        if isinstance(manufacturing_export_df, pd.DataFrame) and not manufacturing_export_df.empty:
+            excel_export_df = manufacturing_export_df.copy()
+            excel_export_source_label = st.session_state.get(MANUFACTURING_EXCEL_EXPORT_SOURCE_KEY, source_label)
+            excel_export_button_label = "Descargar antigüedad / fabricación en Excel"
+
     st.download_button(
-        "Descargar vista filtrada en Excel",
+        excel_export_button_label,
         data=build_dashboard_excel_export(
-            filtered,
+            excel_export_df,
             filter_summary_for_panel,
             active_dashboard_tab=active_dashboard_tab,
-            source_label_value=source_label,
+            source_label_value=excel_export_source_label,
             stock_context=st.session_state.get("pdf_stock_context", {"available": False}),
         ),
         file_name=f"records_list_filtered_dashboard_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
         mime=EXCEL_MIME,
         use_container_width=True,
-        key="download_filtered_excel_dashboard_v37",
+        key="download_filtered_excel_dashboard_v38",
     )
