@@ -1554,179 +1554,239 @@ def _corporate_add_column_chart(ws, data_start_row: int, data_start_col: int, n_
 
 
 def build_monthly_corporate_latam_report_excel(records_df: pd.DataFrame, source_label_value: str = "") -> bytes:
-    """Genera un informe mensual corporativo LATAM en Excel con lectura ejecutiva.
+    """Genera un informe corporativo LATAM simple y ejecutivo.
 
-    Enfoque del informe:
-    1) Base instalada LATAM actualizada.
-    2) Equipos en rutina por mes.
-    3) Equipos recién comprados/pipeline por mes.
-    4) Base comercial estimada = rutina + recién comprados/pipeline.
-    5) Proyección aproximada de venta/consumo usando tests/día como proxy técnico.
+    Enfoque exclusivo solicitado:
+    - Base instalada actualizada.
+    - Cuántos equipos están en rutina por mes.
+    - Recién comprados por mes.
+    - Base proyectada = equipos en rutina + recién comprados.
+
+    No incluye proyección monetaria ni tests/día para evitar confusión en la lectura corporativa.
     """
     from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
     output = BytesIO()
     wb = Workbook()
-    ws_readme = wb.active
-    ws_readme.title = "00_Leer_primero"
 
     work = _corporate_prepare_latam_report_df(records_df)
 
-    ws_readme["A1"] = "Informe a corporativo mensual - LATAM"
-    ws_readme["A1"].font = Font(bold=True, size=16, color="FFFFFF")
-    ws_readme["A1"].fill = PatternFill("solid", fgColor="0B1B2A")
-    ws_readme.merge_cells("A1:H1")
-    ws_readme["A2"] = f"Código creado: {CODE_CREATED_AT} · {CODE_VERSION_LABEL}"
-    ws_readme["A3"] = f"Build: {PARSER_VERSION}"
-    ws_readme["A4"] = f"Fuente activa: {source_label_value}"
-    ws_readme["A5"] = f"Fecha de generación: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    def _safe_int(value) -> int:
+        try:
+            return int(round(float(value)))
+        except Exception:
+            return 0
 
-    method_rows = [
-        ("Alcance", "Solo LATAM. El archivo se filtra automáticamente por región comercial LATAM y, como respaldo, por país LATAM."),
-        ("Base instalada actualizada", "Total de equipos LATAM presentes en el Records List al momento de generar el informe."),
-        ("Equipos en rutina", "Equipos con estado operativo normalizado como Routine. Representan la base actualmente productiva."),
-        ("Recién comprados / pipeline", "Equipos con estado Warehouse New System, Warehouse Ready To Be Installed, Warehouse Transit Customs o equivalentes. Representan equipos adquiridos o próximos a entrar en operación."),
-        ("Base comercial estimada", "Equipos en rutina + recién comprados/pipeline. Esta es la base usada para estimar potencial de venta/consumo."),
-        ("Proyección aproximada", "No es una proyección monetaria. Como el Records List no trae precios de reactivos, se usa tests/día como proxy técnico de consumo/venta."),
-        ("Estimación de nuevos equipos", "Para equipos recién comprados/pipeline, se estima tests/día usando el promedio de los equipos en rutina del mismo modelo. Si un modelo no tiene rutina, se usa el promedio global de rutina."),
-        ("Lectura mensual", "El mes se toma de Installation date. Si un equipo no tiene fecha de instalación, se agrupa como 'Sin fecha'."),
-    ]
-    _corporate_write_text_block(ws_readme, method_rows, 7, 1, "Cómo leer este informe")
+    def _projection_summary(group_cols: list[str]) -> pd.DataFrame:
+        if work is None or work.empty:
+            columns = list(group_cols) + [
+                "Base instalada actualizada",
+                "Equipos en rutina",
+                "Recién comprados",
+                "Base proyectada",
+                "% base proyectada sobre base instalada",
+            ]
+            return pd.DataFrame(columns=columns)
+        summary = (
+            work.groupby(group_cols, dropna=False)
+            .agg(
+                **{
+                    "Base instalada actualizada": ("Serial number", "count"),
+                    "Equipos en rutina": ("Routine count", "sum"),
+                    "Recién comprados": ("Recently purchased count", "sum"),
+                }
+            )
+            .reset_index()
+        )
+        for col in ["Base instalada actualizada", "Equipos en rutina", "Recién comprados"]:
+            summary[col] = pd.to_numeric(summary[col], errors="coerce").fillna(0).astype(int)
+        summary["Base proyectada"] = summary["Equipos en rutina"] + summary["Recién comprados"]
+        summary["% base proyectada sobre base instalada"] = (
+            summary["Base proyectada"] * 100 / summary["Base instalada actualizada"].replace(0, np.nan)
+        ).round(1).fillna(0)
+        if "Corporate month" in summary.columns:
+            summary = _corporate_sort_monthly_df(summary)
+        else:
+            sort_cols = [c for c in ["Base proyectada", "Distributor name", "Instrument type"] if c in summary.columns]
+            if sort_cols:
+                asc = [False if c == "Base proyectada" else True for c in sort_cols]
+                summary = summary.sort_values(sort_cols, ascending=asc).reset_index(drop=True)
+        return summary
+
+    def _rename_clear(df: pd.DataFrame) -> pd.DataFrame:
+        if df is None or df.empty:
+            return pd.DataFrame()
+        rename_map = {
+            "Corporate month": "Mes",
+            "Instrument type": "Modelo",
+            "Distributor name": "Distribuidor",
+            "Country": "País",
+            "Corporate status type": "Clasificación",
+        }
+        out = df.copy().rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
+        if "Clasificación" in out.columns:
+            out["Clasificación"] = out["Clasificación"].replace({"Recién comprados / pipeline": "Recién comprados"})
+        return out
+
+    def _add_note(ws, cell: str, text: str) -> None:
+        ws[cell] = text
+        ws[cell].alignment = Alignment(wrap_text=True, vertical="top")
+        ws[cell].font = Font(italic=True, color="44546A")
+
+    def _add_summary_cards(ws, metrics_rows: list[tuple[str, str]], start_row: int = 5) -> int:
+        row = start_row
+        fill_label = PatternFill("solid", fgColor="D9EAF7")
+        fill_value = PatternFill("solid", fgColor="F8FBFD")
+        thin = Side(style="thin", color="C9DDED")
+        border = Border(left=thin, right=thin, top=thin, bottom=thin)
+        for label, value in metrics_rows:
+            ws.cell(row, 1, label)
+            ws.cell(row, 2, value)
+            ws.cell(row, 1).font = Font(bold=True, color="0B1B2A")
+            ws.cell(row, 1).fill = fill_label
+            ws.cell(row, 2).fill = fill_value
+            ws.cell(row, 1).border = border
+            ws.cell(row, 2).border = border
+            ws.cell(row, 1).alignment = Alignment(wrap_text=True, vertical="top")
+            ws.cell(row, 2).alignment = Alignment(wrap_text=True, vertical="top")
+            row += 1
+        return row
+
+    ws = wb.active
+    ws.title = "00_Resumen"
+    ws["A1"] = "Informe a corporativo mensual - LATAM"
+    ws["A1"].font = Font(bold=True, size=16, color="FFFFFF")
+    ws["A1"].fill = PatternFill("solid", fgColor="0B1B2A")
+    ws.merge_cells("A1:H1")
+    ws["A2"] = f"Código creado: {CODE_CREATED_AT} · {CODE_VERSION_LABEL}"
+    ws["A3"] = f"Fuente activa: {source_label_value}"
+    ws["A4"] = f"Fecha de generación: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+
+    _add_note(
+        ws,
+        "A12",
+        "Lectura ejecutiva: este informe usa únicamente LATAM. La columna 'Mes' se toma de Installation date. "
+        "La base proyectada se calcula con una fórmula simple: Equipos en rutina + Recién comprados. "
+        "No se incluye proyección monetaria ni tests/día para mantener el informe claro y auditable.",
+    )
+    ws.merge_cells("A12:H13")
 
     if work.empty:
-        _excel_write_df(ws_readme, pd.DataFrame({"Mensaje": ["No se encontraron registros LATAM para generar el informe."]}), 18, 1, "Resultado")
+        _excel_write_df(ws, pd.DataFrame({"Mensaje": ["No se encontraron registros LATAM para generar el informe."]}), 15, 1, "Resultado")
         _excel_style_workbook(wb)
         wb.save(output)
         output.seek(0)
         return output.getvalue()
 
-    metrics = _corporate_global_metrics(work)
-    executive_rows = [
-        ("Base instalada LATAM actualizada", f"{metrics['base']:,} equipos"),
-        ("Equipos en rutina", f"{metrics['routine']:,} equipos ({metrics['routine_pct']}% de la base actual)"),
-        ("Recién comprados / pipeline", f"{metrics['pipeline']:,} equipos ({metrics['pipeline_pct']}% de la base actual)"),
-        ("Base comercial estimada", f"{metrics['commercial_base']:,} equipos = rutina + recién comprados/pipeline"),
-        ("Proyección venta/consumo aproximada", f"{metrics['projected_tests']:,.1f} tests/día estimados"),
-        ("Distribuidores / países / modelos", f"{metrics['distributors']} distribuidores · {metrics['countries']} países · {metrics['models']} modelos"),
+    total_base = _safe_int(len(work))
+    total_routine = _safe_int(pd.to_numeric(work["Routine count"], errors="coerce").fillna(0).sum())
+    total_purchased = _safe_int(pd.to_numeric(work["Recently purchased count"], errors="coerce").fillna(0).sum())
+    total_projected = total_routine + total_purchased
+    projected_pct = round(total_projected * 100 / max(total_base, 1), 1)
+    routine_pct = round(total_routine * 100 / max(total_base, 1), 1)
+    purchased_pct = round(total_purchased * 100 / max(total_base, 1), 1)
+
+    metrics_rows = [
+        ("Base instalada actualizada LATAM", f"{total_base:,} equipos"),
+        ("Equipos en rutina", f"{total_routine:,} equipos ({routine_pct}% de la base instalada)"),
+        ("Recién comprados", f"{total_purchased:,} equipos ({purchased_pct}% de la base instalada)"),
+        ("Base proyectada", f"{total_projected:,} equipos = rutina + recién comprados"),
+        ("% base proyectada sobre base instalada", f"{projected_pct}%"),
+        ("Distribuidores LATAM", f"{work['Distributor name'].nunique(dropna=True):,}"),
+        ("Países LATAM", f"{work['Country'].nunique(dropna=True):,}"),
+        ("Modelos incluidos", f"{work['Instrument type'].nunique(dropna=True):,}"),
     ]
-    _corporate_write_text_block(ws_readme, executive_rows, 18, 1, "Resumen ejecutivo para lectura rápida")
+    _add_summary_cards(ws, metrics_rows, 15)
 
-    ws_summary = wb.create_sheet("01_Resumen_ejecutivo")
-    ws_summary["A1"] = "Resumen ejecutivo LATAM"
-    ws_summary["A1"].font = Font(bold=True, size=16, color="FFFFFF")
-    ws_summary["A1"].fill = PatternFill("solid", fgColor="0B1B2A")
-    ws_summary.merge_cells("A1:H1")
-    ws_summary["A3"] = (
-        "Objetivo: mostrar la base instalada LATAM actualizada, identificar cuántos equipos están en rutina, "
-        "sumar los equipos recién comprados/pipeline y estimar una proyección aproximada de venta/consumo usando tests/día como proxy técnico."
-    )
-    ws_summary["A3"].alignment = Alignment(wrap_text=True, vertical="top")
-    ws_summary.merge_cells("A3:H4")
-
-    global_summary = pd.DataFrame({
-        "Métrica": [
-            "Base instalada LATAM actualizada",
+    formula_df = pd.DataFrame({
+        "Concepto": [
+            "Base instalada actualizada",
             "Equipos en rutina",
-            "Recién comprados / pipeline",
-            "Base comercial estimada",
-            "% rutina sobre base actual",
-            "% pipeline sobre base actual",
-            "Tests/día rutina actual",
-            "Tests/día nuevos estimados",
-            "Proyección venta/consumo aproximada (tests/día)",
-            "Distribuidores LATAM",
-            "Países LATAM",
-            "Modelos diferenciados",
+            "Recién comprados",
+            "Base proyectada",
         ],
-        "Valor": [
-            metrics["base"], metrics["routine"], metrics["pipeline"], metrics["commercial_base"],
-            metrics["routine_pct"], metrics["pipeline_pct"], metrics["routine_tests"], metrics["new_tests"],
-            metrics["projected_tests"], metrics["distributors"], metrics["countries"], metrics["models"],
-        ],
-        "Explicación": [
-            "Total de equipos LATAM visibles en el Records List.",
-            "Equipos actualmente productivos / en operación.",
-            "Equipos comprados o en pipeline para instalación/entrada en operación.",
-            "Rutina + recién comprados/pipeline. Base para potencial comercial.",
-            "Peso de equipos en rutina sobre la base LATAM actual.",
-            "Peso del pipeline sobre la base LATAM actual.",
-            "Tests/día reales reportados por equipos en rutina.",
-            "Tests/día estimados para nuevos/pipeline usando promedio por modelo.",
-            "Proxy técnico de potencial de venta/consumo. No incluye precio de reactivo.",
-            "Número de distribuidores incluidos en LATAM.",
-            "Número de países incluidos en LATAM.",
-            "Número de modelos diferenciados en la base.",
+        "Qué significa": [
+            "Total de equipos LATAM presentes en el Records List actual.",
+            "Equipos con estado operativo Routine. Es la base actualmente productiva.",
+            "Equipos comprados o próximos a entrar en operación. Incluye estados tipo Warehouse New System, Warehouse Ready To Be Installed y Warehouse Transit Customs.",
+            "Suma simple de equipos en rutina + recién comprados. Esta es la base de proyección solicitada.",
         ],
     })
-    _excel_write_df(ws_summary, global_summary, 6, 1, "Indicadores principales")
+    _excel_write_df(ws, formula_df, 15, 4, "Definiciones del informe")
 
-    status_summary = _corporate_spanish_summary(_corporate_group_summary(work, ["Corporate status type"]))
-    r_status, c_status, n_status, nc_status = _excel_write_df(ws_summary, status_summary, 6, 6, "Clasificación corporativa")
-    _excel_add_pie_chart(ws_summary, r_status, c_status, max(n_status, 1), "Distribución corporativa LATAM", "J6")
+    overview_df = pd.DataFrame({
+        "Indicador": ["Base instalada", "En rutina", "Recién comprados", "Base proyectada"],
+        "Cantidad": [total_base, total_routine, total_purchased, total_projected],
+    })
+    r_over, c_over, n_over, nc_over = _excel_write_df(ws, overview_df, 25, 1, "Vista ejecutiva de la proyección")
+    _excel_add_bar_chart(ws, r_over, c_over, n_over, nc_over, "Base instalada vs base proyectada", "D25", stacked=False)
 
-    monthly_global = _corporate_group_summary(work, ["Corporate month"])
-    monthly_global = _corporate_add_cumulative_columns(monthly_global)
-    monthly_model = _corporate_group_summary(work, ["Corporate month", "Instrument type"])
-    monthly_model = _corporate_sort_monthly_df(monthly_model)
-    global_model = _corporate_group_summary(work, ["Instrument type"])
-    distributor_summary = _corporate_group_summary(work, ["Distributor name", "Country"])
-    distributor_model = _corporate_group_summary(work, ["Distributor name", "Country", "Instrument type"])
+    monthly = _projection_summary(["Corporate month"])
+    monthly_out = _rename_clear(monthly)
+    monthly_out = monthly_out[[c for c in [
+        "Mes",
+        "Base instalada actualizada",
+        "Equipos en rutina",
+        "Recién comprados",
+        "Base proyectada",
+        "% base proyectada sobre base instalada",
+    ] if c in monthly_out.columns]].copy()
+    if "Mes" in monthly_out.columns:
+        monthly_out["Lectura"] = monthly_out.apply(
+            lambda row: f"En {row['Mes']}: {int(row['Equipos en rutina'])} en rutina + {int(row['Recién comprados'])} recién comprados = {int(row['Base proyectada'])} equipos proyectados.",
+            axis=1,
+        )
+    ws_month = wb.create_sheet("01_Mensual_LATAM")
+    _add_note(
+        ws_month,
+        "A1",
+        "Esta hoja responde la pregunta principal por mes: cuántos equipos hay en rutina, cuántos son recién comprados y cuál es la base proyectada resultante.",
+    )
+    ws_month.merge_cells("A1:H2")
+    r, c, n, nc = _excel_write_df(ws_month, monthly_out, 4, 1, "Proyección mensual LATAM")
+    chart_cols = ["Mes", "Equipos en rutina", "Recién comprados", "Base proyectada"]
+    chart_df = monthly_out[[col for col in chart_cols if col in monthly_out.columns]].copy() if not monthly_out.empty else pd.DataFrame()
+    r_chart, c_chart, n_chart, nc_chart = _excel_write_df(ws_month, chart_df, r + n + 4, 1, "Rutina + recién comprados por mes")
+    _corporate_add_column_chart(ws_month, r_chart, c_chart, n_chart, nc_chart, "Base proyectada por mes", "J4", stacked=False)
 
-    ws_month = wb.create_sheet("02_Mensual_global")
-    monthly_global_es = _corporate_spanish_summary(monthly_global)
-    r, c, n, nc = _excel_write_df(ws_month, monthly_global_es, 1, 1, "Lectura mensual global LATAM")
-    monthly_chart_cols = [
-        "Mes de instalación", "Equipos en rutina", "Recién comprados / pipeline", "Base comercial estimada"
-    ]
-    monthly_chart_df = monthly_global_es[[col for col in monthly_chart_cols if col in monthly_global_es.columns]].copy() if not monthly_global_es.empty else pd.DataFrame()
-    r_chart, c_chart, n_chart, nc_chart = _excel_write_df(ws_month, monthly_chart_df, r + n + 4, 1, "Rutina + recién comprados/pipeline por mes")
-    _corporate_add_column_chart(ws_month, r_chart, c_chart, n_chart, nc_chart, "Base comercial estimada por mes", "J2", stacked=False)
-    cumulative_cols = [
-        "Mes de instalación", "Base instalada acumulada", "Equipos en rutina acumulados",
-        "Recién comprados/pipeline acumulados", "Base comercial estimada acumulada",
-        "Proyección venta/consumo acumulada (tests/día)",
-    ]
-    cumulative_df = monthly_global_es[[col for col in cumulative_cols if col in monthly_global_es.columns]].copy() if not monthly_global_es.empty else pd.DataFrame()
-    r_cum, c_cum, n_cum, nc_cum = _excel_write_df(ws_month, cumulative_df, r_chart + n_chart + 4, 1, "Vista acumulada por mes")
-    _corporate_add_column_chart(ws_month, r_cum, c_cum, n_cum, nc_cum, "Base comercial acumulada", "J22", stacked=False)
+    monthly_model = _projection_summary(["Corporate month", "Instrument type"])
+    monthly_model_out = _rename_clear(monthly_model)
+    monthly_model_out = monthly_model_out[[c for c in [
+        "Mes", "Modelo", "Base instalada actualizada", "Equipos en rutina", "Recién comprados", "Base proyectada", "% base proyectada sobre base instalada"
+    ] if c in monthly_model_out.columns]].copy()
+    ws_model_month = wb.create_sheet("02_Mensual_modelo")
+    _add_note(ws_model_month, "A1", "Misma lectura mensual, separada por modelo para entender qué plataforma aporta a la base proyectada.")
+    ws_model_month.merge_cells("A1:H2")
+    _excel_write_df(ws_model_month, monthly_model_out, 4, 1, "Proyección mensual por modelo")
 
-    ws_month_model = wb.create_sheet("03_Mensual_por_modelo")
-    monthly_model_es = _corporate_spanish_summary(monthly_model)
-    _excel_write_df(ws_month_model, monthly_model_es, 1, 1, "Lectura mensual diferenciada por modelo")
-
-    ws_model = wb.create_sheet("04_Global_por_modelo")
-    global_model_es = _corporate_spanish_summary(global_model)
-    r, c, n, nc = _excel_write_df(ws_model, global_model_es, 1, 1, "Base comercial estimada por modelo")
-    model_chart_cols = ["Modelo", "Equipos en rutina", "Recién comprados / pipeline", "Base comercial estimada"]
-    model_chart_df = global_model_es[[col for col in model_chart_cols if col in global_model_es.columns]].copy() if not global_model_es.empty else pd.DataFrame()
-    r_model, c_model, n_model, nc_model = _excel_write_df(ws_model, model_chart_df, r + n + 4, 1, "Rutina + pipeline por modelo")
-    _excel_add_bar_chart(ws_model, r_model, c_model, n_model, nc_model, "Rutina + pipeline por modelo", "J2", stacked=True)
-
-    ws_dist = wb.create_sheet("05_Distribuidores")
-    distributor_summary_es = _corporate_spanish_summary(distributor_summary)
-    r, c, n, nc = _excel_write_df(ws_dist, distributor_summary_es, 1, 1, "Resumen claro por distribuidor")
-    top_dist_chart = distributor_summary_es.sort_values("Base comercial estimada", ascending=False).head(15) if not distributor_summary_es.empty and "Base comercial estimada" in distributor_summary_es.columns else pd.DataFrame()
-    top_dist_chart = top_dist_chart[["Distribuidor", "Base comercial estimada"]].copy() if not top_dist_chart.empty else pd.DataFrame()
-    r_top, c_top, n_top, nc_top = _excel_write_df(ws_dist, top_dist_chart, r + n + 4, 1, "Top distribuidores por base comercial estimada")
-    _excel_add_bar_chart(ws_dist, r_top, c_top, n_top, nc_top, "Top distribuidores por base comercial estimada", "J2")
-
-    ws_dist_model = wb.create_sheet("06_Distribuidor_modelo")
-    distributor_model_es = _corporate_spanish_summary(distributor_model)
-    _excel_write_df(ws_dist_model, distributor_model_es, 1, 1, "Detalle por distribuidor y modelo")
+    dist_model = _projection_summary(["Distributor name", "Country", "Instrument type"])
+    dist_model_out = _rename_clear(dist_model)
+    dist_model_out = dist_model_out[[c for c in [
+        "Distribuidor", "País", "Modelo", "Base instalada actualizada", "Equipos en rutina", "Recién comprados", "Base proyectada", "% base proyectada sobre base instalada"
+    ] if c in dist_model_out.columns]].copy()
+    if not dist_model_out.empty and "Base proyectada" in dist_model_out.columns:
+        dist_model_out = dist_model_out.sort_values(["Base proyectada", "Distribuidor", "Modelo"], ascending=[False, True, True]).reset_index(drop=True)
+    ws_dist = wb.create_sheet("03_Distribuidor_modelo")
+    _add_note(ws_dist, "A1", "Resumen para seguimiento con distribuidores. Cada fila muestra la base instalada, rutina, recién comprados y base proyectada por modelo.")
+    ws_dist.merge_cells("A1:H2")
+    r, c, n, nc = _excel_write_df(ws_dist, dist_model_out, 4, 1, "Proyección por distribuidor y modelo")
+    top_dist = (
+        dist_model_out.groupby("Distribuidor", as_index=False)["Base proyectada"].sum().sort_values("Base proyectada", ascending=False).head(15)
+        if not dist_model_out.empty and "Distribuidor" in dist_model_out.columns and "Base proyectada" in dist_model_out.columns
+        else pd.DataFrame()
+    )
+    r_top, c_top, n_top, nc_top = _excel_write_df(ws_dist, top_dist, r + n + 4, 1, "Top distribuidores por base proyectada")
+    _excel_add_bar_chart(ws_dist, r_top, c_top, n_top, nc_top, "Top distribuidores por base proyectada", "J4", stacked=False)
 
     detail_cols = [
-        "Commercial Region", "Country", "Distributor name", "Customer name", "City",
-        "Instrument type", "Serial number", "Installation date", "Corporate month",
-        "Operational status grouped", "Corporate status type", "Asset condition",
-        "Number of tests per day", "Tests/day actual", "Model routine avg tests/day",
-        "Corporate projection units", "Projected tests/day", "Type of contract",
-        "In Blood Bank", "Operating System", "Machine Configurations",
+        "Country", "Distributor name", "Customer name", "City", "Instrument type", "Serial number",
+        "Installation date", "Corporate month", "Operational status grouped", "Corporate status type",
+        "Asset condition", "Type of contract", "In Blood Bank", "Operating System",
     ]
     detail_cols = [c for c in detail_cols if c in work.columns]
     detail = work[detail_cols].copy()
     detail = detail.rename(columns={
-        "Commercial Region": "Región comercial",
         "Country": "País",
         "Distributor name": "Distribuidor",
         "Customer name": "Cliente",
@@ -1734,25 +1794,27 @@ def build_monthly_corporate_latam_report_excel(records_df: pd.DataFrame, source_
         "Instrument type": "Modelo",
         "Serial number": "Serial",
         "Installation date": "Fecha de instalación",
-        "Corporate month": "Mes de instalación",
-        "Operational status grouped": "Estado operativo normalizado",
-        "Corporate status type": "Clasificación corporativa",
+        "Corporate month": "Mes",
+        "Operational status grouped": "Estado operativo",
+        "Corporate status type": "Clasificación",
         "Asset condition": "Condición del activo",
-        "Number of tests per day": "Tests/día reportados",
-        "Tests/day actual": "Tests/día usados como real",
-        "Model routine avg tests/day": "Promedio tests/día del modelo usado para estimar nuevos",
-        "Corporate projection units": "Incluye en base comercial estimada",
-        "Projected tests/day": "Proyección venta/consumo aproximada (tests/día)",
         "Type of contract": "Tipo de contrato",
         "In Blood Bank": "Banco de sangre",
         "Operating System": "Sistema operativo",
-        "Machine Configurations": "Configuración de máquina",
     })
-    sort_cols = [c for c in ["País", "Distribuidor", "Modelo", "Clasificación corporativa", "Serial"] if c in detail.columns]
+    if "Clasificación" in detail.columns:
+        detail["Incluye en base proyectada"] = detail["Clasificación"].isin(["En rutina", "Recién comprados / pipeline"]).map({True: "Sí", False: "No"})
+        detail["Clasificación"] = detail["Clasificación"].replace({"Recién comprados / pipeline": "Recién comprados"})
+    sort_cols = [c for c in ["País", "Distribuidor", "Modelo", "Clasificación", "Serial"] if c in detail.columns]
     if sort_cols:
         detail = detail.sort_values(sort_cols).reset_index(drop=True)
-    ws_detail = wb.create_sheet("07_Detalle_LATAM")
-    _excel_write_df(ws_detail, detail, 1, 1, "Detalle de equipos LATAM usados en el informe")
+    ws_detail = wb.create_sheet("04_Detalle")
+    _add_note(ws_detail, "A1", "Detalle de los equipos que soportan el informe. Esta hoja sirve para auditoría y validación operativa.")
+    ws_detail.merge_cells("A1:H2")
+    _excel_write_df(ws_detail, detail, 4, 1, "Detalle LATAM usado en la proyección")
+
+    for sheet in wb.worksheets:
+        sheet.freeze_panes = sheet.freeze_panes or "A4"
 
     _excel_style_workbook(wb)
     wb.save(output)
@@ -3877,9 +3939,9 @@ def payload_from_manufacturing_year(point: dict) -> dict | None:
         f"Año de fabricación: {year_text}",
     )
 
-CODE_CREATED_AT = "2026-06-05 12:28:00 COT"
-CODE_VERSION_LABEL = "v40"
-PARSER_VERSION = "records-list-stable-v40-20260605-1228COT-corporate-report-executive-projection"
+CODE_CREATED_AT = "2026-06-05 12:54:00 COT"
+CODE_VERSION_LABEL = "v41"
+PARSER_VERSION = "records-list-stable-v41-20260605-1254COT-corporate-report-simple-base-projection"
 
 
 def get_uploaded_file_signature(uploaded_file) -> str:
@@ -5614,10 +5676,10 @@ if active_dashboard_tab == "Base instalada":
         file_name=f"informe_corporativo_mensual_LATAM_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
         mime=EXCEL_MIME,
         use_container_width=False,
-        key="download_monthly_corporate_latam_report_v40",
-        help="Genera un Excel solo LATAM con base instalada actualizada, equipos en rutina, recién comprados/pipeline y proyección aproximada por mes, modelo y distribuidor.",
+        key="download_monthly_corporate_latam_report_v41",
+        help="Genera un Excel solo LATAM con base instalada actualizada, equipos en rutina, recién comprados y base proyectada = rutina + recién comprados.",
     )
-    st.caption("Informe corporativo mensual solo LATAM: base instalada actualizada, rutina mensual, recién comprados/pipeline y proyección aproximada de venta/consumo por modelo y distribuidor.")
+    st.caption("Informe corporativo mensual solo LATAM: base instalada actualizada, equipos en rutina, recién comprados y base proyectada = rutina + recién comprados.")
     geo_df = filtered.dropna(subset=["Latitude", "Longitude"]).copy()
     if geo_df.empty:
         st.info("No hay coordenadas válidas para mostrar en el mapa.")
