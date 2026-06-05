@@ -1386,7 +1386,7 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
         'title': 'Configuración de equipo',
         'intro': 'Se consolidan los campos detectados en configuración de equipo y se muestran las distribuciones de los ítems con mayor visibilidad en el filtro activo. Banco de sangre se presenta primero como indicador ejecutivo principal.',
         'summary_pairs': cfg_pairs,
-        'charts': [_make_pdf_donut(pd.DataFrame({'Categoría':['Banco de sangre','Resto de equipos'],'Count':[blood_bank_yes,max(len(filtered_df)-blood_bank_yes,0)]}), 'Categoría', 'Count', 'Banco de sangre', max_rows=2), _make_pdf_barh(cfg_cov, 'Campo de configuración', 'Equipos con dato', 'Cobertura de campos de configuración', max_rows=10)] + cfg_charts,
+        'charts': [_make_pdf_donut(pd.DataFrame({'Categoría':['Banco de sangre','Equipos en laboratorio'],'Count':[blood_bank_yes,max(len(filtered_df)-blood_bank_yes,0)]}), 'Categoría', 'Count', 'Banco de sangre', max_rows=2), _make_pdf_barh(cfg_cov, 'Campo de configuración', 'Equipos con dato', 'Cobertura de campos de configuración', max_rows=10)] + cfg_charts,
         'table_title': 'Resumen de configuración de equipo',
         'table_df': cfg_value_df,
         'table_max_rows': 12,
@@ -1824,7 +1824,7 @@ def build_blood_bank_donut(df: pd.DataFrame) -> go.Figure:
     total_assets = int(len(df))
     yes_count = count_blood_bank_yes(df) if total_assets else 0
     no_count = max(total_assets - yes_count, 0)
-    summary = pd.DataFrame({"Label": ["Banco de sangre", "Resto de equipos"], "Count": [yes_count, no_count]})
+    summary = pd.DataFrame({"Label": ["Banco de sangre", "Equipos en laboratorio"], "Count": [yes_count, no_count]})
 
     fig = go.Figure()
     fig.add_trace(
@@ -2798,9 +2798,9 @@ def payload_from_manufacturing_year(point: dict) -> dict | None:
         f"Año de fabricación: {year_text}",
     )
 
-CODE_CREATED_AT = "2026-06-02 20:20:00 COT"
-CODE_VERSION_LABEL = "v30"
-PARSER_VERSION = "records-list-stable-v30-20260602-2020COT-tab-persistence-machine-config-filters"
+CODE_CREATED_AT = "2026-06-05 09:18:36 COT"
+CODE_VERSION_LABEL = "v31"
+PARSER_VERSION = "records-list-stable-v31-20260605-0918COT-hide-parser-message-lab-label"
 
 
 def get_uploaded_file_signature(uploaded_file) -> str:
@@ -3031,15 +3031,11 @@ def _finalize_records_df(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def load_records(file_bytes: bytes, parser_version: str = PARSER_VERSION) -> pd.DataFrame:
-    # Do not cache this parser across builds; parser_version is an explicit cache/session breaker.
+    # Parser tolerante para Records List.
+    # Nota: este texto se deja como comentario para que Streamlit no lo renderice
+    # accidentalmente como bloque visible en el dashboard.
+    # parser_version actúa como breaker de firma/sesión entre builds.
     _ = parser_version
-    """Carga Records List CSV de forma tolerante.
-
-    El export histórico viene separado por punto y coma, pero algunos archivos
-    llegan desde Excel/GitHub con coma, tabulador o con encabezados ya limpios.
-    Esta función intenta detectar el delimitador sin romper la alineación
-    posicional que ya funcionaba para el Records List original.
-    """
     raw_text = file_bytes.decode("utf-8-sig", errors="replace")
     lines = [line for line in raw_text.splitlines() if line.strip()]
     expected_len = len(CUSTOM_HEADERS)
@@ -4813,7 +4809,7 @@ if active_dashboard_tab == "Machine configuration":
             payload_builder=payload_from_blood_bank_point,
         )
         render_pie_filter_fallback_buttons(
-            ["Banco de sangre", "Resto de equipos"],
+            ["Banco de sangre", "Equipos en laboratorio"],
             key_prefix="blood_bank_main",
             payload_from_value=lambda selected_label: payload_from_blood_bank_point({"label": selected_label, "customdata": [selected_label]}),
             max_options=2,
