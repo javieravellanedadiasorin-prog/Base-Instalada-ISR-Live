@@ -947,21 +947,26 @@ def dataframe_to_excel_bytes(sheet_map: dict[str, pd.DataFrame]) -> bytes:
 def build_dashboard_excel_export(
     filtered_df: pd.DataFrame,
     filter_summary: dict[str, str] | None,
-    active_tab: str,
+    active_tab: str | None = None,
     source_label_value: str = "",
     stock_context: dict | None = None,
+    active_dashboard_tab: str | None = None,
 ) -> bytes:
     """Genera un Excel ejecutivo con datos filtrados, tablas resumen y gráficas.
 
     El contenido respeta todos los filtros laterales y filtros aplicados desde gráficas.
+    Acepta `active_tab` y `active_dashboard_tab` para mantener compatibilidad con
+    las llamadas existentes del dashboard y evitar errores por nombre de argumento.
     """
     from openpyxl import Workbook
+
+    active_tab_value = active_dashboard_tab or active_tab or "Dashboard"
 
     output = BytesIO()
     wb = Workbook()
     summary_ws = wb.active
     summary_ws.title = "00_Resumen"
-    _excel_add_readme(summary_ws, filter_summary or {}, len(filtered_df), active_tab, source_label_value)
+    _excel_add_readme(summary_ws, filter_summary or {}, len(filtered_df), active_tab_value, source_label_value)
 
     export_df = filtered_df.drop(columns=[c for c in filtered_df.columns if str(c).startswith("FLAG::")], errors="ignore").copy()
     export_df = export_df[_preferred_export_columns(export_df)]
@@ -3179,9 +3184,9 @@ def payload_from_manufacturing_year(point: dict) -> dict | None:
         f"Año de fabricación: {year_text}",
     )
 
-CODE_CREATED_AT = "2026-06-05 10:32:00 COT"
-CODE_VERSION_LABEL = "v34"
-PARSER_VERSION = "records-list-stable-v34-20260605-1032COT-excel-export-with-charts"
+CODE_CREATED_AT = "2026-06-05 10:47:00 COT"
+CODE_VERSION_LABEL = "v35"
+PARSER_VERSION = "records-list-stable-v35-20260605-1047COT-excel-export-keyword-fix"
 
 
 def get_uploaded_file_signature(uploaded_file) -> str:
@@ -6817,5 +6822,5 @@ with foot_r:
         file_name=f"records_list_filtered_dashboard_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
         mime=EXCEL_MIME,
         use_container_width=True,
-        key="download_filtered_excel_dashboard_v34",
+        key="download_filtered_excel_dashboard_v35",
     )
