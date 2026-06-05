@@ -691,15 +691,87 @@ def _excel_safe_sheet_name(sheet_name: str) -> str:
     return safe_name or "Sheet1"
 
 
+def _excel_safe_cell_value(value):
+    """Return a value that openpyxl can safely write to a worksheet cell.
+
+    Some dashboard DataFrames may contain pandas extension values, dictionaries,
+    lists, tuples, sets, intervals or other Python objects created by Plotly /
+    Streamlit / pandas processing. openpyxl cannot write those objects directly
+    and raises errors such as ``Cannot convert {0: ...} to Excel``. This
+    sanitizer keeps numbers/dates as native Excel-compatible values and converts
+    complex objects to readable text before writing.
+    """
+    import json
+    from datetime import date as _date, datetime as _datetime
+
+    try:
+        if value is None or pd.isna(value):
+            return ""
+    except Exception:
+        # pd.isna(dict/list) can return a non-scalar result. Continue with the
+        # explicit object handling below.
+        pass
+
+    if isinstance(value, pd.Timestamp):
+        if pd.isna(value):
+            return ""
+        try:
+            if value.tzinfo is not None:
+                value = value.tz_convert(None)
+        except Exception:
+            pass
+        return value.to_pydatetime()
+
+    if isinstance(value, (_datetime, _date)):
+        return value
+
+    if isinstance(value, pd.Timedelta):
+        return str(value)
+
+    if isinstance(value, np.generic):
+        try:
+            native = value.item()
+            if isinstance(native, float) and (math.isnan(native) or math.isinf(native)):
+                return ""
+            return native
+        except Exception:
+            return str(value)
+
+    if isinstance(value, float):
+        if math.isnan(value) or math.isinf(value):
+            return ""
+        return value
+
+    if isinstance(value, (int, bool, str)):
+        if isinstance(value, str):
+            # Remove control characters not accepted by Excel XML.
+            return re.sub(r"[\x00-\x08\x0B-\x0C\x0E-\x1F]", "", value)
+        return value
+
+    if isinstance(value, (dict, list, tuple, set)):
+        try:
+            if isinstance(value, set):
+                value = sorted(list(value), key=lambda x: str(x))
+            text_value = json.dumps(value, ensure_ascii=False, default=str)
+        except Exception:
+            text_value = str(value)
+        return re.sub(r"[\x00-\x08\x0B-\x0C\x0E-\x1F]", "", text_value)
+
+    text_value = str(value)
+    return re.sub(r"[\x00-\x08\x0B-\x0C\x0E-\x1F]", "", text_value)
+
+
 def _excel_clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     clean_df = df.copy() if isinstance(df, pd.DataFrame) else pd.DataFrame()
     if clean_df.empty:
         return clean_df
+
+    # Sanitize every column, not only object columns. Pandas categorical /
+    # extension columns can still contain values that openpyxl cannot bind.
     for col in clean_df.columns:
         if str(col).startswith("FLAG::"):
             continue
-        if clean_df[col].dtype == object:
-            clean_df[col] = clean_df[col].map(lambda value: "" if pd.isna(value) else str(value))
+        clean_df[col] = clean_df[col].map(_excel_safe_cell_value)
     return clean_df
 
 
@@ -790,7 +862,7 @@ def _excel_write_df(ws, df: pd.DataFrame, start_row: int = 1, start_col: int = 1
 
     for r_offset, row in enumerate(dataframe_to_rows(clean_df, index=False, header=True), start=0):
         for c_offset, value in enumerate(row, start=0):
-            ws.cell(start_row + r_offset, start_col + c_offset, value)
+            ws.cell(start_row + r_offset, start_col + c_offset, _excel_safe_cell_value(value))
 
     n_rows = len(clean_df)
     n_cols = max(len(clean_df.columns), 1)
@@ -3184,9 +3256,9 @@ def payload_from_manufacturing_year(point: dict) -> dict | None:
         f"Año de fabricación: {year_text}",
     )
 
-CODE_CREATED_AT = "2026-06-05 10:47:00 COT"
-CODE_VERSION_LABEL = "v35"
-PARSER_VERSION = "records-list-stable-v35-20260605-1047COT-excel-export-keyword-fix"
+CODE_CREATED_AT = "2026-06-05 11:06:00 COT"
+CODE_VERSION_LABEL = "v36"
+PARSER_VERSION = "records-list-stable-v36-20260605-1106COT-excel-export-safe-cell-values"
 
 
 def get_uploaded_file_signature(uploaded_file) -> str:
@@ -6822,5 +6894,5 @@ with foot_r:
         file_name=f"records_list_filtered_dashboard_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
         mime=EXCEL_MIME,
         use_container_width=True,
-        key="download_filtered_excel_dashboard_v35",
+        key="download_filtered_excel_dashboard_v36",
     )
