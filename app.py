@@ -910,19 +910,56 @@ def _excel_add_pie_chart(ws, data_start_row: int, data_start_col: int, n_rows: i
     ws.add_chart(chart, anchor)
 
 
+def _excel_value_counts_label(value) -> str:
+    """Etiqueta segura para conteos en Excel.
+
+    Evita errores con dtypes pandas nullable, por ejemplo Int64/Float64/Categorical,
+    donde fillna("No informado") puede fallar porque el dtype no acepta strings.
+    """
+    try:
+        missing = pd.isna(value)
+        if isinstance(missing, (bool, np.bool_)) and bool(missing):
+            return "No informado"
+    except Exception:
+        pass
+
+    if isinstance(value, (pd.Timestamp, datetime, date)):
+        try:
+            if pd.isna(value):
+                return "No informado"
+        except Exception:
+            pass
+        try:
+            return pd.to_datetime(value).strftime("%Y-%m-%d")
+        except Exception:
+            return str(value).strip() or "No informado"
+
+    if isinstance(value, (list, tuple, set)):
+        text = ", ".join(str(v) for v in value)
+    elif isinstance(value, dict):
+        text = "; ".join(f"{k}: {v}" for k, v in value.items())
+    else:
+        text = str(value)
+
+    text = text.strip()
+    if not text or text.lower() in {"nan", "none", "nat", "<na>"}:
+        return "No informado"
+    return text
+
+
 def _excel_value_counts_df(df: pd.DataFrame, column: str, label_name: str = "Categoría", top_n: int | None = None) -> pd.DataFrame:
     if df is None or df.empty or column not in df.columns:
         return pd.DataFrame(columns=[label_name, "Cantidad"])
-    counts = (
-        df[column]
-        .fillna("No informado")
-        .astype(str)
-        .str.strip()
-        .replace("", "No informado")
-        .value_counts()
-        .reset_index()
-    )
+
+    series = df[column]
+    if isinstance(series, pd.DataFrame):
+        series = series.bfill(axis=1).iloc[:, 0]
+
+    labels = series.astype("object").map(_excel_value_counts_label)
+    counts = labels.value_counts(dropna=False).reset_index()
     counts.columns = [label_name, "Cantidad"]
+    counts[label_name] = counts[label_name].map(_excel_value_counts_label)
+    counts["Cantidad"] = pd.to_numeric(counts["Cantidad"], errors="coerce").fillna(0).astype(int)
     if top_n:
         counts = counts.head(top_n)
     return counts
@@ -3256,9 +3293,9 @@ def payload_from_manufacturing_year(point: dict) -> dict | None:
         f"Año de fabricación: {year_text}",
     )
 
-CODE_CREATED_AT = "2026-06-05 11:06:00 COT"
-CODE_VERSION_LABEL = "v36"
-PARSER_VERSION = "records-list-stable-v36-20260605-1106COT-excel-export-safe-cell-values"
+CODE_CREATED_AT = "2026-06-05 11:22:00 COT"
+CODE_VERSION_LABEL = "v37"
+PARSER_VERSION = "records-list-stable-v37-20260605-1122COT-excel-export-nullable-dtype-fix"
 
 
 def get_uploaded_file_signature(uploaded_file) -> str:
@@ -6894,5 +6931,5 @@ with foot_r:
         file_name=f"records_list_filtered_dashboard_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
         mime=EXCEL_MIME,
         use_container_width=True,
-        key="download_filtered_excel_dashboard_v36",
+        key="download_filtered_excel_dashboard_v37",
     )
