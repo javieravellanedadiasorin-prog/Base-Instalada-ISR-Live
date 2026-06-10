@@ -3979,9 +3979,9 @@ def payload_from_manufacturing_year(point: dict) -> dict | None:
         f"Año de fabricación: {year_text}",
     )
 
-CODE_CREATED_AT = "2026-06-05 13:18:00 COT"
-CODE_VERSION_LABEL = "v42"
-PARSER_VERSION = "records-list-stable-v42-20260605-1318COT-excel-sheet-view-repair"
+CODE_CREATED_AT = "2026-06-10 15:35:00 COT"
+CODE_VERSION_LABEL = "v43"
+PARSER_VERSION = "records-list-stable-v43-20260610-1535COT-stock-csv-parser-fix"
 
 
 def get_uploaded_file_signature(uploaded_file) -> str:
@@ -4457,9 +4457,57 @@ def to_csv_download(df: pd.DataFrame) -> bytes:
 
 
 def load_table_file(file_bytes: bytes, filename: str) -> pd.DataFrame:
+    """Carga archivos tabulares usados en Stock/Carstock de forma tolerante.
+
+    Algunos reportes de stock enviados por distribuidores vienen como CSV
+    separados por punto y coma, coma, tabulador o con líneas irregulares.
+    El lector anterior usaba pd.read_csv con parámetros por defecto y podía
+    tumbar la app con ParserError. Esta versión prueba combinaciones seguras
+    y omite líneas corruptas antes de fallar.
+    """
     name = filename.lower()
     if name.endswith(".csv"):
-        return pd.read_csv(BytesIO(file_bytes))
+        attempts = []
+        for encoding in ["utf-8-sig", "latin1"]:
+            for sep in [None, ";", ",", "\t", "|"]:
+                attempts.append({"encoding": encoding, "sep": sep, "quoting": csv.QUOTE_MINIMAL})
+            for sep in [";", ",", "\t", "|"]:
+                attempts.append({"encoding": encoding, "sep": sep, "quoting": csv.QUOTE_NONE})
+
+        best_df = None
+        best_score = -1
+        last_error = None
+
+        for attempt in attempts:
+            try:
+                text = file_bytes.decode(attempt["encoding"], errors="replace")
+                read_kwargs = dict(
+                    sep=attempt["sep"],
+                    engine="python",
+                    on_bad_lines="skip",
+                    dtype=str,
+                )
+                if attempt["quoting"] == csv.QUOTE_NONE:
+                    read_kwargs["quoting"] = csv.QUOTE_NONE
+                    read_kwargs["escapechar"] = "\\"
+                df = pd.read_csv(StringIO(text), **read_kwargs)
+                df = df.dropna(axis=0, how="all").dropna(axis=1, how="all")
+                if df.empty or df.shape[1] < 1:
+                    continue
+                score = df.shape[1] * 100000 + df.shape[0]
+                if score > best_score:
+                    best_df = df
+                    best_score = score
+            except Exception as exc:
+                last_error = exc
+                continue
+
+        if best_df is not None:
+            best_df.columns = [str(c).strip() for c in best_df.columns]
+            return best_df
+
+        raise ValueError(f"No fue posible leer el CSV de stock: {filename}. Último error: {last_error}")
+
     return pd.read_excel(BytesIO(file_bytes))
 
 
