@@ -2193,38 +2193,131 @@ def _safe_share_pct(part, total) -> float:
         return 0.0
 
 
-def _make_pdf_barh(df: pd.DataFrame, label_col: str, value_col: str, title: str, xlabel: str = "Cantidad", max_rows: int = 10, color: str = "#2F80ED"):
+MANUFACTURING_AGE_BUCKET_ORDER = ["0–3 años", "3–5 años", "5–8 años", "8–10 años", "10–15 años", "15+ años"]
+INSTALLATION_AGE_BUCKET_ORDER = ["0-5 años", "5-8 años", "8-10 años", "10+ años"]
+
+
+def _has_valid_numeric_column(df: pd.DataFrame, column: str) -> bool:
+    if df is None or df.empty or column not in df.columns:
+        return False
+    values = pd.to_numeric(df[column], errors="coerce")
+    return bool(values.notna().any())
+
+
+def _ordered_value_counts(series: pd.Series, order: list[str], label_col: str = "Rango", value_col: str = "Cantidad") -> pd.DataFrame:
+    if series is None:
+        return pd.DataFrame(columns=[label_col, value_col])
+    clean = series.dropna().astype(str).str.strip()
+    clean = clean[clean.ne("") & ~clean.str.lower().isin({"nan", "none", "nat", "<na>"})]
+    counts = clean.value_counts(dropna=False)
+    rows = [{label_col: label, value_col: int(counts.get(label, 0))} for label in order]
+    out = pd.DataFrame(rows)
+    return out[out[value_col] > 0].reset_index(drop=True)
+
+
+def _build_pdf_age_profile(filtered_df: pd.DataFrame) -> tuple[pd.DataFrame, str, str]:
+    """Devuelve el perfil de antigüedad correcto para el PDF.
+
+    Prioridad:
+    1. Fecha de fabricación, cuando `Manufacturing age (years)` está disponible.
+    2. Fecha de instalación, solo como respaldo cuando no existe cruce de fabricación.
+
+    Esto corrige la diferencia entre el dashboard de Antigüedad / fabricación y
+    el PDF, que antes usaba siempre `Age (years)` calculado por fecha de instalación.
+    """
+    age_df = filtered_df.copy() if isinstance(filtered_df, pd.DataFrame) else pd.DataFrame()
+
+    if _has_valid_numeric_column(age_df, "Manufacturing age (years)"):
+        age_values = pd.to_numeric(age_df["Manufacturing age (years)"], errors="coerce")
+        if "Manufacturing age bucket" in age_df.columns:
+            bucket_series = age_df["Manufacturing age bucket"]
+        else:
+            bucket_series = build_age_bucket(age_values)
+
+        valid_bucket_series = bucket_series[age_values.notna()]
+        age_counts = _ordered_value_counts(valid_bucket_series, MANUFACTURING_AGE_BUCKET_ORDER)
+        return age_counts, "Perfil de antigüedad por fabricación", "Fecha de fabricación"
+
+    age_values = pd.to_numeric(age_df.get("Age (years)", pd.Series(dtype=float)), errors="coerce")
+    install_bucket = pd.cut(
+        age_values,
+        bins=[-np.inf, 5, 8, 10, np.inf],
+        labels=INSTALLATION_AGE_BUCKET_ORDER,
+        right=False,
+    )
+    age_counts = _ordered_value_counts(install_bucket, INSTALLATION_AGE_BUCKET_ORDER)
+    return age_counts, "Perfil de antigüedad por instalación", "Fecha de instalación"
+
+
+def _make_pdf_barh(
+    df: pd.DataFrame,
+    label_col: str,
+    value_col: str,
+    title: str,
+    xlabel: str = "Cantidad",
+    max_rows: int = 10,
+    color: str = "#2F80ED",
+    preserve_order: bool = False,
+    label_wrap: int = 30,
+):
+    """Genera una barra horizontal para PDF.
+
+    Mejora v44:
+    - `preserve_order=True` evita que gráficos ordinales, como rangos de edad,
+      se reordenen por cantidad. Esto permite que el PDF conserve la misma lógica
+      de lectura del dashboard.
+    - `label_wrap` permite controlar el corte de etiquetas sin modificar el resto
+      de gráficas ejecutivas.
+    """
     if not MATPLOTLIB_AVAILABLE or df is None or df.empty or label_col not in df.columns or value_col not in df.columns:
         return None
-    work = df[[label_col, value_col]].copy().dropna()
+
+    work = df[[label_col, value_col]].copy().dropna(subset=[label_col])
     if work.empty:
         return None
+
     work[value_col] = pd.to_numeric(work[value_col], errors="coerce")
-    work = work.dropna()
+    work = work.dropna(subset=[value_col])
+    work = work[work[value_col] > 0]
     if work.empty:
         return None
-    work = work.sort_values(value_col, ascending=False).head(max_rows).sort_values(value_col, ascending=True)
-    work[label_col] = work[label_col].map(lambda x: _wrap_label(x, 30))
+
+    if preserve_order:
+        # Matplotlib barh dibuja la primera fila abajo; se invierte para que el
+        # orden del DataFrame se lea de arriba hacia abajo en el PDF.
+        work = work.head(max_rows).iloc[::-1].copy()
+    else:
+        work = work.sort_values(value_col, ascending=False).head(max_rows).sort_values(value_col, ascending=True)
+
+    work[label_col] = work[label_col].map(lambda x: _wrap_label(x, label_wrap))
     height = max(2.8, 0.48 * len(work) + 1.25)
     fig, ax = plt.subplots(figsize=(8.6, height))
     bars = ax.barh(work[label_col].astype(str), work[value_col].astype(float), color=color)
-    ax.set_title(title, fontsize=12, fontweight='bold')
+    ax.set_title(title, fontsize=12, fontweight="bold")
     ax.set_xlabel(xlabel, fontsize=9)
-    ax.tick_params(axis='y', labelsize=8)
-    ax.tick_params(axis='x', labelsize=8)
-    ax.grid(axis='x', alpha=0.22)
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
+    ax.tick_params(axis="y", labelsize=8)
+    ax.tick_params(axis="x", labelsize=8)
+    ax.grid(axis="x", alpha=0.22)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    max_value = float(work[value_col].max()) if not work.empty else 0.0
     for bar in bars:
         value = bar.get_width()
-        ax.text(value + max(work[value_col].max() * 0.01, 0.1), bar.get_y() + bar.get_height()/2, safe_number_text(value, '0'), va='center', fontsize=8)
+        ax.text(
+            value + max(max_value * 0.01, 0.1),
+            bar.get_y() + bar.get_height() / 2,
+            safe_number_text(value, "0"),
+            va="center",
+            fontsize=8,
+        )
+
     fig.tight_layout()
     buf = BytesIO()
-    fig.savefig(buf, format='png', dpi=180, bbox_inches='tight', facecolor='white')
+    fig.savefig(buf, format="png", dpi=180, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     buf.seek(0)
     return buf
-
 
 
 
@@ -2468,16 +2561,8 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
     top_inst.columns = ['Instrumento', 'Cantidad']
     state_counts = filtered_df['Operational status grouped'].fillna('No informado').value_counts().reset_index()
     state_counts.columns = ['Estado', 'Cantidad']
-    age_df = filtered_df.copy()
-    age_df['Rango de antigüedad'] = pd.cut(
-        pd.to_numeric(age_df.get('Age (years)', pd.Series(dtype=float)), errors='coerce'),
-        bins=[-1, 5, 8, 10, 100],
-        labels=['0-5 años', '5-8 años', '8-10 años', '10+ años']
-    )
-    age_counts = age_df['Rango de antigüedad'].value_counts().reset_index()
-    age_counts.columns = ['Rango', 'Cantidad']
-    age_counts['Rango'] = pd.Categorical(age_counts['Rango'], categories=['0-5 años', '5-8 años', '8-10 años', '10+ años'], ordered=True)
-    age_counts = age_counts.sort_values('Rango')
+    age_counts, age_chart_title, age_source_label = _build_pdf_age_profile(filtered_df)
+    base_pairs.append(('Base usada para antigüedad', age_source_label))
 
     corporate_model_charts = []
     corporate_model_df = filtered_df.copy()
@@ -2518,7 +2603,7 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
             _make_pdf_barh(top_country, 'País', 'Cantidad', 'Países con mayor concentración', max_rows=10),
             _make_pdf_barh(top_inst, 'Instrumento', 'Cantidad', 'Mix de instrumentos', max_rows=10),
             _make_pdf_barh(state_counts, 'Estado', 'Cantidad', 'Distribución por estado operativo', max_rows=10),
-            _make_pdf_barh(age_counts, 'Rango', 'Cantidad', 'Perfil de antigüedad', max_rows=4),
+            _make_pdf_barh(age_counts, 'Rango', 'Cantidad', age_chart_title, max_rows=len(age_counts), preserve_order=True),
         ] + corporate_model_charts,
         'table_title': 'Muestra resumida de equipos filtrados',
         'table_df': prepare_pdf_report_table(filtered_df),
@@ -3980,8 +4065,8 @@ def payload_from_manufacturing_year(point: dict) -> dict | None:
     )
 
 CODE_CREATED_AT = "2026-06-10 15:35:00 COT"
-CODE_VERSION_LABEL = "v43"
-PARSER_VERSION = "records-list-stable-v43-20260610-1535COT-stock-csv-parser-fix"
+CODE_VERSION_LABEL = "v44"
+PARSER_VERSION = "records-list-stable-v44-20260625-1630COT-pdf-manufacturing-age-fix"
 
 
 def get_uploaded_file_signature(uploaded_file) -> str:
@@ -5535,13 +5620,13 @@ def load_manufacturing_source(file_bytes: bytes, filename: str) -> dict[str, pd.
 
 
 def build_age_bucket(series: pd.Series) -> pd.Series:
+    age_values = pd.to_numeric(series, errors="coerce")
     return pd.cut(
-        series,
+        age_values,
         bins=[-np.inf, 3, 5, 8, 10, 15, np.inf],
-        labels=["0–3 años", "3–5 años", "5–8 años", "8–10 años", "10–15 años", "15+ años"],
+        labels=MANUFACTURING_AGE_BUCKET_ORDER,
         right=False,
     )
-
 
 def build_manufacturing_match(
     filtered_assets: pd.DataFrame,
@@ -5593,6 +5678,52 @@ def build_manufacturing_match(
     merged["Manufacturing age bucket"] = build_age_bucket(merged["Manufacturing age (years)"])
     merged["Manufacturing matched"] = merged["Manufacturing Date"].notna()
     return merged, reference
+
+
+def _same_serial_universe(left_df: pd.DataFrame, right_df: pd.DataFrame) -> bool:
+    """Valida que dos dataframes representen el mismo filtro de equipos."""
+    if left_df is None or right_df is None or left_df.empty or right_df.empty:
+        return False
+    if "Serial number" not in left_df.columns or "Serial number" not in right_df.columns:
+        return False
+
+    left_serials = set(left_df["Serial number"].map(normalize_serial_match).dropna())
+    right_serials = set(right_df["Serial number"].map(normalize_serial_match).dropna())
+    left_serials.discard("")
+    right_serials.discard("")
+    return bool(left_serials) and left_serials == right_serials
+
+
+def resolve_pdf_report_dataframe(
+    filtered_df: pd.DataFrame,
+    active_tab: str,
+    source_label_value: str = "",
+) -> tuple[pd.DataFrame, str, bool]:
+    """Selecciona el dataframe correcto para generar PDF.
+
+    Si la pestaña activa es Antigüedad / fabricación y existe el dataframe
+    enriquecido con cruce de seriales, el PDF usa ese dataframe. De lo contrario,
+    usa la vista filtrada estándar del Records List.
+    """
+    report_df = filtered_df.copy() if isinstance(filtered_df, pd.DataFrame) else pd.DataFrame()
+    report_source = source_label_value
+    using_manufacturing = False
+
+    if active_tab == "Antigüedad / fabricación":
+        manufacturing_df = st.session_state.get(MANUFACTURING_EXCEL_EXPORT_SESSION_KEY)
+        if isinstance(manufacturing_df, pd.DataFrame) and not manufacturing_df.empty:
+            if _same_serial_universe(report_df, manufacturing_df):
+                report_df = manufacturing_df.copy()
+                report_source = st.session_state.get(MANUFACTURING_EXCEL_EXPORT_SOURCE_KEY, source_label_value)
+                using_manufacturing = True
+            else:
+                st.warning(
+                    "El PDF usará la vista estándar del Records List porque el cruce de fabricación guardado "
+                    "no coincide con los filtros activos actuales. Vuelve a abrir la pestaña Antigüedad / fabricación "
+                    "para recalcular el cruce antes de preparar el PDF."
+                )
+
+    return report_df, report_source, using_manufacturing
 
 
 st.markdown(
@@ -7631,12 +7762,24 @@ with st.sidebar:
             selected_states=selected_states,
         )
         pdf_filter_summary = dict(base_summary) if isinstance(base_summary, dict) else {"Filters": str(base_summary)}
-        pdf_filter_summary["Total records"] = f"{len(filtered):,}"
+
+        pdf_report_df, pdf_report_source, pdf_using_manufacturing = resolve_pdf_report_dataframe(
+            filtered,
+            active_dashboard_tab,
+            source_label_value=source_label,
+        )
+        pdf_filter_summary["Total records"] = f"{len(pdf_report_df):,}"
+        pdf_filter_summary["Fuente activa PDF"] = pdf_report_source
+        if pdf_using_manufacturing:
+            pdf_filter_summary["Cruce de fabricación"] = "Incluido: el PDF usa Manufacturing age (years) y Manufacturing age bucket"
+            st.caption("PDF listo para usar antigüedad por fabricación en lugar de antigüedad por instalación.")
+        elif active_dashboard_tab == "Antigüedad / fabricación":
+            st.caption("PDF en modo Records List estándar: no hay cruce de fabricación válido para los filtros actuales.")
 
         if st.button("🧾 Preparar informe PDF", use_container_width=True, key="prepare_pdf_report"):
             try:
                 prepared_bytes = build_pdf_report(
-                    filtered_df=filtered,
+                    filtered_df=pdf_report_df,
                     filter_summary=pdf_filter_summary,
                     report_title=pdf_title,
                     author_name=pdf_author,
