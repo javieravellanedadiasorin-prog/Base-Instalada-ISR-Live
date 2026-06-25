@@ -2249,6 +2249,163 @@ def _build_pdf_age_profile(filtered_df: pd.DataFrame) -> tuple[pd.DataFrame, str
     return age_counts, "Perfil de antigüedad por instalación", "Fecha de instalación"
 
 
+
+
+def _build_pdf_manufacturing_age_analysis(filtered_df: pd.DataFrame) -> tuple[dict | None, dict | None]:
+    """Construye una sección PDF dedicada al análisis de edad por fabricación.
+
+    El resumen general del PDF ya contiene un gráfico de perfil de antigüedad,
+    pero el usuario necesita que el informe también replique la lectura ejecutiva
+    de la pestaña Antigüedad / fabricación: cobertura del cruce, edad promedio,
+    equipo más antiguo/nuevo, distribución por rangos, distribución por año y
+    listado de los equipos más antiguos.
+    """
+    if filtered_df is None or filtered_df.empty:
+        return None, None
+    if not _has_valid_numeric_column(filtered_df, "Manufacturing age (years)"):
+        return None, None
+
+    work = filtered_df.copy()
+    age_values = pd.to_numeric(work["Manufacturing age (years)"], errors="coerce")
+    matched = work[age_values.notna()].copy()
+    matched["Manufacturing age (years)"] = age_values.loc[matched.index]
+    if matched.empty:
+        return None, None
+
+    total_assets = int(len(work))
+    matched_count = int(len(matched))
+    unmatched_count = max(total_assets - matched_count, 0)
+    match_pct = _safe_share_pct(matched_count, total_assets)
+    average_age = round(float(matched["Manufacturing age (years)"].mean()), 1)
+    oldest_age = round(float(matched["Manufacturing age (years)"].max()), 1)
+    newest_age = round(float(matched["Manufacturing age (years)"].min()), 1)
+
+    conflict_count = 0
+    if "Manufacturing date conflict" in matched.columns:
+        try:
+            conflict_count = int(matched["Manufacturing date conflict"].fillna(False).astype(bool).sum())
+        except Exception:
+            conflict_count = int(matched["Manufacturing date conflict"].astype(str).str.lower().isin({"true", "1", "yes", "si", "sí"}).sum())
+
+    source_count = int(matched["Manufacturing Source"].nunique(dropna=True)) if "Manufacturing Source" in matched.columns else 0
+    year_min = "No informado"
+    year_max = "No informado"
+    if "Manufacturing year" in matched.columns:
+        years = pd.to_numeric(matched["Manufacturing year"], errors="coerce").dropna()
+        if not years.empty:
+            year_min = str(int(years.min()))
+            year_max = str(int(years.max()))
+
+    age_counts, _, _ = _build_pdf_age_profile(matched)
+
+    annual_df = pd.DataFrame(columns=["Año fabricación", "Cantidad"])
+    if "Manufacturing year" in matched.columns:
+        years = pd.to_numeric(matched["Manufacturing year"], errors="coerce").dropna().astype(int)
+        if not years.empty:
+            annual_df = (
+                years.value_counts()
+                .sort_index()
+                .reset_index()
+            )
+            annual_df.columns = ["Año fabricación", "Cantidad"]
+            annual_df["Año fabricación"] = annual_df["Año fabricación"].astype(str)
+
+    top_oldest = matched.copy()
+    if "Manufacturing Date" in top_oldest.columns:
+        top_oldest = top_oldest.sort_values(["Manufacturing age (years)", "Manufacturing Date", "Serial number"], ascending=[False, True, True])
+    else:
+        top_oldest = top_oldest.sort_values(["Manufacturing age (years)", "Serial number"], ascending=[False, True])
+    top_oldest = top_oldest.head(15).copy()
+    top_oldest["Equipo"] = (
+        top_oldest.get("Serial number", pd.Series("N/A", index=top_oldest.index)).fillna("N/A").astype(str)
+        + " | "
+        + top_oldest.get("Instrument type", pd.Series("N/A", index=top_oldest.index)).fillna("N/A").astype(str)
+    )
+    top_chart_df = top_oldest[["Equipo", "Manufacturing age (years)"]].rename(columns={"Manufacturing age (years)": "Edad fabricación (años)"})
+
+    detail_columns = [
+        "Country",
+        "Distributor name",
+        "Customer name",
+        "Instrument type",
+        "Serial number",
+        "Manufacturing Date",
+        "Manufacturing year",
+        "Manufacturing age (years)",
+        "Manufacturing age bucket",
+        "Operational status grouped",
+        "Manufacturing Source",
+    ]
+    detail_columns = [col for col in detail_columns if col in top_oldest.columns]
+    top_table = top_oldest[detail_columns].copy()
+    if "Manufacturing Date" in top_table.columns:
+        top_table["Manufacturing Date"] = pd.to_datetime(top_table["Manufacturing Date"], errors="coerce").dt.strftime("%Y-%m-%d").fillna("No informado")
+    rename_map = {
+        "Country": "País",
+        "Distributor name": "Distribuidor",
+        "Customer name": "Cliente",
+        "Instrument type": "Instrumento",
+        "Serial number": "Serial",
+        "Manufacturing Date": "Fecha fabricación",
+        "Manufacturing year": "Año fabricación",
+        "Manufacturing age (years)": "Edad fabricación (años)",
+        "Manufacturing age bucket": "Rango edad fabricación",
+        "Operational status grouped": "Estado operativo",
+        "Manufacturing Source": "Fuente fabricación",
+    }
+    top_table = top_table.rename(columns={k: v for k, v in rename_map.items() if k in top_table.columns})
+
+    full_detail = matched[[c for c in detail_columns if c in matched.columns]].copy()
+    if not full_detail.empty:
+        full_detail = full_detail.sort_values("Manufacturing age (years)", ascending=False)
+        if "Manufacturing Date" in full_detail.columns:
+            full_detail["Manufacturing Date"] = pd.to_datetime(full_detail["Manufacturing Date"], errors="coerce").dt.strftime("%Y-%m-%d").fillna("No informado")
+        full_detail = full_detail.rename(columns={k: v for k, v in rename_map.items() if k in full_detail.columns})
+
+    summary_pairs = [
+        ("Equipos filtrados", f"{total_assets:,}"),
+        ("Seriales cruzados con fecha de fabricación", f"{matched_count:,} de {total_assets:,} ({match_pct:.1f}%)"),
+        ("Seriales sin coincidencia de fabricación", f"{unmatched_count:,}"),
+        ("Edad promedio por fabricación", f"{average_age:.1f} años"),
+        ("Equipo más antiguo", f"{oldest_age:.1f} años"),
+        ("Equipo más nuevo", f"{newest_age:.1f} años"),
+        ("Rango de años de fabricación", f"{year_min} – {year_max}"),
+        ("Fuentes de fabricación usadas", f"{source_count:,}"),
+        ("Seriales con conflicto de fecha", f"{conflict_count:,}"),
+    ]
+
+    charts = [
+        _make_pdf_barh(age_counts, "Rango", "Cantidad", "Perfil de antigüedad por fabricación", max_rows=len(age_counts), preserve_order=True),
+        _make_pdf_barh(annual_df, "Año fabricación", "Cantidad", "Equipos por año de fabricación", max_rows=min(max(len(annual_df), 1), 24), preserve_order=True, label_wrap=12) if not annual_df.empty else None,
+        _make_pdf_barh(top_chart_df, "Equipo", "Edad fabricación (años)", "Top 15 equipos más antiguos por fabricación", xlabel="Años desde fabricación", max_rows=15, color="#ffb454", label_wrap=38),
+    ]
+
+    section = {
+        "title": "Análisis de antigüedad por fabricación",
+        "intro": (
+            "Esta sección usa el cruce por serial contra los archivos de fabricación cargados manualmente. "
+            "La edad se calcula desde Manufacturing Date y no desde Installation date, por lo que debe coincidir "
+            "con la pestaña Antigüedad / fabricación del dashboard."
+        ),
+        "summary_pairs": summary_pairs,
+        "charts": charts,
+        "table_title": "Top 15 equipos más antiguos por fabricación",
+        "table_df": top_table,
+        "table_max_rows": min(len(top_table), 15),
+    }
+
+    annex = {
+        "title": "Anexo. Detalle completo de antigüedad por fabricación",
+        "intro": "Detalle de todos los equipos filtrados que tuvieron coincidencia válida con fecha de fabricación.",
+        "summary_pairs": [("Filas incluidas", f"{len(full_detail):,}"), ("Alcance", "Equipos con Manufacturing Date válida")],
+        "charts": [],
+        "table_title": "Detalle completo de fabricación",
+        "table_df": full_detail,
+        "table_max_rows": max(len(full_detail), 1),
+    }
+    return section, annex
+
+
 def _make_pdf_barh(
     df: pd.DataFrame,
     label_col: str,
@@ -2609,6 +2766,12 @@ def _build_pdf_sections(filtered_df: pd.DataFrame, stock_context: dict | None = 
         'table_df': prepare_pdf_report_table(filtered_df),
         'table_max_rows': 10,
     })
+    manufacturing_age_section, manufacturing_age_annex = _build_pdf_manufacturing_age_analysis(filtered_df)
+    if manufacturing_age_section is not None:
+        sections.append(manufacturing_age_section)
+    if manufacturing_age_annex is not None:
+        annexes.append(manufacturing_age_annex)
+
     annexes.append({
         'title': 'Anexo A. Base instalada detallada',
         'intro': 'Detalle tabular de la base instalada filtrada.',
@@ -4065,8 +4228,8 @@ def payload_from_manufacturing_year(point: dict) -> dict | None:
     )
 
 CODE_CREATED_AT = "2026-06-10 15:35:00 COT"
-CODE_VERSION_LABEL = "v44"
-PARSER_VERSION = "records-list-stable-v44-20260625-1630COT-pdf-manufacturing-age-fix"
+CODE_VERSION_LABEL = "v45"
+PARSER_VERSION = "records-list-stable-v45-20260625-1715COT-pdf-manufacturing-age-section"
 
 
 def get_uploaded_file_signature(uploaded_file) -> str:
@@ -5701,27 +5864,29 @@ def resolve_pdf_report_dataframe(
 ) -> tuple[pd.DataFrame, str, bool]:
     """Selecciona el dataframe correcto para generar PDF.
 
-    Si la pestaña activa es Antigüedad / fabricación y existe el dataframe
-    enriquecido con cruce de seriales, el PDF usa ese dataframe. De lo contrario,
-    usa la vista filtrada estándar del Records List.
+    v45: el PDF usa el dataframe enriquecido con fabricación siempre que exista
+    un cruce válido para el mismo universo de seriales filtrados, no solo cuando
+    la pestaña activa sea Antigüedad / fabricación. Esto evita que el informe
+    pierda el análisis de edad por fabricación si el usuario prepara el PDF desde
+    otra pestaña o desde el sidebar después de haber calculado el cruce.
     """
     report_df = filtered_df.copy() if isinstance(filtered_df, pd.DataFrame) else pd.DataFrame()
     report_source = source_label_value
     using_manufacturing = False
 
-    if active_tab == "Antigüedad / fabricación":
-        manufacturing_df = st.session_state.get(MANUFACTURING_EXCEL_EXPORT_SESSION_KEY)
-        if isinstance(manufacturing_df, pd.DataFrame) and not manufacturing_df.empty:
-            if _same_serial_universe(report_df, manufacturing_df):
-                report_df = manufacturing_df.copy()
-                report_source = st.session_state.get(MANUFACTURING_EXCEL_EXPORT_SOURCE_KEY, source_label_value)
-                using_manufacturing = True
-            else:
-                st.warning(
-                    "El PDF usará la vista estándar del Records List porque el cruce de fabricación guardado "
-                    "no coincide con los filtros activos actuales. Vuelve a abrir la pestaña Antigüedad / fabricación "
-                    "para recalcular el cruce antes de preparar el PDF."
-                )
+    manufacturing_df = st.session_state.get(MANUFACTURING_EXCEL_EXPORT_SESSION_KEY)
+    if isinstance(manufacturing_df, pd.DataFrame) and not manufacturing_df.empty:
+        has_manufacturing_age = _has_valid_numeric_column(manufacturing_df, "Manufacturing age (years)")
+        if has_manufacturing_age and _same_serial_universe(report_df, manufacturing_df):
+            report_df = manufacturing_df.copy()
+            report_source = st.session_state.get(MANUFACTURING_EXCEL_EXPORT_SOURCE_KEY, source_label_value)
+            using_manufacturing = True
+        elif active_tab == "Antigüedad / fabricación":
+            st.warning(
+                "El PDF usará la vista estándar del Records List porque el cruce de fabricación guardado "
+                "no coincide con los filtros activos actuales o no contiene edades de fabricación válidas. "
+                "Vuelve a abrir la pestaña Antigüedad / fabricación para recalcular el cruce antes de preparar el PDF."
+            )
 
     return report_df, report_source, using_manufacturing
 
