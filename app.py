@@ -839,15 +839,13 @@ def _excel_style_workbook(wb) -> None:
     tab_colors = {
         "00_Dashboard": EXCEL_THEME["royal"],
         "00_Resumen": EXCEL_THEME["navy"],
-        "01_Filtros": EXCEL_THEME["teal"],
-        "02_Datos_clave": EXCEL_THEME["green"],
-        "03_Datos_completos": EXCEL_THEME["slate"],
-        "04_Base_instalada": EXCEL_THEME["royal"],
-        "05_Modelo_estado": EXCEL_THEME["green"],
-        "06_Machine_config": EXCEL_THEME["purple"],
-        "07_OS_PM": EXCEL_THEME["amber"],
-        "08_Fabricacion": EXCEL_THEME["slate"],
-        "09_Carstock": EXCEL_THEME["coral"],
+        "01_Datos_filtrados": EXCEL_THEME["teal"],
+        "02_Base_instalada": EXCEL_THEME["royal"],
+        "03_Modelo_estado": EXCEL_THEME["green"],
+        "04_Machine_config": EXCEL_THEME["purple"],
+        "05_OS_PM": EXCEL_THEME["amber"],
+        "06_Fabricacion": EXCEL_THEME["slate"],
+        "07_Carstock": EXCEL_THEME["coral"],
     }
 
     for ws in wb.worksheets:
@@ -1398,7 +1396,7 @@ def _excel_category_pairs(df: pd.DataFrame, column: str) -> list[tuple[str, str]
 def _excel_write_dynamic_category_section(
     ws,
     export_df: pd.DataFrame,
-    range_map: dict[str, str],
+    table_name: str,
     source_column: str,
     section_title: str,
     start_row: int,
@@ -1428,7 +1426,7 @@ def _excel_write_dynamic_category_section(
     raw_end = raw_start + raw_rows - 1
     if available:
         visible_ref = _excel_table_column_ref(table_name, "__Visible")
-        source_ref = range_map[source_column]
+        source_ref = _excel_table_column_ref(table_name, source_column)
         for idx, (display_label, criteria_value) in enumerate(pairs):
             row_idx = raw_start + idx
             ws.cell(row_idx, start_col, display_label)
@@ -1832,716 +1830,6 @@ def _excel_build_visual_dashboard(
     ws.sheet_view.selection[0].sqref = "A1"
 
 
-
-# =============================================================================
-# EXCEL V50 · PORTADA ESTABLE + EXPLORADOR CON FILTROS
-# =============================================================================
-EXCEL_V50_FILTER_SPECS = [
-    ("Región comercial", "Commercial Region", "$B$5"),
-    ("País", "Country", "$B$6"),
-    ("Distribuidor", "Distributor name", "$B$7"),
-    ("Modelo", "Instrument type", "$B$8"),
-    ("Estado operativo", "Operational status grouped", "$B$9"),
-    ("Banco de sangre", "Blood Bank group", "$B$10"),
-    ("Sistema operativo", "Operating System", "$B$11"),
-    ("Procesamiento", "Processing group", "$B$12"),
-    ("Rango de antigüedad", "Age group", "$B$13"),
-]
-
-
-EXCEL_V50_KEY_COLUMNS = [
-    "Commercial Region",
-    "Country",
-    "Distributor name",
-    "Customer name",
-    "City",
-    "Instrument type",
-    "Serial number",
-    "Installation date",
-    "Age (years)",
-    "Operational status grouped",
-    "Operational status",
-    "Asset condition",
-    "Type of contract",
-    "Blood Bank group",
-    "Number of tests per day",
-    "Processing group",
-    "PM plan",
-    "PM last date",
-    "PM next date",
-    "PM status",
-    "Operating System",
-    "Manufacturing Date",
-    "Manufacturing age (years)",
-    "Manufacturing age bucket",
-    "Manufacturing matched",
-]
-
-
-EXCEL_V50_TECH_COLUMNS = [
-    "__RoutineFlag",
-    "__ZeroTestsFlag",
-    "__PMOverdueFlag",
-    "__ManufacturingFlag",
-]
-
-
-def _excel_v50_safe_text_series(df: pd.DataFrame, column: str, default: str = "No informado") -> pd.Series:
-    if column not in df.columns:
-        return pd.Series(default, index=df.index, dtype="object")
-    series = df[column].astype("object")
-    series = series.where(~pd.isna(series), default)
-    series = series.astype(str).str.strip()
-    return series.replace({"": default, "nan": default, "None": default, "<NA>": default, "NaT": default})
-
-
-def _excel_v50_age_group(values: pd.Series) -> pd.Series:
-    numeric = pd.to_numeric(values, errors="coerce")
-    labels = pd.cut(
-        numeric,
-        bins=[-np.inf, 2.999, 4.999, 7.999, 9.999, 14.999, np.inf],
-        labels=["0–2 años", "3–4 años", "5–7 años", "8–9 años", "10–14 años", "15+ años"],
-    )
-    result = labels.astype("object")
-    result = result.where(~pd.isna(result), "No informado")
-    return result.astype(str)
-
-
-def _excel_v50_prepare_key_data(export_df: pd.DataFrame) -> pd.DataFrame:
-    """Construye una vista manejable de 25 campos y auxiliares ocultos.
-
-    La hoja de datos completos conserva todas las columnas. Esta vista existe
-    para que el usuario pueda filtrar sin navegar horizontalmente por más de
-    cien campos técnicos.
-    """
-    work = export_df.copy() if isinstance(export_df, pd.DataFrame) else pd.DataFrame()
-
-    for column in EXCEL_V50_KEY_COLUMNS:
-        if column not in work.columns:
-            work[column] = ""
-
-    work["Commercial Region"] = _excel_v50_safe_text_series(work, "Commercial Region")
-    work["Country"] = _excel_v50_safe_text_series(work, "Country")
-    work["Distributor name"] = _excel_v50_safe_text_series(work, "Distributor name")
-    work["Customer name"] = _excel_v50_safe_text_series(work, "Customer name")
-    work["City"] = _excel_v50_safe_text_series(work, "City")
-    work["Instrument type"] = _excel_v50_safe_text_series(work, "Instrument type")
-    work["Operational status grouped"] = _excel_v50_safe_text_series(work, "Operational status grouped")
-    work["Operational status"] = _excel_v50_safe_text_series(work, "Operational status")
-    work["Asset condition"] = _excel_v50_safe_text_series(work, "Asset condition")
-    work["Type of contract"] = _excel_v50_safe_text_series(work, "Type of contract")
-    work["Operating System"] = _excel_v50_safe_text_series(work, "Operating System")
-
-    tests = pd.to_numeric(work["Number of tests per day"], errors="coerce").fillna(0)
-    work["Number of tests per day"] = tests
-    work["Processing group"] = np.where(tests.gt(0), "> 0 tests/día", "0 tests/día")
-
-    if "Blood Bank Flag" in export_df.columns:
-        blood = export_df["Blood Bank Flag"].fillna(False).astype(bool)
-    elif "In Blood Bank" in export_df.columns:
-        blood = export_df["In Blood Bank"].map(is_blood_bank_yes).fillna(False).astype(bool)
-    else:
-        blood = pd.Series(False, index=work.index, dtype=bool)
-    work["Blood Bank group"] = np.where(blood, "Banco de sangre", "Laboratorio")
-
-    pm_next = pd.to_datetime(work["PM next date"], errors="coerce")
-    today = pd.Timestamp.today().normalize()
-    work["PM status"] = np.select(
-        [
-            pm_next.notna() & pm_next.lt(today),
-            pm_next.notna() & pm_next.le(today + pd.Timedelta(days=90)),
-            pm_next.notna(),
-        ],
-        ["Vencido", "Próximos 90 días", "Planificado"],
-        default="No informado",
-    )
-
-    manufacturing_age = pd.to_numeric(work["Manufacturing age (years)"], errors="coerce")
-    installation_age = pd.to_numeric(work["Age (years)"], errors="coerce")
-    age_for_filter = manufacturing_age.where(manufacturing_age.notna(), installation_age)
-    work["Age group"] = _excel_v50_age_group(age_for_filter)
-
-    routine_text = work["Operational status grouped"].astype(str).str.lower().str.strip()
-    work["__RoutineFlag"] = routine_text.eq("routine").astype(int)
-    work["__ZeroTestsFlag"] = tests.le(0).astype(int)
-    work["__PMOverdueFlag"] = (pm_next.notna() & pm_next.lt(today)).astype(int)
-
-    matched = work["Manufacturing matched"]
-    try:
-        matched_bool = matched.fillna(False).astype(bool)
-    except Exception:
-        matched_bool = matched.astype(str).str.lower().isin({"true", "1", "yes", "si", "sí"})
-    work["__ManufacturingFlag"] = matched_bool.astype(int)
-
-    visible_columns = [c for c in EXCEL_V50_KEY_COLUMNS if c in work.columns]
-    # Age group is used as a filter and is intentionally visible near age fields.
-    insert_at = visible_columns.index("Age (years)") + 1 if "Age (years)" in visible_columns else len(visible_columns)
-    visible_columns.insert(insert_at, "Age group")
-    return _excel_unique_columns(work[visible_columns + EXCEL_V50_TECH_COLUMNS])
-
-
-def _excel_v50_navigation(ws, current: str = "") -> None:
-    """Crea navegación interna funcional en cada hoja visible."""
-    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-
-    links = [
-        ("Dashboard", "00_Dashboard", EXCEL_THEME["royal"]),
-        ("Filtros", "01_Filtros", EXCEL_THEME["teal"]),
-        ("Datos clave", "02_Datos_clave", EXCEL_THEME["green"]),
-        ("Datos completos", "03_Datos_completos", EXCEL_THEME["slate"]),
-        ("Resumen", "00_Resumen", EXCEL_THEME["navy"]),
-    ]
-    thin = Side(style="thin", color=EXCEL_THEME["border"])
-    border = Border(left=thin, right=thin, top=thin, bottom=thin)
-    for idx, (label, sheet_name, color) in enumerate(links, start=1):
-        cell = ws.cell(3, idx)
-        cell.value = label if sheet_name != current else f"● {label}"
-        cell.hyperlink = f"#'{sheet_name}'!A1"
-        cell.fill = PatternFill("solid", fgColor=color if sheet_name == current else EXCEL_THEME["panel_alt"])
-        cell.font = Font(
-            color=EXCEL_THEME["white"] if sheet_name == current else color,
-            bold=True,
-            underline=None if sheet_name == current else "single",
-            name="Aptos",
-            size=9,
-        )
-        cell.alignment = Alignment(horizontal="center", vertical="center")
-        cell.border = border
-    ws.row_dimensions[3].height = 22
-
-
-def _excel_v50_sheet_header(ws, title: str, subtitle: str, current: str, tab_color: str) -> None:
-    from openpyxl.styles import Alignment, Font, PatternFill
-
-    ws.sheet_view.showGridLines = False
-    ws.sheet_properties.tabColor = tab_color
-    ws.merge_cells("A1:L1")
-    ws["A1"] = title
-    ws["A1"].fill = PatternFill("solid", fgColor=EXCEL_THEME["navy"])
-    ws["A1"].font = Font(color=EXCEL_THEME["white"], bold=True, size=17, name="Aptos Display")
-    ws["A1"].alignment = Alignment(horizontal="left", vertical="center")
-    ws.merge_cells("A2:L2")
-    ws["A2"] = subtitle
-    ws["A2"].fill = PatternFill("solid", fgColor=EXCEL_THEME["canvas"])
-    ws["A2"].font = Font(color=EXCEL_THEME["muted"], italic=True, size=10, name="Aptos")
-    ws["A2"].alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
-    ws.row_dimensions[1].height = 30
-    ws.row_dimensions[2].height = 28
-    _excel_v50_navigation(ws, current=current)
-
-
-def _excel_v50_static_banner(ws, row: int = 5) -> None:
-    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-
-    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=8)
-    cell = ws.cell(row, 1)
-    cell.value = "FOTOGRAFÍA ESTÁTICA DE LOS FILTROS APLICADOS EN LA APP AL MOMENTO DE EXPORTAR"
-    cell.fill = PatternFill("solid", fgColor="FFF3CD")
-    cell.font = Font(color="7A4E00", bold=True, name="Aptos", size=9)
-    cell.alignment = Alignment(horizontal="left", vertical="center")
-    thin = Side(style="thin", color="E7C96A")
-    cell.border = Border(left=thin, right=thin, top=thin, bottom=thin)
-    ws.row_dimensions[row].height = 22
-
-
-def _excel_v50_summary_values(df: pd.DataFrame) -> dict[str, object]:
-    total = int(len(df))
-    status = _excel_v50_safe_text_series(df, "Operational status grouped", "No informado")
-    routine = int(status.str.lower().str.strip().eq("routine").sum())
-    tests = pd.to_numeric(df.get("Number of tests per day", pd.Series(index=df.index, dtype=float)), errors="coerce").fillna(0)
-    zero_tests = int(tests.le(0).sum())
-    countries = int(_excel_v50_safe_text_series(df, "Country").nunique()) if total else 0
-    distributors = int(_excel_v50_safe_text_series(df, "Distributor name").nunique()) if total else 0
-    blood = count_blood_bank_yes(df) if total else 0
-    pm_next = pd.to_datetime(df.get("PM next date", pd.Series(index=df.index, dtype="object")), errors="coerce")
-    pm_overdue = int((pm_next.notna() & pm_next.lt(pd.Timestamp.today().normalize())).sum())
-    matched = df.get("Manufacturing matched", pd.Series(False, index=df.index))
-    try:
-        manuf = int(matched.fillna(False).astype(bool).sum())
-    except Exception:
-        manuf = int(matched.astype(str).str.lower().isin({"true", "1", "yes", "si", "sí"}).sum())
-    return {
-        "Total equipos": total,
-        "En rutina": routine,
-        "Fuera de rutina": max(total - routine, 0),
-        "Países": countries,
-        "Distribuidores": distributors,
-        "0 tests/día": zero_tests,
-        "PM vencidos": pm_overdue,
-        "Con fabricación": manuf,
-        "Banco de sangre": blood,
-    }
-
-
-def _excel_v50_chart_image(
-    df: pd.DataFrame,
-    label_col: str,
-    value_col: str,
-    title: str,
-    chart_type: str = "bar",
-    base_color: str | None = None,
-    semantic: str | None = None,
-    max_rows: int = 10,
-):
-    """Genera una imagen PNG estable para que el dashboard nunca abra vacío."""
-    if not MATPLOTLIB_AVAILABLE or df is None or df.empty:
-        return None
-
-    work = df[[label_col, value_col]].copy()
-    work[value_col] = pd.to_numeric(work[value_col], errors="coerce").fillna(0)
-    work = work[work[value_col] > 0].head(max_rows)
-    if work.empty:
-        return None
-
-    color_map = {
-        "royal": f"#{EXCEL_THEME['royal']}",
-        "teal": f"#{EXCEL_THEME['teal']}",
-        "green": f"#{EXCEL_THEME['green']}",
-        "amber": f"#{EXCEL_THEME['amber']}",
-        "coral": f"#{EXCEL_THEME['coral']}",
-        "purple": f"#{EXCEL_THEME['purple']}",
-        "slate": f"#{EXCEL_THEME['slate']}",
-    }
-    default_color = base_color or color_map["royal"]
-
-    def semantic_color(label: str) -> str:
-        low = str(label).lower()
-        if semantic == "status":
-            if "routine" in low and "not" not in low and "no rutina" not in low:
-                return color_map["green"]
-            if "scrap" in low or "discard" in low or "baja" in low:
-                return color_map["coral"]
-            if "warehouse" in low or "almac" in low:
-                return color_map["amber"]
-            return color_map["slate"]
-        if semantic == "os":
-            if "windows 10" in low or "win 10" in low:
-                return color_map["green"]
-            if any(token in low for token in ("windows 7", "windows xp", "legacy", "vista")):
-                return color_map["coral"]
-            if "no informado" in low or "unknown" in low:
-                return color_map["amber"]
-            return color_map["teal"]
-        if semantic == "processing":
-            return color_map["green"] if str(label).startswith(">") else color_map["coral"]
-        if semantic == "blood":
-            return color_map["royal"] if "banco" in low else color_map["slate"]
-        return default_color
-
-    colors = [semantic_color(label) for label in work[label_col]]
-    buffer = BytesIO()
-    if chart_type == "donut":
-        fig, ax = plt.subplots(figsize=(6.8, 3.5))
-        wedges, texts, autotexts = ax.pie(
-            work[value_col].astype(float),
-            labels=work[label_col].astype(str),
-            colors=colors,
-            autopct=lambda pct: f"{pct:.0f}%" if pct >= 4 else "",
-            startangle=90,
-            counterclock=False,
-            wedgeprops={"width": 0.42, "edgecolor": "white"},
-            textprops={"fontsize": 8, "color": f"#{EXCEL_THEME['text']}"},
-        )
-        for autotext in autotexts:
-            autotext.set_fontsize(8)
-            autotext.set_color("white")
-            autotext.set_fontweight("bold")
-        ax.set_title(title, fontsize=12, fontweight="bold", color=f"#{EXCEL_THEME['navy']}", pad=12)
-        ax.axis("equal")
-    else:
-        work = work.sort_values(value_col, ascending=True)
-        colors = [semantic_color(label) for label in work[label_col]]
-        fig, ax = plt.subplots(figsize=(7.4, 3.8))
-        bars = ax.barh(work[label_col].astype(str), work[value_col].astype(float), color=colors)
-        ax.set_title(title, fontsize=12, fontweight="bold", color=f"#{EXCEL_THEME['navy']}", pad=10)
-        ax.grid(axis="x", alpha=0.18)
-        ax.tick_params(axis="both", labelsize=8)
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-        ax.spines["left"].set_visible(False)
-        ax.spines["bottom"].set_color(f"#{EXCEL_THEME['border']}")
-        max_value = float(work[value_col].max()) if not work.empty else 0
-        for bar in bars:
-            value = bar.get_width()
-            ax.text(value + max(max_value * 0.015, 0.1), bar.get_y() + bar.get_height() / 2, f"{value:,.0f}", va="center", fontsize=8)
-        ax.set_xlim(0, max_value * 1.18 if max_value else 1)
-    fig.patch.set_facecolor("white")
-    ax.set_facecolor("white")
-    fig.tight_layout()
-    fig.savefig(buffer, format="png", dpi=150, bbox_inches="tight", facecolor="white")
-    plt.close(fig)
-    buffer.seek(0)
-    return buffer
-
-
-def _excel_v50_add_image(ws, image_buffer, anchor: str, width: int = 610, height: int = 315) -> None:
-    if image_buffer is None:
-        return
-    from openpyxl.drawing.image import Image as XLImage
-
-    image = XLImage(image_buffer)
-    image.width = width
-    image.height = height
-    ws.add_image(image, anchor)
-
-
-def _excel_v50_build_snapshot_dashboard(
-    wb,
-    filtered_df: pd.DataFrame,
-    filter_summary: dict[str, str],
-    active_tab: str,
-    source_label_value: str,
-) -> None:
-    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-
-    ws = wb.create_sheet("00_Dashboard", 0)
-    _excel_v50_sheet_header(
-        ws,
-        "RECORDS LIST INTELLIGENCE · DASHBOARD EJECUTIVO",
-        "Portada estable: los indicadores y gráficos representan exactamente los filtros activos al exportar y siempre se muestran al abrir.",
-        "00_Dashboard",
-        EXCEL_THEME["royal"],
-    )
-    ws.sheet_view.zoomScale = 82
-    ws.freeze_panes = "A5"
-    ws.page_setup.orientation = "landscape"
-    ws.page_setup.fitToWidth = 1
-    ws.sheet_properties.pageSetUpPr.fitToPage = True
-
-    for col in range(1, 17):
-        ws.column_dimensions[chr(64 + col)].width = 11 if col not in {1, 5, 9, 13} else 5
-    for row in range(4, 66):
-        ws.row_dimensions[row].height = 22
-
-    values = _excel_v50_summary_values(filtered_df)
-    card_specs = [
-        ("A5:D5", "A6:D8", "TOTAL EQUIPOS", values["Total equipos"], EXCEL_THEME["royal"]),
-        ("E5:H5", "E6:H8", "EN RUTINA", values["En rutina"], EXCEL_THEME["green"]),
-        ("I5:L5", "I6:L8", "FUERA DE RUTINA", values["Fuera de rutina"], EXCEL_THEME["amber"]),
-        ("M5:P5", "M6:P8", "0 TESTS/DÍA", values["0 tests/día"], EXCEL_THEME["coral"]),
-        ("A9:D9", "A10:D12", "PAÍSES", values["Países"], EXCEL_THEME["teal"]),
-        ("E9:H9", "E10:H12", "DISTRIBUIDORES", values["Distribuidores"], EXCEL_THEME["purple"]),
-        ("I9:L9", "I10:L12", "PM VENCIDOS", values["PM vencidos"], EXCEL_THEME["coral"]),
-        ("M9:P9", "M10:P12", "CON FABRICACIÓN", values["Con fabricación"], EXCEL_THEME["slate"]),
-    ]
-    thin = Side(style="thin", color=EXCEL_THEME["border"])
-    border = Border(left=thin, right=thin, top=thin, bottom=thin)
-    for label_range, value_range, label, value, color in card_specs:
-        ws.merge_cells(label_range)
-        ws.merge_cells(value_range)
-        label_cell = ws[label_range.split(":")[0]]
-        value_cell = ws[value_range.split(":")[0]]
-        label_cell.value = label
-        label_cell.fill = PatternFill("solid", fgColor=color)
-        label_cell.font = Font(color=EXCEL_THEME["white"], bold=True, size=10, name="Aptos")
-        label_cell.alignment = Alignment(horizontal="center", vertical="center")
-        label_cell.border = border
-        value_cell.value = value
-        value_cell.fill = PatternFill("solid", fgColor=EXCEL_THEME["panel"])
-        value_cell.font = Font(color=color, bold=True, size=23, name="Aptos Display")
-        value_cell.alignment = Alignment(horizontal="center", vertical="center")
-        value_cell.number_format = "#,##0"
-        value_cell.border = border
-
-    ws.merge_cells("A13:H13")
-    ws["A13"] = "Explorar con filtros propios de Excel"
-    ws["A13"].hyperlink = "#'01_Filtros'!A1"
-    ws["A13"].fill = PatternFill("solid", fgColor="DDF4F2")
-    ws["A13"].font = Font(color=EXCEL_THEME["teal"], bold=True, underline="single", name="Aptos")
-    ws["A13"].alignment = Alignment(horizontal="center")
-    ws.merge_cells("I13:P13")
-    ws["I13"] = f"Vista exportada: {active_tab} · Fuente: {source_label_value or 'No informada'}"
-    ws["I13"].fill = PatternFill("solid", fgColor=EXCEL_THEME["panel_alt"])
-    ws["I13"].font = Font(color=EXCEL_THEME["muted"], italic=True, name="Aptos")
-    ws["I13"].alignment = Alignment(horizontal="center")
-
-    model_df = _excel_value_counts_df(filtered_df, "Instrument type", "Modelo", top_n=10)
-    status_df = _excel_value_counts_df(filtered_df, "Operational status grouped", "Estado", top_n=10)
-    country_df = _excel_value_counts_df(filtered_df, "Country", "País", top_n=10)
-    os_df = _excel_value_counts_df(filtered_df, "Operating System", "Sistema operativo", top_n=10)
-    tests = pd.to_numeric(filtered_df.get("Number of tests per day", pd.Series(index=filtered_df.index, dtype=float)), errors="coerce").fillna(0)
-    processing_df = pd.DataFrame({"Procesamiento": ["0 tests/día", "> 0 tests/día"], "Cantidad": [int(tests.le(0).sum()), int(tests.gt(0).sum())]})
-    blood_yes = count_blood_bank_yes(filtered_df)
-    blood_df = pd.DataFrame({"Ubicación": ["Banco de sangre", "Laboratorio"], "Cantidad": [blood_yes, max(len(filtered_df) - blood_yes, 0)]})
-
-    images = [
-        (_excel_v50_chart_image(model_df, "Modelo", "Cantidad", "Base instalada por modelo", base_color=f"#{EXCEL_THEME['royal']}"), "A15"),
-        (_excel_v50_chart_image(status_df, "Estado", "Cantidad", "Estado operativo", semantic="status"), "I15"),
-        (_excel_v50_chart_image(country_df, "País", "Cantidad", "Top países", base_color=f"#{EXCEL_THEME['teal']}"), "A31"),
-        (_excel_v50_chart_image(os_df, "Sistema operativo", "Cantidad", "Sistemas operativos", semantic="os"), "I31"),
-        (_excel_v50_chart_image(processing_df, "Procesamiento", "Cantidad", "Procesamiento diario", chart_type="donut", semantic="processing"), "A47"),
-        (_excel_v50_chart_image(blood_df, "Ubicación", "Cantidad", "Banco de sangre", chart_type="donut", semantic="blood"), "I47"),
-    ]
-    for image_buffer, anchor in images:
-        _excel_v50_add_image(ws, image_buffer, anchor)
-
-    ws.print_area = "A1:P63"
-
-
-def _excel_v50_key_range_map(key_df: pd.DataFrame, sheet_name: str = "02_Datos_clave", header_row: int = 5) -> dict[str, str]:
-    """Mapea cada campo a un rango A1 normal para máxima compatibilidad.
-
-    El explorador no depende de referencias estructuradas ni del motor de tablas
-    de un programa específico. Esto funciona de forma más consistente en Excel
-    de escritorio, Excel Online y herramientas compatibles.
-    """
-    from openpyxl.utils import get_column_letter
-
-    first_row = header_row + 1
-    last_row = header_row + max(len(key_df), 1)
-    escaped_sheet = str(sheet_name).replace("'", "''")
-    result: dict[str, str] = {}
-    for idx, column in enumerate(key_df.columns, start=1):
-        letter = get_column_letter(idx)
-        result[str(column)] = f"'{escaped_sheet}'!${letter}${first_row}:${letter}${last_row}"
-    return result
-
-
-def _excel_v50_filter_formula(range_map: dict[str, str], extra_condition: str | None = None) -> str:
-    conditions = []
-    for _, column, cell_ref in EXCEL_V50_FILTER_SPECS:
-        column_ref = range_map[column]
-        conditions.append(f'--((({cell_ref}="Todos")+({column_ref}={cell_ref}))>0)')
-    if extra_condition:
-        conditions.append(extra_condition)
-    return "=SUMPRODUCT(" + ",".join(conditions) + ")"
-
-
-def _excel_v50_add_data_validation_lists(wb, key_df: pd.DataFrame, filter_ws) -> None:
-    from openpyxl.worksheet.datavalidation import DataValidation
-    from openpyxl.utils import get_column_letter
-
-    lists_ws = wb.create_sheet("_Listas")
-    lists_ws.sheet_state = "veryHidden"
-    for idx, (label, column, cell_ref) in enumerate(EXCEL_V50_FILTER_SPECS, start=1):
-        values = ["Todos"]
-        if column in key_df.columns:
-            raw_values = _excel_v50_safe_text_series(key_df, column).tolist()
-            values += sorted({str(v).strip() or "No informado" for v in raw_values}, key=lambda x: x.lower())
-        values = list(dict.fromkeys(values))
-        lists_ws.cell(1, idx, label)
-        for row_idx, value in enumerate(values, start=2):
-            lists_ws.cell(row_idx, idx, value)
-        target = cell_ref.replace("$", "")
-        col_letter = get_column_letter(idx)
-        formula = f"'_Listas'!${col_letter}$2:${col_letter}${len(values) + 1}"
-        validation = DataValidation(type="list", formula1=formula, allow_blank=False)
-        validation.error = "Selecciona un valor válido de la lista."
-        validation.errorTitle = "Filtro no válido"
-        validation.prompt = f"Selecciona {label.lower()} o Todos."
-        validation.promptTitle = "Filtro del dashboard"
-        filter_ws.add_data_validation(validation)
-        validation.add(filter_ws[target])
-        filter_ws[target] = "Todos"
-
-
-def _excel_v50_dynamic_summary_table(
-    ws,
-    key_df: pd.DataFrame,
-    range_map: dict[str, str],
-    source_column: str,
-    title: str,
-    start_row: int,
-    start_col: int,
-    max_categories: int | None = None,
-) -> tuple[int, int]:
-    from openpyxl.formatting.rule import DataBarRule
-    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-    from openpyxl.utils import get_column_letter
-
-    counts = _excel_value_counts_df(key_df, source_column, "Categoría")
-    if max_categories:
-        counts = counts.head(max_categories)
-    categories = counts["Categoría"].astype(str).tolist() if not counts.empty else ["No informado"]
-    ws.merge_cells(start_row=start_row, start_column=start_col, end_row=start_row, end_column=start_col + 2)
-    title_cell = ws.cell(start_row, start_col)
-    title_cell.value = title
-    title_cell.fill = PatternFill("solid", fgColor=EXCEL_THEME["navy"])
-    title_cell.font = Font(color=EXCEL_THEME["white"], bold=True, name="Aptos Display", size=11)
-    title_cell.alignment = Alignment(horizontal="left")
-
-    header_row = start_row + 1
-    ws.cell(header_row, start_col, "Categoría")
-    ws.cell(header_row, start_col + 1, "Cantidad filtrada")
-    ws.cell(header_row, start_col + 2, "% filtrado")
-    for col in range(start_col, start_col + 3):
-        ws.cell(header_row, col).fill = PatternFill("solid", fgColor=EXCEL_THEME["royal"])
-        ws.cell(header_row, col).font = Font(color=EXCEL_THEME["white"], bold=True, name="Aptos", size=9)
-        ws.cell(header_row, col).alignment = Alignment(horizontal="center", wrap_text=True)
-
-    thin = Side(style="thin", color=EXCEL_THEME["border"])
-    border = Border(left=thin, right=thin, top=thin, bottom=thin)
-    source_ref = range_map[source_column]
-    for offset, category in enumerate(categories, start=1):
-        row = header_row + offset
-        ws.cell(row, start_col, category)
-        category_cell = f"${get_column_letter(start_col)}${row}"
-        extra = f"--({source_ref}={category_cell})"
-        ws.cell(row, start_col + 1, _excel_v50_filter_formula(range_map, extra))
-        ws.cell(row, start_col + 2, f'=IFERROR({get_column_letter(start_col + 1)}{row}/$D$6,0)')
-        ws.cell(row, start_col + 2).number_format = "0.0%"
-        for col in range(start_col, start_col + 3):
-            ws.cell(row, col).border = border
-            ws.cell(row, col).fill = PatternFill("solid", fgColor=EXCEL_THEME["panel"] if offset % 2 else EXCEL_THEME["canvas"])
-            ws.cell(row, col).font = Font(color=EXCEL_THEME["text"], name="Aptos", size=9)
-    end_row = header_row + len(categories)
-    count_range = f"{get_column_letter(start_col + 1)}{header_row + 1}:{get_column_letter(start_col + 1)}{end_row}"
-    ws.conditional_formatting.add(
-        count_range,
-        DataBarRule(start_type="num", start_value=0, end_type="max", color=EXCEL_THEME["teal"], showValue=True),
-    )
-    ws.column_dimensions[get_column_letter(start_col)].width = 30
-    ws.column_dimensions[get_column_letter(start_col + 1)].width = 17
-    ws.column_dimensions[get_column_letter(start_col + 2)].width = 13
-    return header_row, end_row
-
-
-def _excel_v50_build_filter_explorer(wb, key_df: pd.DataFrame, range_map: dict[str, str]) -> None:
-    from openpyxl.formatting.rule import CellIsRule
-    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-
-    ws = wb.create_sheet("01_Filtros", 1)
-    _excel_v50_sheet_header(
-        ws,
-        "EXPLORADOR DE EXCEL · FILTROS EDITABLES",
-        "Selecciona valores en las celdas azules. Las tarjetas y tablas inferiores se recalculan sin macros y sin usar OFFSET.",
-        "01_Filtros",
-        EXCEL_THEME["teal"],
-    )
-    ws.sheet_view.zoomScale = 90
-    ws.freeze_panes = "A5"
-
-    thin = Side(style="thin", color=EXCEL_THEME["border"])
-    border = Border(left=thin, right=thin, top=thin, bottom=thin)
-    ws.merge_cells("A4:B4")
-    ws["A4"] = "FILTROS"
-    ws["A4"].fill = PatternFill("solid", fgColor=EXCEL_THEME["teal"])
-    ws["A4"].font = Font(color=EXCEL_THEME["white"], bold=True, name="Aptos Display", size=12)
-    ws["A4"].alignment = Alignment(horizontal="left")
-
-    for idx, (label, _, cell_ref) in enumerate(EXCEL_V50_FILTER_SPECS, start=5):
-        ws.cell(idx, 1, label)
-        ws.cell(idx, 1).fill = PatternFill("solid", fgColor=EXCEL_THEME["panel_alt"])
-        ws.cell(idx, 1).font = Font(color=EXCEL_THEME["navy"], bold=True, name="Aptos")
-        ws.cell(idx, 1).border = border
-        target = ws[cell_ref.replace("$", "")]
-        target.fill = PatternFill("solid", fgColor="DDE8FF")
-        target.font = Font(color=EXCEL_THEME["royal"], bold=True, name="Aptos")
-        target.border = border
-        target.alignment = Alignment(horizontal="left")
-
-    _excel_v50_add_data_validation_lists(wb, key_df, ws)
-    ws.column_dimensions["A"].width = 26
-    ws.column_dimensions["B"].width = 34
-
-    ws.merge_cells("D4:I4")
-    ws["D4"] = "INDICADORES SEGÚN LOS FILTROS DE ESTA HOJA"
-    ws["D4"].fill = PatternFill("solid", fgColor=EXCEL_THEME["navy"])
-    ws["D4"].font = Font(color=EXCEL_THEME["white"], bold=True, name="Aptos Display", size=12)
-    ws["D4"].alignment = Alignment(horizontal="left")
-
-    kpis = [
-        ("D5:F5", "D6:F8", "EQUIPOS", _excel_v50_filter_formula(range_map), EXCEL_THEME["royal"]),
-        ("G5:I5", "G6:I8", "EN RUTINA", _excel_v50_filter_formula(range_map, f"--({range_map['__RoutineFlag']}=1)"), EXCEL_THEME["green"]),
-        ("D9:F9", "D10:F12", "0 TESTS/DÍA", _excel_v50_filter_formula(range_map, f"--({range_map['__ZeroTestsFlag']}=1)"), EXCEL_THEME["coral"]),
-        ("G9:I9", "G10:I12", "PM VENCIDOS", _excel_v50_filter_formula(range_map, f"--({range_map['__PMOverdueFlag']}=1)"), EXCEL_THEME["amber"]),
-        ("J5:L5", "J6:L8", "CON FABRICACIÓN", _excel_v50_filter_formula(range_map, f"--({range_map['__ManufacturingFlag']}=1)"), EXCEL_THEME["slate"]),
-        ("J9:L9", "J10:L12", "BANCO DE SANGRE", _excel_v50_filter_formula(range_map, f'--({range_map["Blood Bank group"]}="Banco de sangre")'), EXCEL_THEME["purple"]),
-    ]
-    for label_range, value_range, label, formula, color in kpis:
-        ws.merge_cells(label_range)
-        ws.merge_cells(value_range)
-        label_cell = ws[label_range.split(":")[0]]
-        value_cell = ws[value_range.split(":")[0]]
-        label_cell.value = label
-        label_cell.fill = PatternFill("solid", fgColor=color)
-        label_cell.font = Font(color=EXCEL_THEME["white"], bold=True, size=9, name="Aptos")
-        label_cell.alignment = Alignment(horizontal="center")
-        label_cell.border = border
-        value_cell.value = formula
-        value_cell.fill = PatternFill("solid", fgColor=EXCEL_THEME["panel"])
-        value_cell.font = Font(color=color, bold=True, size=21, name="Aptos Display")
-        value_cell.alignment = Alignment(horizontal="center", vertical="center")
-        value_cell.number_format = "#,##0"
-        value_cell.border = border
-
-    ws.merge_cells("A15:L15")
-    ws["A15"] = "Las tablas siguientes se recalculan con los selectores superiores. Las categorías mantienen un orden estable para facilitar comparación."
-    ws["A15"].fill = PatternFill("solid", fgColor="E7F7EF")
-    ws["A15"].font = Font(color=EXCEL_THEME["green"], italic=True, name="Aptos", size=9)
-    ws["A15"].alignment = Alignment(horizontal="left")
-
-    _, model_end = _excel_v50_dynamic_summary_table(ws, key_df, range_map, "Instrument type", "Equipos por modelo", 17, 1)
-    _, status_end = _excel_v50_dynamic_summary_table(ws, key_df, range_map, "Operational status grouped", "Estado operativo", 17, 5)
-    _, country_end = _excel_v50_dynamic_summary_table(ws, key_df, range_map, "Country", "Países", max(model_end, status_end) + 3, 1)
-    _excel_v50_dynamic_summary_table(ws, key_df, range_map, "Operating System", "Sistemas operativos", max(model_end, status_end) + 3, 5)
-
-    ws["E8"].number_format = "#,##0"
-    ws.conditional_formatting.add("D6:L12", CellIsRule(operator="lessThan", formula=["0"], fill=PatternFill("solid", fgColor="FDE2E7")))
-
-
-def _excel_v50_add_native_data_sheet(
-    wb,
-    sheet_name: str,
-    title: str,
-    subtitle: str,
-    df: pd.DataFrame,
-    table_name: str,
-    tab_color: str,
-    freeze_cell: str,
-    key_sheet: bool = False,
-):
-    from openpyxl.styles import Alignment, Font, PatternFill
-    from openpyxl.utils import get_column_letter
-
-    ws = wb.create_sheet(sheet_name)
-    _excel_v50_sheet_header(ws, title, subtitle, sheet_name, tab_color)
-    clean_df = _excel_unique_columns(_excel_clean_dataframe(df))
-    header_row, start_col, n_rows, n_cols = _excel_write_df(ws, clean_df, start_row=5, start_col=1, title=None)
-    final_table_name = _excel_add_native_table(ws, header_row, start_col, n_rows, n_cols, table_name)
-    ws.freeze_panes = freeze_cell
-    ws.sheet_view.zoomScale = 85 if key_sheet else 70
-
-    # Widths are controlled instead of fully autofitting 100+ technical fields.
-    for idx, column in enumerate(clean_df.columns, start=1):
-        name = str(column)
-        letter = get_column_letter(idx)
-        if name in {"Customer name", "Distributor name", "Address", "Notes", "Machine Configurations"}:
-            ws.column_dimensions[letter].width = 30
-        elif "date" in name.lower():
-            ws.column_dimensions[letter].width = 14
-        elif name in {"Serial number", "Instrument type", "Operational status", "Operating System"}:
-            ws.column_dimensions[letter].width = 20
-        else:
-            ws.column_dimensions[letter].width = min(max(len(name) + 2, 11), 18)
-
-    for row in range(header_row + 1, header_row + n_rows + 1):
-        ws.row_dimensions[row].height = 18
-    for tech_column in EXCEL_V50_TECH_COLUMNS:
-        if tech_column in clean_df.columns:
-            idx = list(clean_df.columns).index(tech_column) + 1
-            ws.column_dimensions[get_column_letter(idx)].hidden = True
-
-    ws.auto_filter.ref = None  # la tabla nativa ya contiene sus propios filtros
-    ws["L3"] = "Filtros nativos disponibles en cada encabezado"
-    ws["L3"].font = Font(color=EXCEL_THEME["teal"], italic=True, name="Aptos", size=9)
-    ws["L3"].alignment = Alignment(horizontal="right")
-    return ws, final_table_name
-
-
-def _excel_v50_apply_data_bars(ws, start_row: int, end_row: int, column: int, color: str) -> None:
-    if end_row < start_row:
-        return
-    from openpyxl.formatting.rule import DataBarRule
-    from openpyxl.utils import get_column_letter
-
-    letter = get_column_letter(column)
-    ws.conditional_formatting.add(
-        f"{letter}{start_row}:{letter}{end_row}",
-        DataBarRule(start_type="num", start_value=0, end_type="max", color=color, showValue=True),
-    )
-
-
 def build_dashboard_excel_export(
     filtered_df: pd.DataFrame,
     filter_summary: dict[str, str] | None,
@@ -2551,176 +1839,211 @@ def build_dashboard_excel_export(
     active_dashboard_tab: str | None = None,
     include_visual_dashboard: bool = True,
 ) -> bytes:
-    """Genera el Excel v50 con una arquitectura estable y comprensible.
+    """Genera un Excel ejecutivo, filtrable y con dashboard dinámico.
 
-    1. ``00_Dashboard`` es una fotografía ejecutiva garantizada: usa imágenes PNG
-       embebidas, por lo que nunca abre con gráficos vacíos.
-    2. ``01_Filtros`` ofrece selectores editables y resúmenes mediante fórmulas
-       ``SUMPRODUCT`` no volátiles; no usa OFFSET ni depende del AutoFilter.
-    3. ``02_Datos_clave`` limita la vista operativa a los campos principales.
-    4. ``03_Datos_completos`` conserva la totalidad de la información técnica.
-    5. Las hojas analíticas restantes se identifican como resúmenes estáticos de
-       la vista exportada para evitar contradicciones sobre su comportamiento.
+    El contenido respeta todos los filtros laterales y filtros aplicados desde gráficas.
+    Acepta `active_tab` y `active_dashboard_tab` para mantener compatibilidad con
+    las llamadas existentes del dashboard y evitar errores por nombre de argumento.
     """
     from openpyxl import Workbook
-    from openpyxl.formatting.rule import ColorScaleRule
 
     active_tab_value = active_dashboard_tab or active_tab or "Dashboard"
-    filter_summary = dict(filter_summary or {})
-    stock_context = stock_context or {}
 
-    source_df = filtered_df.copy() if isinstance(filtered_df, pd.DataFrame) else pd.DataFrame()
-    export_df = source_df.drop(columns=[c for c in source_df.columns if str(c).startswith("FLAG::")], errors="ignore").copy()
-    export_df = export_df[_preferred_export_columns(export_df)] if not export_df.empty else export_df
-    export_df = _excel_unique_columns(export_df)
-    key_df = _excel_v50_prepare_key_data(export_df)
-
+    output = BytesIO()
     wb = Workbook()
     summary_ws = wb.active
     summary_ws.title = "00_Resumen"
-    _excel_add_readme(summary_ws, filter_summary, len(export_df), active_tab_value, source_label_value)
-    _excel_v50_navigation(summary_ws, current="00_Resumen")
+    _excel_add_readme(summary_ws, filter_summary or {}, len(filtered_df), active_tab_value, source_label_value)
 
-    if include_visual_dashboard:
-        _excel_v50_build_snapshot_dashboard(wb, export_df, filter_summary, active_tab_value, source_label_value)
-
-    key_ws, key_table_name = _excel_v50_add_native_data_sheet(
-        wb,
-        "02_Datos_clave",
-        "DATOS CLAVE · VISTA OPERATIVA",
-        "Campos esenciales para consulta y filtros rápidos. Las columnas auxiliares del explorador permanecen ocultas.",
-        key_df,
-        "RecordsKeyData",
-        EXCEL_THEME["green"],
-        "G6",
-        key_sheet=True,
-    )
-
-    key_range_map = _excel_v50_key_range_map(key_df, "02_Datos_clave", header_row=5)
-    _excel_v50_build_filter_explorer(wb, key_df, key_range_map)
-
-    _excel_v50_add_native_data_sheet(
-        wb,
-        "03_Datos_completos",
-        "DATOS COMPLETOS · DETALLE TÉCNICO",
-        "Incluye todos los campos exportados. Usa esta hoja para auditoría o análisis profundo; la operación diaria debe realizarse en Datos clave.",
+    export_df = filtered_df.drop(columns=[c for c in filtered_df.columns if str(c).startswith("FLAG::")], errors="ignore").copy()
+    export_df = export_df[_preferred_export_columns(export_df)]
+    export_df = _excel_add_interactive_helper_columns(export_df)
+    data_ws = wb.create_sheet("01_Datos_filtrados")
+    export_df = _excel_unique_columns(export_df)
+    data_header_row, data_start_col, data_n_rows, data_n_cols = _excel_write_df(
+        data_ws,
         export_df,
-        "RecordsCompleteData",
-        EXCEL_THEME["slate"],
-        "G6",
-        key_sheet=False,
+        title="Datos filtrados y ordenados · usa los filtros de los encabezados para actualizar 00_Dashboard",
     )
+    data_table_name = _excel_add_native_table(
+        data_ws,
+        start_row=data_header_row,
+        start_col=data_start_col,
+        n_rows=data_n_rows,
+        n_cols=data_n_cols,
+        table_name="RecordsListFilteredData",
+    )
+    _excel_apply_visibility_formulas(
+        data_ws,
+        header_row=data_header_row,
+        start_col=data_start_col,
+        n_rows=data_n_rows,
+        columns=list(export_df.columns),
+    )
+    data_ws.sheet_properties.tabColor = EXCEL_THEME["teal"]
 
-    # 04 Base instalada · tablas estáticas, sin gráficos nativos que puedan abrir vacíos.
-    base_ws = wb.create_sheet("04_Base_instalada")
-    _excel_v50_sheet_header(base_ws, "BASE INSTALADA", "Resumen estático de la vista exportada.", "04_Base_instalada", EXCEL_THEME["royal"])
-    _excel_v50_static_banner(base_ws, 5)
-    type_df = _excel_value_counts_df(export_df, "Instrument type", "Modelo")
-    r1, c1, n1, nc1 = _excel_write_df(base_ws, type_df, 7, 1, "Base instalada por modelo")
-    _excel_v50_apply_data_bars(base_ws, r1 + 1, r1 + n1, c1 + 1, EXCEL_THEME["royal"])
-    country_df = _excel_value_counts_df(export_df, "Country", "País", top_n=30)
-    r2, c2, n2, nc2 = _excel_write_df(base_ws, country_df, 7, 5, "Países")
-    _excel_v50_apply_data_bars(base_ws, r2 + 1, r2 + n2, c2 + 1, EXCEL_THEME["teal"])
-    city_df = _excel_value_counts_df(export_df.assign(CityLabel=build_city_label_series(export_df)), "CityLabel", "Ciudad | País", top_n=40) if "City" in export_df.columns else pd.DataFrame()
-    r3, c3, n3, nc3 = _excel_write_df(base_ws, city_df, max(r1 + n1, r2 + n2) + 4, 1, "Ciudades")
-    _excel_v50_apply_data_bars(base_ws, r3 + 1, r3 + n3, c3 + 1, EXCEL_THEME["purple"])
+    # Base instalada
+    base_ws = wb.create_sheet("02_Base_instalada")
+    row = 1
+    type_df = _excel_value_counts_df(filtered_df, "Instrument type", "Modelo")
+    r, c, n, nc = _excel_write_df(base_ws, type_df, row, 1, "Base instalada por tipo de instrumento")
+    _excel_add_bar_chart(base_ws, r, c, n, nc, "Base instalada por tipo de instrumento", "E2")
+    row = r + n + 4
+    country_df = _excel_value_counts_df(filtered_df, "Country", "País", top_n=15)
+    r, c, n, nc = _excel_write_df(base_ws, country_df, row, 1, "Top países")
+    _excel_add_bar_chart(base_ws, r, c, n, nc, "Top países", "E20")
+    row = r + n + 4
+    city_df = _excel_value_counts_df(filtered_df.assign(CityLabel=build_city_label_series(filtered_df)), "CityLabel", "Ciudad | País", top_n=20) if "City" in filtered_df.columns else pd.DataFrame()
+    _excel_write_df(base_ws, city_df, row, 1, "Top ciudades")
 
-    # 05 Modelo por estado · matriz y mapa de calor.
-    matrix_ws = wb.create_sheet("05_Modelo_estado")
-    _excel_v50_sheet_header(matrix_ws, "MODELO POR ESTADO OPERATIVO", "Matriz estática de la vista exportada.", "05_Modelo_estado", EXCEL_THEME["green"])
-    _excel_v50_static_banner(matrix_ws, 5)
-    model_status_df = _excel_prepare_model_status_matrix(export_df)
-    rm, cm, nm, ncm = _excel_write_df(matrix_ws, model_status_df, 7, 1, "Base instalada por modelo y estado")
-    if nm > 0 and ncm > 2:
-        from openpyxl.utils import get_column_letter
-        start = f"{get_column_letter(cm + 1)}{rm + 1}"
-        end = f"{get_column_letter(cm + ncm - 2)}{rm + nm}"
-        matrix_ws.conditional_formatting.add(
-            f"{start}:{end}",
-            ColorScaleRule(start_type="min", start_color="FFFFFF", mid_type="percentile", mid_value=50, mid_color="FFF3CD", end_type="max", end_color="63BE7B"),
-        )
+    # Modelo por estado operativo
+    matrix_ws = wb.create_sheet("03_Modelo_estado")
+    model_status_df = _excel_prepare_model_status_matrix(filtered_df)
+    r, c, n, nc = _excel_write_df(matrix_ws, model_status_df, 1, 1, "Base instalada por modelo y estado operativo")
+    _excel_add_bar_chart(matrix_ws, r, c, n, nc - 1 if nc > 2 else nc, "Modelo por estado operativo", "K2", stacked=True)
 
-    # 06 Machine configuration · cantidades y porcentajes separados.
-    cfg_ws = wb.create_sheet("06_Machine_config")
-    _excel_v50_sheet_header(cfg_ws, "MACHINE CONFIGURATION", "Resumen estático de configuración; cantidades y porcentajes se presentan en columnas separadas.", "06_Machine_config", EXCEL_THEME["purple"])
-    _excel_v50_static_banner(cfg_ws, 5)
-    blood_yes = count_blood_bank_yes(export_df)
-    blood_df = pd.DataFrame({"Categoría": ["Banco de sangre", "Laboratorio"], "Cantidad": [blood_yes, max(len(export_df) - blood_yes, 0)]})
-    rb, cb, nb, ncb = _excel_write_df(cfg_ws, blood_df, 7, 1, "Banco de sangre")
-    _excel_v50_apply_data_bars(cfg_ws, rb + 1, rb + nb, cb + 1, EXCEL_THEME["royal"])
-    cfg_coverage, cfg_values = _excel_prepare_config_summary(export_df)
-    rc, cc, nc, ncc = _excel_write_df(cfg_ws, cfg_coverage, 7, 5, "Cobertura por campo")
-    _excel_v50_apply_data_bars(cfg_ws, rc + 1, rc + nc, cc + 1, EXCEL_THEME["purple"])
-    rv, cv, nv, ncv = _excel_write_df(cfg_ws, cfg_values, max(rb + nb, rc + nc) + 4, 1, "Valores principales por campo")
-    _excel_v50_apply_data_bars(cfg_ws, rv + 1, rv + nv, cv + 2, EXCEL_THEME["teal"])
+    # Machine configuration
+    cfg_ws = wb.create_sheet("04_Machine_config")
+    blood_bank_yes = count_blood_bank_yes(filtered_df)
+    blood_df = pd.DataFrame({"Categoría": ["Banco de sangre", "Equipos en laboratorio"], "Cantidad": [blood_bank_yes, max(len(filtered_df) - blood_bank_yes, 0)]})
+    r, c, n, nc = _excel_write_df(cfg_ws, blood_df, 1, 1, "Banco de sangre")
+    _excel_add_pie_chart(cfg_ws, r, c, n, "Banco de sangre", "E2")
+    cfg_coverage, cfg_values = _excel_prepare_config_summary(filtered_df)
+    r2, c2, n2, nc2 = _excel_write_df(cfg_ws, cfg_coverage, n + 5, 1, "Cobertura por campo de configuración")
+    _excel_add_bar_chart(cfg_ws, r2, c2, min(n2, 20), nc2, "Cobertura por campo", "E20")
+    _excel_write_df(cfg_ws, cfg_values, r2 + n2 + 4, 1, "Top valores por campo de configuración")
 
-    # 07 OS y PM · evita mezclar equipos con tests totales en un mismo gráfico.
-    os_ws = wb.create_sheet("07_OS_PM")
-    _excel_v50_sheet_header(os_ws, "SISTEMA OPERATIVO · PROCESAMIENTO · PM", "Resumen estático con unidades separadas para mantener lectura correcta.", "07_OS_PM", EXCEL_THEME["amber"])
-    _excel_v50_static_banner(os_ws, 5)
-    os_df = _excel_value_counts_df(export_df, "Operating System", "Sistema operativo")
-    ro, co, no, nco = _excel_write_df(os_ws, os_df, 7, 1, "Sistemas operativos")
-    _excel_v50_apply_data_bars(os_ws, ro + 1, ro + no, co + 1, EXCEL_THEME["teal"])
-    tests = pd.to_numeric(export_df.get("Number of tests per day", pd.Series(index=export_df.index, dtype=float)), errors="coerce").fillna(0)
+    # OS y procesamiento / PM
+    os_pm_ws = wb.create_sheet("05_OS_PM")
+    os_df = _excel_value_counts_df(filtered_df, "Operating System", "Sistema operativo") if "Operating System" in filtered_df.columns else pd.DataFrame(columns=["Sistema operativo", "Cantidad"])
+    r, c, n, nc = _excel_write_df(os_pm_ws, os_df, 1, 1, "Sistema operativo")
+    _excel_add_bar_chart(os_pm_ws, r, c, n, nc, "Sistema operativo", "E2")
+    tests = pd.to_numeric(filtered_df.get("Number of tests per day", pd.Series(dtype=float)), errors="coerce").fillna(0)
+    zero_count = int(tests.eq(0).sum())
     tests_summary = pd.DataFrame({
-        "Métrica": ["Equipos", "Equipos con 0 tests/día", "% con 0 tests/día", "Promedio tests/día", "Máximo tests/día"],
-        "Valor": [len(export_df), int(tests.le(0).sum()), round(tests.le(0).mean() * 100, 1) if len(tests) else 0, round(float(tests.mean()), 1) if len(tests) else 0, round(float(tests.max()), 1) if len(tests) else 0],
+        "Métrica": ["Equipos evaluados", "Equipos con tests/día = 0", "% con tests/día = 0", "Promedio tests/día", "Máximo tests/día"],
+        "Valor": [len(filtered_df), zero_count, round(zero_count * 100 / max(len(filtered_df), 1), 1), round(float(tests.mean()), 1) if len(tests) else 0, round(float(tests.max()), 1) if len(tests) else 0],
     })
-    rt, ct, nt, nct = _excel_write_df(os_ws, tests_summary, 7, 5, "Indicadores de procesamiento")
-    tests_by_model = export_df.assign(**{"Number of tests per day": tests}).groupby("Instrument type", dropna=False)["Number of tests per day"].agg(["count", "sum", "mean", "max"]).reset_index()
+    r2, c2, n2, nc2 = _excel_write_df(os_pm_ws, tests_summary, n + 5, 1, "Resumen de procesamiento")
+    tests_by_model = filtered_df.assign(**{"Number of tests per day": tests}).groupby("Instrument type", dropna=False)["Number of tests per day"].agg(["count", "sum", "mean", "max"]).reset_index()
     tests_by_model.columns = ["Modelo", "Equipos", "Tests/día total", "Promedio tests/día", "Máximo tests/día"]
-    rpm, cpm, npm, ncpm = _excel_write_df(os_ws, tests_by_model, max(ro + no, rt + nt) + 4, 1, "Procesamiento por modelo · métricas separadas")
-    _excel_v50_apply_data_bars(os_ws, rpm + 1, rpm + npm, cpm + 2, EXCEL_THEME["green"])
-    pm_next = pd.to_datetime(export_df.get("PM next date", pd.Series(index=export_df.index, dtype="object")), errors="coerce")
-    today = pd.Timestamp.today().normalize()
-    pm_status = pd.Series(np.select([pm_next.notna() & pm_next.lt(today), pm_next.notna() & pm_next.le(today + pd.Timedelta(days=90)), pm_next.notna()], ["Vencido", "Próximos 90 días", "Planificado"], default="No informado"), index=export_df.index)
-    pm_df = pm_status.value_counts().reset_index()
-    pm_df.columns = ["Estado PM", "Cantidad"]
-    rps, cps, nps, ncps = _excel_write_df(os_ws, pm_df, rpm + npm + 4, 1, "Estado PM")
-    _excel_v50_apply_data_bars(os_ws, rps + 1, rps + nps, cps + 1, EXCEL_THEME["amber"])
+    r3, c3, n3, nc3 = _excel_write_df(os_pm_ws, tests_by_model, r2 + n2 + 4, 1, "Procesamiento por modelo")
+    _excel_add_bar_chart(os_pm_ws, r3, c3, n3, 3, "Tests/día total por modelo", "E22")
+    if "PM next date" in filtered_df.columns:
+        pm_next = pd.to_datetime(filtered_df["PM next date"], errors="coerce")
+        today = pd.Timestamp.today().normalize()
+        pm_status = pd.Series(np.where(pm_next < today, "Vencido", np.where(pm_next <= today + pd.Timedelta(days=90), "Próximos 90 días", "Planificado más adelante")), index=filtered_df.index)
+        pm_df = pm_status.value_counts().reset_index()
+        pm_df.columns = ["Estado PM", "Cantidad"]
+        r4, c4, n4, nc4 = _excel_write_df(os_pm_ws, pm_df, r3 + n3 + 4, 1, "Estado PM")
+        _excel_add_pie_chart(os_pm_ws, r4, c4, n4, "Estado PM", "E40")
 
-    # 08 Fabricación si existe información.
+    # Antigüedad / fabricación si está disponible en la vista.
     manuf_cols = ["Manufacturing Date", "Manufacturing year", "Manufacturing age (years)", "Manufacturing age bucket", "Manufacturing matched"]
-    if any(col in export_df.columns for col in manuf_cols):
-        manuf_ws = wb.create_sheet("08_Fabricacion")
-        _excel_v50_sheet_header(manuf_ws, "ANTIGÜEDAD POR FABRICACIÓN", "Resumen estático y detalle del cruce por serial.", "08_Fabricacion", EXCEL_THEME["slate"])
-        _excel_v50_static_banner(manuf_ws, 5)
-        matched = export_df.get("Manufacturing matched", pd.Series(False, index=export_df.index))
-        try:
-            matched_bool = matched.fillna(False).astype(bool)
-        except Exception:
-            matched_bool = matched.astype(str).str.lower().isin({"true", "1", "yes", "si", "sí"})
-        age = pd.to_numeric(export_df.get("Manufacturing age (years)", pd.Series(index=export_df.index, dtype=float)), errors="coerce")
-        manuf_summary = pd.DataFrame({
-            "Métrica": ["Equipos evaluados", "Con fecha de fabricación", "Sin coincidencia", "% con fecha", "Edad promedio", "Más antiguo", "Más nuevo"],
-            "Valor": [len(export_df), int(matched_bool.sum()), int(len(export_df) - matched_bool.sum()), round(matched_bool.mean() * 100, 1) if len(export_df) else 0, round(float(age.mean()), 1) if age.notna().any() else "No informado", round(float(age.max()), 1) if age.notna().any() else "No informado", round(float(age.min()), 1) if age.notna().any() else "No informado"],
-        })
-        rs, cs, ns, ncs = _excel_write_df(manuf_ws, manuf_summary, 7, 1, "Resumen de fabricación")
-        bucket_df = _excel_value_counts_df(export_df, "Manufacturing age bucket", "Rango de edad")
-        rbu, cbu, nbu, ncbu = _excel_write_df(manuf_ws, bucket_df, 7, 5, "Rangos de antigüedad")
-        _excel_v50_apply_data_bars(manuf_ws, rbu + 1, rbu + nbu, cbu + 1, EXCEL_THEME["slate"])
-        year_df = _excel_value_counts_df(export_df, "Manufacturing year", "Año fabricación")
-        ry, cy, ny, ncy = _excel_write_df(manuf_ws, year_df, max(rs + ns, rbu + nbu) + 4, 1, "Equipos por año de fabricación")
-        _excel_v50_apply_data_bars(manuf_ws, ry + 1, ry + ny, cy + 1, EXCEL_THEME["teal"])
-        detail_cols = [c for c in ["Commercial Region", "Country", "Distributor name", "Customer name", "Instrument type", "Serial number", "Operational status grouped", "Manufacturing Date", "Manufacturing year", "Manufacturing age (years)", "Manufacturing age bucket", "Manufacturing Source", "Manufacturing matched"] if c in export_df.columns]
-        detail_df = export_df[detail_cols].copy() if detail_cols else pd.DataFrame()
-        if "Manufacturing age (years)" in detail_df.columns:
-            detail_df = detail_df.sort_values("Manufacturing age (years)", ascending=False, na_position="last")
-        _excel_write_df(manuf_ws, detail_df, ry + ny + 4, 1, "Detalle completo de fabricación")
+    if any(col in filtered_df.columns for col in manuf_cols):
+        manuf_ws = wb.create_sheet("06_Fabricacion")
+        manuf_export_cols = [
+            c for c in _preferred_export_columns(filtered_df)
+            if c in filtered_df.columns
+            and (
+                c.startswith("Manufacturing")
+                or c in [
+                    "Commercial Region", "Country", "Distributor name", "Customer name",
+                    "Instrument type", "Serial number", "Installation date",
+                    "Operational status", "Operational status grouped", "Asset condition",
+                    "Number of tests per day", "Operating System",
+                ]
+            )
+        ]
+        manuf_export = filtered_df[manuf_export_cols].copy() if manuf_export_cols else pd.DataFrame()
 
+        matched_series = filtered_df.get("Manufacturing matched", pd.Series(False, index=filtered_df.index))
+        try:
+            matched_series = matched_series.fillna(False).astype(bool)
+        except Exception:
+            matched_series = matched_series.astype(str).str.lower().isin({"true", "1", "yes", "si", "sí"})
+
+        total_manuf = int(len(filtered_df))
+        matched_count = int(matched_series.sum()) if total_manuf else 0
+        unmatched_count = max(total_manuf - matched_count, 0)
+        age_series = pd.to_numeric(filtered_df.get("Manufacturing age (years)", pd.Series(dtype=float)), errors="coerce")
+        avg_age = round(float(age_series.dropna().mean()), 1) if age_series.notna().any() else "No informado"
+        oldest_age = round(float(age_series.dropna().max()), 1) if age_series.notna().any() else "No informado"
+        newest_age = round(float(age_series.dropna().min()), 1) if age_series.notna().any() else "No informado"
+        match_pct = round(matched_count * 100 / max(total_manuf, 1), 1)
+
+        manuf_summary = pd.DataFrame({
+            "Métrica": [
+                "Equipos evaluados",
+                "Equipos con fecha de fabricación",
+                "Equipos sin coincidencia de fabricación",
+                "% con fecha de fabricación",
+                "Edad promedio de fabricación",
+                "Equipo más antiguo - años",
+                "Equipo más nuevo - años",
+            ],
+            "Valor": [
+                total_manuf,
+                matched_count,
+                unmatched_count,
+                match_pct,
+                avg_age,
+                oldest_age,
+                newest_age,
+            ],
+        })
+        r0, c0, n0, nc0 = _excel_write_df(manuf_ws, manuf_summary, 1, 1, "Resumen antigüedad / fabricación")
+
+        match_df = pd.DataFrame({
+            "Estado": ["Con fecha de fabricación", "Sin coincidencia"],
+            "Cantidad": [matched_count, unmatched_count],
+        })
+        r_match, c_match, n_match, nc_match = _excel_write_df(manuf_ws, match_df, r0 + n0 + 4, 1, "Cobertura de cruce por serial")
+        _excel_add_pie_chart(manuf_ws, r_match, c_match, n_match, "Cobertura de fabricación", "E2")
+
+        year_df = _excel_value_counts_df(filtered_df, "Manufacturing year", "Año fabricación") if "Manufacturing year" in filtered_df.columns else pd.DataFrame()
+        bucket_df = _excel_value_counts_df(filtered_df, "Manufacturing age bucket", "Rango edad") if "Manufacturing age bucket" in filtered_df.columns else pd.DataFrame()
+
+        r_bucket, c_bucket, n_bucket, nc_bucket = _excel_write_df(manuf_ws, bucket_df, r_match + n_match + 4, 1, "Rangos de antigüedad por fabricación")
+        _excel_add_bar_chart(manuf_ws, r_bucket, c_bucket, n_bucket, nc_bucket, "Rangos de antigüedad", "E20")
+
+        r_year, c_year, n_year, nc_year = _excel_write_df(manuf_ws, year_df, r_bucket + n_bucket + 4, 1, "Equipos por año de fabricación")
+        _excel_add_bar_chart(manuf_ws, r_year, c_year, n_year, nc_year, "Equipos por año de fabricación", "E38")
+
+        detail_start_row = r_year + n_year + 4
+        if not manuf_export.empty and "Manufacturing age (years)" in manuf_export.columns:
+            manuf_export = manuf_export.sort_values(["Manufacturing age (years)", "Manufacturing Date"], ascending=[False, True], na_position="last")
+        _excel_write_df(manuf_ws, manuf_export, detail_start_row, 1, "Detalle completo antigüedad / fabricación")
+
+    stock_context = stock_context or {}
     if stock_context.get("available"):
-        stock_ws = wb.create_sheet("09_Carstock")
-        _excel_v50_sheet_header(stock_ws, "CARSTOCK", "Resumen estático del análisis disponible en la app.", "09_Carstock", EXCEL_THEME["coral"])
-        _excel_v50_static_banner(stock_ws, 5)
+        stock_ws = wb.create_sheet("07_Carstock")
         stock_pairs = pd.DataFrame({
             "Métrica": ["Distribuidor", "SKUs requeridos", "SKUs OK", "SKUs LOW", "SKUs faltantes", "Costo opción 2"],
-            "Valor": [stock_context.get("detected_distributor", "N/A"), stock_context.get("required_skus", 0), stock_context.get("ok_skus", 0), stock_context.get("low_skus", 0), stock_context.get("missing_skus", 0), stock_context.get("option2_cost", 0)],
+            "Valor": [
+                stock_context.get("detected_distributor", "N/A"),
+                stock_context.get("required_skus", 0),
+                stock_context.get("ok_skus", 0),
+                stock_context.get("low_skus", 0),
+                stock_context.get("missing_skus", 0),
+                stock_context.get("option2_cost", 0),
+            ],
         })
-        _excel_write_df(stock_ws, stock_pairs, 7, 1, "Resumen carstock")
-        comparison = stock_context.get("full_comparison_df", pd.DataFrame())
-        if isinstance(comparison, pd.DataFrame) and not comparison.empty:
-            _excel_write_df(stock_ws, comparison, 17, 1, "Comparación completa")
+        _excel_write_df(stock_ws, stock_pairs, 1, 1, "Resumen carstock")
+        full_comparison_df = stock_context.get("full_comparison_df", pd.DataFrame())
+        if isinstance(full_comparison_df, pd.DataFrame) and not full_comparison_df.empty:
+            _excel_write_df(stock_ws, full_comparison_df, 10, 1, "Comparación completa carstock")
 
+    if include_visual_dashboard:
+        _excel_build_visual_dashboard(
+            wb,
+            export_df=export_df,
+            filter_summary=filter_summary or {},
+            active_tab=active_tab_value,
+            source_label_value=source_label_value,
+            stock_context=stock_context,
+            table_name=data_table_name or "RecordsListFilteredData",
+        )
     _excel_style_workbook(wb)
     try:
         wb.calculation.fullCalcOnLoad = True
@@ -2729,7 +2052,6 @@ def build_dashboard_excel_export(
     except Exception:
         pass
     wb.active = 0
-    output = BytesIO()
     wb.save(output)
     output.seek(0)
     return output.getvalue()
@@ -5682,8 +5004,8 @@ def payload_from_manufacturing_year(point: dict) -> dict | None:
         f"Año de fabricación: {year_text}",
     )
 
-CODE_CREATED_AT = "2026-07-15 10:54:00 COT"
-CODE_VERSION_LABEL = "v50-excel-rebuild"
+CODE_CREATED_AT = "2026-07-15 11:25:00 COT"
+CODE_VERSION_LABEL = "v51-emergency-map-restore"
 PARSER_VERSION = "records-list-stable-v45-20260625-1715COT-pdf-manufacturing-age-section"
 
 
@@ -9465,8 +8787,8 @@ with st.sidebar:
     st.markdown("---")
     st.subheader("📊 Informe Excel")
     st.caption(
-        "Genera un libro con una portada ejecutiva estable, un explorador con listas desplegables, "
-        "datos clave y datos completos. Los gráficos de portada siempre se muestran al abrir."
+        "Genera un libro ejecutivo con tablas generales, filtros nativos y un dashboard dinámico. "
+        "Al filtrar 01_Datos_filtrados, las tarjetas y los seis gráficos se actualizan sin macros."
     )
 
     excel_sidebar_df, excel_sidebar_source, excel_using_manufacturing = resolve_excel_report_dataframe(
@@ -9488,7 +8810,7 @@ with st.sidebar:
         excel_sidebar_source,
     )
 
-    if st.button("📗 Preparar informe Excel", use_container_width=True, key="prepare_dashboard_excel_v50"):
+    if st.button("📗 Preparar informe Excel", use_container_width=True, key="prepare_dashboard_excel_v49"):
         try:
             prepared_excel_bytes = build_dashboard_excel_export(
                 excel_sidebar_df,
@@ -9500,9 +8822,9 @@ with st.sidebar:
             st.session_state["prepared_dashboard_excel_bytes"] = prepared_excel_bytes
             st.session_state["prepared_dashboard_excel_signature"] = current_excel_signature
             st.session_state["prepared_dashboard_excel_name"] = (
-                f"records_list_dashboard_professional_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+                f"records_list_dashboard_interactive_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
             )
-            st.success("Informe Excel profesional preparado correctamente.")
+            st.success("Informe Excel interactivo preparado correctamente.")
         except Exception as e:
             st.session_state.pop("prepared_dashboard_excel_bytes", None)
             st.session_state.pop("prepared_dashboard_excel_signature", None)
@@ -9518,11 +8840,11 @@ with st.sidebar:
             data=st.session_state["prepared_dashboard_excel_bytes"],
             file_name=st.session_state.get(
                 "prepared_dashboard_excel_name",
-                f"records_list_dashboard_professional_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                f"records_list_dashboard_interactive_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
             ),
             mime=EXCEL_MIME,
             use_container_width=True,
-            key="download_prepared_dashboard_excel_v50",
+            key="download_prepared_dashboard_excel_v49",
         )
     elif st.session_state.get("prepared_dashboard_excel_bytes") is not None:
         st.info("Los filtros cambiaron. Prepara nuevamente el Excel para descargar la vista actual.")
@@ -9544,7 +8866,7 @@ with foot_r:
             data=st.session_state["prepared_dashboard_excel_bytes"],
             file_name=st.session_state.get(
                 "prepared_dashboard_excel_name",
-                f"records_list_dashboard_professional_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                f"records_list_dashboard_interactive_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
             ),
             mime=EXCEL_MIME,
             use_container_width=True,
