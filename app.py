@@ -685,6 +685,38 @@ def compute_mapbox_center_zoom(df: pd.DataFrame, lat_col: str = "Latitude", lon_
 
 EXCEL_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
+# Paleta ejecutiva para los informes Excel. Se mantiene separada de la paleta
+# oscura del dashboard Streamlit para privilegiar legibilidad al imprimir,
+# presentar y trabajar directamente en Microsoft Excel.
+EXCEL_THEME = {
+    "navy": "17324D",          # títulos y encabezados principales
+    "royal": "2F6BFF",         # acción / dato principal
+    "teal": "00A6A6",          # cobertura y distribución
+    "green": "2E9D62",         # condición favorable / rutina
+    "amber": "F2B134",         # atención / próximos vencimientos
+    "coral": "E85D75",         # riesgo / cero procesamiento
+    "purple": "7A5AF8",        # categorías complementarias
+    "slate": "5F6B7A",         # información neutral
+    "canvas": "F4F7FB",        # fondo general claro
+    "panel": "FFFFFF",         # tarjetas y gráficos
+    "panel_alt": "EAF1F8",     # panel secundario
+    "text": "243447",          # texto principal
+    "muted": "61758A",         # texto secundario
+    "border": "D7E1EA",        # divisores y bordes
+    "white": "FFFFFF",
+}
+
+EXCEL_CHART_PALETTE = [
+    EXCEL_THEME["royal"],
+    EXCEL_THEME["teal"],
+    EXCEL_THEME["purple"],
+    EXCEL_THEME["green"],
+    EXCEL_THEME["amber"],
+    EXCEL_THEME["coral"],
+    "4B8BBE",
+    EXCEL_THEME["slate"],
+]
+
 
 def _excel_safe_sheet_name(sheet_name: str) -> str:
     safe_name = re.sub(r"[\\/*?:\[\]]", "_", str(sheet_name)).strip()[:31]
@@ -798,21 +830,29 @@ def _preferred_export_columns(df: pd.DataFrame) -> list[str]:
     return ordered
 
 
-def _excel_style_workbook(wb) -> None:
-    """Apply global workbook styling and normalize worksheet views.
 
-    Excel is very sensitive to duplicated <selection> nodes in sheet views.
-    Those duplicates can be created when freeze panes are changed several
-    times in the same sheet while multiple tables/charts are written. Excel
-    then opens the file with a repair warning such as "Vista de
-    /xl/worksheets/sheet1.xml". This routine keeps one valid selection per
-    worksheet and prevents the repair dialog without changing the report data.
-    """
+def _excel_style_workbook(wb) -> None:
+    """Normaliza vistas, zoom y colores de pestaña sin tocar los datos."""
     from openpyxl.worksheet.views import Selection
     from openpyxl.utils.cell import coordinate_to_tuple
 
+    tab_colors = {
+        "00_Dashboard": EXCEL_THEME["royal"],
+        "00_Resumen": EXCEL_THEME["navy"],
+        "01_Datos_filtrados": EXCEL_THEME["teal"],
+        "02_Base_instalada": EXCEL_THEME["royal"],
+        "03_Modelo_estado": EXCEL_THEME["green"],
+        "04_Machine_config": EXCEL_THEME["purple"],
+        "05_OS_PM": EXCEL_THEME["amber"],
+        "06_Fabricacion": EXCEL_THEME["slate"],
+        "07_Carstock": EXCEL_THEME["coral"],
+    }
+
     for ws in wb.worksheets:
         ws.sheet_view.showGridLines = False
+        ws.sheet_view.zoomScale = 90 if ws.title != "00_Dashboard" else 85
+        if ws.title in tab_colors:
+            ws.sheet_properties.tabColor = tab_colors[ws.title]
 
         freeze = ws.freeze_panes
         if freeze:
@@ -839,26 +879,35 @@ def _excel_style_workbook(wb) -> None:
 
 
 def _excel_autofit_and_style(ws, start_row: int, start_col: int, n_rows: int, n_cols: int, title_row: int | None = None) -> None:
+    """Aplica una presentación clara, ejecutiva y consistente a cada tabla."""
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
 
-    header_fill = PatternFill("solid", fgColor="17324A")
-    title_fill = PatternFill("solid", fgColor="0B1B2A")
-    header_font = Font(color="FFFFFF", bold=True)
-    title_font = Font(color="FFFFFF", bold=True, size=13)
-    thin = Side(style="thin", color="D9EAF7")
+    header_fill = PatternFill("solid", fgColor=EXCEL_THEME["navy"])
+    title_fill = PatternFill("solid", fgColor=EXCEL_THEME["royal"])
+    body_fill = PatternFill("solid", fgColor=EXCEL_THEME["panel"])
+    stripe_fill = PatternFill("solid", fgColor=EXCEL_THEME["canvas"])
+    header_font = Font(color=EXCEL_THEME["white"], bold=True, name="Aptos", size=10)
+    title_font = Font(color=EXCEL_THEME["white"], bold=True, size=13, name="Aptos Display")
+    body_font = Font(color=EXCEL_THEME["text"], name="Aptos", size=10)
+    thin = Side(style="thin", color=EXCEL_THEME["border"])
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
-
-    if title_row is not None:
-        title_cell = ws.cell(title_row, start_col)
-        title_cell.font = title_font
-        title_cell.fill = title_fill
-        title_cell.alignment = Alignment(horizontal="left")
 
     if n_cols <= 0:
         return
 
+    if title_row is not None:
+        for col_idx in range(start_col, start_col + n_cols):
+            cell = ws.cell(title_row, col_idx)
+            cell.fill = title_fill
+            cell.border = border
+        title_cell = ws.cell(title_row, start_col)
+        title_cell.font = title_font
+        title_cell.alignment = Alignment(horizontal="left", vertical="center")
+        ws.row_dimensions[title_row].height = 25
+
     header_row = start_row
+    ws.row_dimensions[header_row].height = 30
     for col_idx in range(start_col, start_col + n_cols):
         cell = ws.cell(header_row, col_idx)
         cell.fill = header_fill
@@ -867,8 +916,12 @@ def _excel_autofit_and_style(ws, start_row: int, start_col: int, n_rows: int, n_
         cell.border = border
 
     max_row = start_row + max(n_rows, 1)
-    for row in ws.iter_rows(min_row=start_row + 1, max_row=max_row, min_col=start_col, max_col=start_col + n_cols - 1):
-        for cell in row:
+    for row_idx in range(start_row + 1, max_row + 1):
+        row_fill = stripe_fill if (row_idx - start_row) % 2 == 0 else body_fill
+        for col_idx in range(start_col, start_col + n_cols):
+            cell = ws.cell(row_idx, col_idx)
+            cell.fill = row_fill
+            cell.font = body_font
             cell.alignment = Alignment(vertical="top", wrap_text=True)
             cell.border = border
 
@@ -881,14 +934,9 @@ def _excel_autofit_and_style(ws, start_row: int, start_col: int, n_rows: int, n_
         width = min(max(max(values or [12]) + 2, 12), 42)
         ws.column_dimensions[letter].width = width
 
-    # Freeze panes must only be assigned once per worksheet. Reassigning
-    # freeze panes multiple times can create duplicated worksheet-view
-    # selections that Microsoft Excel repairs on open. Only freeze tables
-    # that start in column A; helper tables placed to the right remain normal.
     if not ws.freeze_panes and start_col == 1:
         ws.freeze_panes = ws.cell(start_row + 1, start_col).coordinate
     ws.auto_filter.ref = f"{ws.cell(start_row, start_col).coordinate}:{ws.cell(max_row, start_col + n_cols - 1).coordinate}"
-
 
 def _excel_write_df(ws, df: pd.DataFrame, start_row: int = 1, start_col: int = 1, title: str | None = None) -> tuple[int, int, int, int]:
     from openpyxl.utils.dataframe import dataframe_to_rows
@@ -910,10 +958,13 @@ def _excel_write_df(ws, df: pd.DataFrame, start_row: int = 1, start_col: int = 1
     return start_row, start_col, n_rows, n_cols
 
 
+
 def _excel_add_bar_chart(ws, data_start_row: int, data_start_col: int, n_rows: int, n_cols: int, title: str, anchor: str, stacked: bool = False) -> None:
     if n_rows <= 0 or n_cols < 2:
         return
     from openpyxl.chart import BarChart, Reference
+    from openpyxl.chart.label import DataLabelList
+    from openpyxl.chart.marker import DataPoint
 
     chart = BarChart()
     chart.type = "bar"
@@ -923,6 +974,7 @@ def _excel_add_bar_chart(ws, data_start_row: int, data_start_col: int, n_rows: i
     chart.x_axis.title = "Cantidad"
     chart.height = 8
     chart.width = 16
+    chart.gapWidth = 55
     if stacked:
         chart.grouping = "stacked"
         chart.overlap = 100
@@ -931,6 +983,19 @@ def _excel_add_bar_chart(ws, data_start_row: int, data_start_col: int, n_rows: i
     cats = Reference(ws, min_col=data_start_col, min_row=data_start_row + 1, max_row=data_start_row + n_rows)
     chart.add_data(data, titles_from_data=True)
     chart.set_categories(cats)
+
+    _excel_apply_series_palette(chart, EXCEL_CHART_PALETTE)
+    if not stacked and chart.series:
+        points = []
+        for idx in range(n_rows):
+            point = DataPoint(idx=idx)
+            point.graphicalProperties.solidFill = EXCEL_CHART_PALETTE[idx % len(EXCEL_CHART_PALETTE)]
+            points.append(point)
+        chart.series[0].data_points = points
+        chart.legend = None
+
+    chart.dataLabels = DataLabelList()
+    chart.dataLabels.showVal = True
     ws.add_chart(chart, anchor)
 
 
@@ -938,17 +1003,32 @@ def _excel_add_pie_chart(ws, data_start_row: int, data_start_col: int, n_rows: i
     if n_rows <= 0:
         return
     from openpyxl.chart import PieChart, Reference
+    from openpyxl.chart.label import DataLabelList
+    from openpyxl.chart.marker import DataPoint
 
     chart = PieChart()
     chart.title = title
+    chart.style = 10
     chart.height = 8
     chart.width = 12
+    chart.legend.position = "b"
     labels = Reference(ws, min_col=data_start_col, min_row=data_start_row + 1, max_row=data_start_row + n_rows)
     data = Reference(ws, min_col=data_start_col + 1, min_row=data_start_row, max_row=data_start_row + n_rows)
     chart.add_data(data, titles_from_data=True)
     chart.set_categories(labels)
-    ws.add_chart(chart, anchor)
 
+    if chart.series:
+        points = []
+        for idx in range(n_rows):
+            point = DataPoint(idx=idx)
+            point.graphicalProperties.solidFill = EXCEL_CHART_PALETTE[idx % len(EXCEL_CHART_PALETTE)]
+            points.append(point)
+        chart.series[0].data_points = points
+
+    chart.dataLabels = DataLabelList()
+    chart.dataLabels.showPercent = True
+    chart.dataLabels.showLeaderLines = True
+    ws.add_chart(chart, anchor)
 
 def _excel_value_counts_label(value) -> str:
     """Etiqueta segura para conteos en Excel.
@@ -1040,32 +1120,78 @@ def _excel_prepare_config_summary(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Da
     return pd.DataFrame(coverage_rows).sort_values("Equipos con dato", ascending=False) if coverage_rows else pd.DataFrame(columns=["Campo", "Equipos con dato", "% del filtro"]), pd.DataFrame(value_rows)
 
 
-def _excel_add_readme(ws, filter_summary: dict[str, str], total_rows: int, active_tab: str, source_label_value: str = "") -> None:
-    from openpyxl.styles import Font, PatternFill, Alignment
 
-    ws["A1"] = "Records List Intelligence Dashboard - Export filtrado"
-    ws["A1"].font = Font(bold=True, size=16, color="FFFFFF")
-    ws["A1"].fill = PatternFill("solid", fgColor="0B1B2A")
-    ws.merge_cells("A1:H1")
-    ws["A2"] = f"Código creado: {CODE_CREATED_AT} · {CODE_VERSION_LABEL}"
-    ws["A3"] = f"Build: {PARSER_VERSION}"
-    ws["A4"] = f"Fecha de exportación: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-    ws["A5"] = f"Pestaña activa al exportar: {active_tab}"
-    ws["A6"] = f"Fuente activa: {source_label_value}"
-    ws["A7"] = f"Registros incluidos después de filtros: {total_rows:,}"
-    ws["A9"] = "Filtros aplicados"
-    ws["A9"].font = Font(bold=True, color="FFFFFF")
-    ws["A9"].fill = PatternFill("solid", fgColor="17324A")
-    ws["A9"].alignment = Alignment(horizontal="left")
-    ws.merge_cells("A9:B9")
-    row = 10
+def _excel_add_readme(ws, filter_summary: dict[str, str], total_rows: int, active_tab: str, source_label_value: str = "") -> None:
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+
+    ws.sheet_view.showGridLines = False
+    ws.sheet_properties.tabColor = EXCEL_THEME["navy"]
+    ws.sheet_view.zoomScale = 95
+
+    navy_fill = PatternFill("solid", fgColor=EXCEL_THEME["navy"])
+    royal_fill = PatternFill("solid", fgColor=EXCEL_THEME["royal"])
+    canvas_fill = PatternFill("solid", fgColor=EXCEL_THEME["canvas"])
+    white_fill = PatternFill("solid", fgColor=EXCEL_THEME["panel"])
+    label_fill = PatternFill("solid", fgColor=EXCEL_THEME["panel_alt"])
+    thin = Side(style="thin", color=EXCEL_THEME["border"])
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    for row in range(1, 40):
+        for col in range(1, 9):
+            ws.cell(row, col).fill = canvas_fill
+            ws.cell(row, col).font = Font(color=EXCEL_THEME["text"], name="Aptos", size=10)
+
+    ws.merge_cells("A1:H2")
+    ws["A1"] = "RECORDS LIST INTELLIGENCE DASHBOARD · RESUMEN DE EXPORTACIÓN"
+    ws["A1"].font = Font(bold=True, size=17, color=EXCEL_THEME["white"], name="Aptos Display")
+    ws["A1"].fill = navy_fill
+    ws["A1"].alignment = Alignment(horizontal="left", vertical="center")
+
+    metadata = [
+        ("A4", "Código / versión", f"{CODE_CREATED_AT} · {CODE_VERSION_LABEL}"),
+        ("A5", "Build", PARSER_VERSION),
+        ("A6", "Fecha de exportación", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+        ("A7", "Pestaña activa", active_tab),
+        ("A8", "Fuente activa", source_label_value),
+        ("A9", "Registros incluidos", f"{total_rows:,}"),
+    ]
+    for label_cell, label, value in metadata:
+        row = ws[label_cell].row
+        ws.cell(row, 1, label)
+        ws.cell(row, 2, value)
+        ws.cell(row, 1).fill = label_fill
+        ws.cell(row, 1).font = Font(color=EXCEL_THEME["navy"], bold=True, name="Aptos")
+        ws.cell(row, 2).fill = white_fill
+        ws.cell(row, 2).font = Font(color=EXCEL_THEME["text"], name="Aptos")
+        ws.cell(row, 1).border = border
+        ws.cell(row, 2).border = border
+        ws.cell(row, 1).alignment = Alignment(vertical="center")
+        ws.cell(row, 2).alignment = Alignment(vertical="center", wrap_text=True)
+
+    ws.merge_cells("A11:B11")
+    ws["A11"] = "FILTROS APLICADOS"
+    ws["A11"].font = Font(bold=True, color=EXCEL_THEME["white"], name="Aptos Display", size=12)
+    ws["A11"].fill = royal_fill
+    ws["A11"].alignment = Alignment(horizontal="left", vertical="center")
+
+    row = 12
     for key, value in (filter_summary or {}).items():
         ws.cell(row, 1, key)
         ws.cell(row, 2, value)
+        ws.cell(row, 1).fill = label_fill
+        ws.cell(row, 1).font = Font(color=EXCEL_THEME["navy"], bold=True, name="Aptos")
+        ws.cell(row, 2).fill = white_fill
+        ws.cell(row, 2).font = Font(color=EXCEL_THEME["text"], name="Aptos")
+        ws.cell(row, 1).border = border
+        ws.cell(row, 2).border = border
+        ws.cell(row, 2).alignment = Alignment(wrap_text=True)
         row += 1
-    ws.column_dimensions["A"].width = 28
-    ws.column_dimensions["B"].width = 55
 
+    ws.column_dimensions["A"].width = 28
+    ws.column_dimensions["B"].width = 58
+    for column in "CDEFGH":
+        ws.column_dimensions[column].width = 3
+    ws.freeze_panes = "A4"
 
 def dataframe_to_excel_bytes(sheet_map: dict[str, pd.DataFrame]) -> bytes:
     """Exporta múltiples tablas a un Excel ordenado y con formato básico.
@@ -1093,6 +1219,602 @@ def dataframe_to_excel_bytes(sheet_map: dict[str, pd.DataFrame]) -> bytes:
     return output.getvalue()
 
 
+
+def _excel_unique_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Devuelve una copia con encabezados válidos y únicos para Excel Tables."""
+    work = df.copy() if isinstance(df, pd.DataFrame) else pd.DataFrame()
+    seen: dict[str, int] = {}
+    unique_columns: list[str] = []
+    for raw_column in work.columns:
+        base = str(raw_column).strip() or "Column"
+        occurrence = seen.get(base, 0) + 1
+        seen[base] = occurrence
+        unique_columns.append(base if occurrence == 1 else f"{base}_{occurrence}")
+    work.columns = unique_columns
+    return work
+
+
+
+def _excel_add_native_table(
+    ws,
+    start_row: int,
+    start_col: int,
+    n_rows: int,
+    n_cols: int,
+    table_name: str = "DashboardData",
+) -> str:
+    """Convierte el rango de datos en una tabla nativa con filtros editables.
+
+    Devuelve el nombre final de la tabla para que el dashboard dinámico pueda
+    construir fórmulas estructuradas sin depender de coordenadas frágiles.
+    """
+    if n_rows <= 0 or n_cols <= 0:
+        return ""
+
+    from openpyxl.worksheet.table import Table, TableStyleInfo
+
+    safe_table_name = re.sub(r"[^A-Za-z0-9_]", "_", str(table_name)).strip("_") or "DashboardData"
+    if safe_table_name[0].isdigit():
+        safe_table_name = f"T_{safe_table_name}"
+
+    end_row = start_row + n_rows
+    end_col = start_col + n_cols - 1
+    table_ref = f"{ws.cell(start_row, start_col).coordinate}:{ws.cell(end_row, end_col).coordinate}"
+    table = Table(displayName=safe_table_name[:250], ref=table_ref)
+    table.tableStyleInfo = TableStyleInfo(
+        name="TableStyleMedium2",
+        showFirstColumn=False,
+        showLastColumn=False,
+        showRowStripes=True,
+        showColumnStripes=False,
+    )
+    ws.add_table(table)
+    return table.displayName
+
+
+
+EXCEL_INTERACTIVE_HELPER_COLUMNS = (
+    "__RowMarker",
+    "__Visible",
+    "__ProcessingBucket",
+    "__BloodBucket",
+)
+
+
+def _excel_table_column_ref(table_name: str, column_name: str) -> str:
+    """Crea una referencia estructurada segura a una columna de Excel Table."""
+    safe_column = str(column_name).replace("]", "]]" )
+    return f"{table_name}[{safe_column}]"
+
+
+def _excel_add_interactive_helper_columns(export_df: pd.DataFrame) -> pd.DataFrame:
+    """Añade columnas ocultas que permiten recalcular el dashboard al filtrar.
+
+    No modifica ninguna columna funcional de la base. Los campos auxiliares se
+    escriben al final de la tabla, se ocultan en Excel y solo alimentan fórmulas.
+    """
+    work = export_df.copy() if isinstance(export_df, pd.DataFrame) else pd.DataFrame()
+    work = work.drop(columns=[c for c in EXCEL_INTERACTIVE_HELPER_COLUMNS if c in work.columns], errors="ignore")
+
+    tests = pd.to_numeric(
+        work.get("Number of tests per day", pd.Series(index=work.index, dtype=float)),
+        errors="coerce",
+    ).fillna(0)
+    work["__ProcessingBucket"] = np.where(tests.gt(0), "> 0 tests/día", "0 tests/día")
+
+    if "Blood Bank Flag" in work.columns:
+        blood_flags = work["Blood Bank Flag"].fillna(False).astype(bool)
+    elif "In Blood Bank" in work.columns:
+        blood_flags = work["In Blood Bank"].map(is_blood_bank_yes).fillna(False).astype(bool)
+    else:
+        blood_flags = pd.Series(False, index=work.index, dtype=bool)
+    work["__BloodBucket"] = np.where(blood_flags, "Banco de sangre", "Laboratorio")
+
+    work["__RowMarker"] = 1
+    work["__Visible"] = 1
+
+    # Deja las columnas técnicas al final para que las columnas de negocio
+    # mantengan exactamente su orden actual.
+    business_columns = [c for c in work.columns if c not in EXCEL_INTERACTIVE_HELPER_COLUMNS]
+    return work[business_columns + list(EXCEL_INTERACTIVE_HELPER_COLUMNS)]
+
+
+def _excel_apply_visibility_formulas(
+    ws,
+    header_row: int,
+    start_col: int,
+    n_rows: int,
+    columns: list[str],
+) -> None:
+    """Convierte __Visible en un indicador 1/0 sensible al AutoFilter.
+
+    SUBTOTAL + OFFSET es una técnica nativa de Excel: cuando una fila queda
+    oculta por el filtro de la tabla, la fórmula devuelve 0; cuando permanece
+    visible, devuelve 1. No requiere macros ni vínculos externos.
+    """
+    if n_rows <= 0:
+        return
+
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    column_positions = {str(name): start_col + idx for idx, name in enumerate(columns)}
+    marker_col = column_positions.get("__RowMarker")
+    visible_col = column_positions.get("__Visible")
+    if marker_col is None or visible_col is None:
+        return
+
+    marker_letter = get_column_letter(marker_col)
+    first_data_row = header_row + 1
+    last_data_row = header_row + n_rows
+    for row_idx in range(first_data_row, last_data_row + 1):
+        ws.cell(row_idx, marker_col, 1)
+        ws.cell(row_idx, visible_col, f"=SUBTOTAL(103,OFFSET(${marker_letter}{row_idx},0,0))")
+        ws.cell(row_idx, visible_col).number_format = "0"
+
+    technical_fill = PatternFill("solid", fgColor=EXCEL_THEME["panel_alt"])
+    for helper_name in EXCEL_INTERACTIVE_HELPER_COLUMNS:
+        col_idx = column_positions.get(helper_name)
+        if col_idx is None:
+            continue
+        letter = get_column_letter(col_idx)
+        ws.column_dimensions[letter].hidden = True
+        ws.column_dimensions[letter].width = 3
+        ws.cell(header_row, col_idx).fill = technical_fill
+        ws.cell(header_row, col_idx).font = Font(color=EXCEL_THEME["muted"], italic=True, size=8)
+
+
+def _excel_category_pairs(df: pd.DataFrame, column: str) -> list[tuple[str, str]]:
+    """Obtiene categorías ordenadas por frecuencia, preservando valores vacíos."""
+    if df is None or df.empty or column not in df.columns:
+        return []
+
+    series = df[column]
+    if isinstance(series, pd.DataFrame):
+        series = series.bfill(axis=1).iloc[:, 0]
+
+    def criterion(value) -> str:
+        try:
+            if value is None or pd.isna(value):
+                return ""
+        except Exception:
+            pass
+        text_value = str(value).strip()
+        if text_value.lower() in {"nan", "none", "nat", "<na>"}:
+            return ""
+        return text_value
+
+    criteria = series.astype("object").map(criterion)
+    counts = criteria.value_counts(dropna=False)
+    pairs: list[tuple[str, str]] = []
+    for raw_value, _count in counts.items():
+        raw_text = str(raw_value)
+        pairs.append((raw_text if raw_text else "No informado", raw_text))
+    return pairs
+
+
+def _excel_write_dynamic_category_section(
+    ws,
+    export_df: pd.DataFrame,
+    table_name: str,
+    source_column: str,
+    section_title: str,
+    start_row: int,
+    start_col: int,
+    top_n: int,
+) -> dict:
+    """Crea una tabla auxiliar dinámica y un Top-N sensible a filtros."""
+    from openpyxl.utils import get_column_letter
+
+    pairs = _excel_category_pairs(export_df, source_column)
+    available = bool(pairs and source_column in export_df.columns)
+    raw_rows = max(len(pairs), 1)
+
+    headers = [
+        f"{section_title} · Etiqueta",
+        f"{section_title} · Criterio",
+        "Visible",
+        "Puntaje",
+        f"Top {top_n} · Categoría",
+        "Top visible",
+        "Top puntaje",
+    ]
+    for offset, header in enumerate(headers):
+        ws.cell(start_row, start_col + offset, header)
+
+    raw_start = start_row + 1
+    raw_end = raw_start + raw_rows - 1
+    if available:
+        visible_ref = _excel_table_column_ref(table_name, "__Visible")
+        source_ref = _excel_table_column_ref(table_name, source_column)
+        for idx, (display_label, criteria_value) in enumerate(pairs):
+            row_idx = raw_start + idx
+            ws.cell(row_idx, start_col, display_label)
+            ws.cell(row_idx, start_col + 1, criteria_value)
+            criteria_cell = ws.cell(row_idx, start_col + 1).coordinate
+            ws.cell(row_idx, start_col + 2, f"=SUMIFS({visible_ref},{source_ref},{criteria_cell})")
+            ws.cell(row_idx, start_col + 3, f"=IF({ws.cell(row_idx, start_col + 2).coordinate}>0,{ws.cell(row_idx, start_col + 2).coordinate}+ROW()/1000000,0)")
+    else:
+        ws.cell(raw_start, start_col, "No disponible")
+        ws.cell(raw_start, start_col + 1, "")
+        ws.cell(raw_start, start_col + 2, "=0")
+        ws.cell(raw_start, start_col + 3, "=0")
+
+    score_range = f"${get_column_letter(start_col + 3)}${raw_start}:${get_column_letter(start_col + 3)}${raw_end}"
+    label_range = f"${get_column_letter(start_col)}${raw_start}:${get_column_letter(start_col)}${raw_end}"
+    count_range = f"${get_column_letter(start_col + 2)}${raw_start}:${get_column_letter(start_col + 2)}${raw_end}"
+
+    top_start = start_row + 1
+    for rank in range(1, top_n + 1):
+        row_idx = top_start + rank - 1
+        top_score_cell = ws.cell(row_idx, start_col + 6)
+        top_label_cell = ws.cell(row_idx, start_col + 4)
+        top_value_cell = ws.cell(row_idx, start_col + 5)
+        top_score_cell.value = f"=IFERROR(LARGE({score_range},{rank}),0)"
+        top_label_cell.value = f'=IF({top_score_cell.coordinate}=0,"",INDEX({label_range},MATCH({top_score_cell.coordinate},{score_range},0)))'
+        top_value_cell.value = f"=IF({top_score_cell.coordinate}=0,NA(),INT({top_score_cell.coordinate}))"
+
+    return {
+        "available": available,
+        "raw_count_range": count_range,
+        "top_start_row": top_start,
+        "top_n": top_n,
+        "top_label_col": start_col + 4,
+        "top_value_col": start_col + 5,
+    }
+
+
+def _excel_build_dynamic_helper_sheet(wb, export_df: pd.DataFrame, table_name: str) -> tuple[object, dict[str, dict]]:
+    """Construye las fórmulas que alimentan KPIs y gráficos interactivos."""
+    helper_ws = wb.create_sheet("_DashboardData")
+    helper_ws.sheet_state = "veryHidden"
+    helper_ws.sheet_view.showGridLines = False
+
+    specifications = [
+        ("models", "Instrument type", "Modelos", 12),
+        ("status", "Operational status grouped", "Estado", 12),
+        ("countries", "Country", "Países", 10),
+        ("os", "Operating System", "Sistema operativo", 10),
+        ("processing", "__ProcessingBucket", "Procesamiento", 2),
+        ("blood", "__BloodBucket", "Banco de sangre", 2),
+        ("distributors", "Distributor name", "Distribuidores", 1),
+    ]
+
+    sections: dict[str, dict] = {}
+    cursor_col = 1
+    for key, source_column, title, top_n in specifications:
+        sections[key] = _excel_write_dynamic_category_section(
+            helper_ws,
+            export_df=export_df,
+            table_name=table_name,
+            source_column=source_column,
+            section_title=title,
+            start_row=1,
+            start_col=cursor_col,
+            top_n=top_n,
+        )
+        cursor_col += 9
+
+    return helper_ws, sections
+
+
+def _excel_export_signature(
+    df: pd.DataFrame,
+    filter_summary: dict[str, str] | None,
+    active_tab: str,
+    source_label_value: str,
+) -> str:
+    """Firma liviana para impedir descargar un Excel preparado con filtros anteriores."""
+    serials: list[str] = []
+    if isinstance(df, pd.DataFrame) and "Serial number" in df.columns:
+        serials = sorted(df["Serial number"].fillna("").astype(str).tolist())
+    payload = "|".join(
+        [
+            str(active_tab),
+            str(source_label_value),
+            str(len(df) if isinstance(df, pd.DataFrame) else 0),
+            repr(sorted((filter_summary or {}).items())),
+            repr(serials),
+        ]
+    )
+    return hashlib.sha256(payload.encode("utf-8", errors="ignore")).hexdigest()
+
+
+def resolve_excel_report_dataframe(
+    filtered_df: pd.DataFrame,
+    active_tab: str,
+    source_label_value: str = "",
+) -> tuple[pd.DataFrame, str, bool]:
+    """Resuelve la misma fuente visual del dashboard para la exportación Excel."""
+    report_df = filtered_df.copy() if isinstance(filtered_df, pd.DataFrame) else pd.DataFrame()
+    report_source = source_label_value
+    using_manufacturing = False
+
+    manufacturing_df = st.session_state.get(MANUFACTURING_EXCEL_EXPORT_SESSION_KEY)
+    if isinstance(manufacturing_df, pd.DataFrame) and not manufacturing_df.empty:
+        has_manufacturing_age = _has_valid_numeric_column(manufacturing_df, "Manufacturing age (years)")
+        if active_tab == "Antigüedad / fabricación" and has_manufacturing_age and _same_serial_universe(report_df, manufacturing_df):
+            report_df = manufacturing_df.copy()
+            report_source = st.session_state.get(MANUFACTURING_EXCEL_EXPORT_SOURCE_KEY, source_label_value)
+            using_manufacturing = True
+
+    return report_df, report_source, using_manufacturing
+
+
+def _excel_write_helper_table(ws, df: pd.DataFrame, start_row: int, start_col: int) -> tuple[int, int, int, int]:
+    """Escribe datos auxiliares para gráficos sin aplicar formato de hoja visible."""
+    from openpyxl.utils.dataframe import dataframe_to_rows
+
+    work = _excel_unique_columns(_excel_clean_dataframe(df))
+    for r_offset, row in enumerate(dataframe_to_rows(work, index=False, header=True)):
+        for c_offset, value in enumerate(row):
+            ws.cell(start_row + r_offset, start_col + c_offset, _excel_safe_cell_value(value))
+    return start_row, start_col, len(work), max(len(work.columns), 1)
+
+
+def _excel_apply_series_palette(chart, palette: list[str]) -> None:
+    """Aplica la paleta visual del dashboard a las series de gráficos Excel."""
+    for idx, series in enumerate(getattr(chart, "series", [])):
+        color = palette[idx % len(palette)].replace("#", "")
+        try:
+            series.graphicalProperties.solidFill = color
+            series.graphicalProperties.line.solidFill = color
+        except Exception:
+            pass
+
+
+
+
+def _excel_build_visual_dashboard(
+    wb,
+    export_df: pd.DataFrame,
+    filter_summary: dict[str, str] | None,
+    active_tab: str,
+    source_label_value: str,
+    stock_context: dict | None = None,
+    table_name: str = "RecordsListFilteredData",
+) -> None:
+    """Crea un dashboard Excel que se recalcula al modificar AutoFilters.
+
+    Los gráficos y KPIs se alimentan de __Visible, una fórmula oculta que cambia
+    entre 1 y 0 según la visibilidad de cada fila de la tabla de datos. Así, el
+    usuario puede filtrar directamente en Excel sin macros y el dashboard se
+    actualiza cuando Excel recalcula el libro.
+    """
+    from openpyxl.chart import BarChart, DoughnutChart, Reference
+    from openpyxl.chart.data_source import AxDataSource, StrRef
+    from openpyxl.chart.label import DataLabelList
+    from openpyxl.chart.marker import DataPoint
+    from openpyxl.utils import get_column_letter
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+
+    helper_ws, sections = _excel_build_dynamic_helper_sheet(wb, export_df, table_name)
+
+    ws = wb.create_sheet("00_Dashboard", 0)
+    ws.sheet_view.showGridLines = False
+    ws.freeze_panes = "A5"
+    ws.sheet_properties.tabColor = EXCEL_THEME["royal"]
+    ws.sheet_view.zoomScale = 85
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.fitToWidth = 1
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+
+    for column, width in {
+        "A": 4, "B": 14, "C": 14, "D": 14,
+        "E": 4, "F": 14, "G": 14, "H": 14,
+        "I": 4, "J": 14, "K": 14, "L": 14,
+        "M": 4, "N": 14, "O": 14, "P": 14,
+    }.items():
+        ws.column_dimensions[column].width = width
+
+    canvas_fill = PatternFill("solid", fgColor=EXCEL_THEME["canvas"])
+    panel_fill = PatternFill("solid", fgColor=EXCEL_THEME["panel"])
+    panel_alt_fill = PatternFill("solid", fgColor=EXCEL_THEME["panel_alt"])
+    navy_fill = PatternFill("solid", fgColor=EXCEL_THEME["navy"])
+    thin = Side(style="thin", color=EXCEL_THEME["border"])
+    panel_border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    for row in range(1, 65):
+        ws.row_dimensions[row].height = 22
+        for col in range(1, 17):
+            ws.cell(row, col).fill = canvas_fill
+            ws.cell(row, col).font = Font(color=EXCEL_THEME["text"], name="Aptos")
+
+    ws.merge_cells("A1:P2")
+    ws["A1"] = "RECORDS LIST INTELLIGENCE DASHBOARD · EXCEL INTERACTIVO"
+    ws["A1"].fill = navy_fill
+    ws["A1"].font = Font(color=EXCEL_THEME["white"], bold=True, size=22, name="Aptos Display")
+    ws["A1"].alignment = Alignment(horizontal="left", vertical="center")
+
+    ws.merge_cells("A3:P3")
+    ws["A3"] = (
+        f"Vista inicial: {active_tab}   |   Fuente: {source_label_value or 'No informada'}   |   "
+        f"Generado: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}   |   Sin macros"
+    )
+    ws["A3"].fill = navy_fill
+    ws["A3"].font = Font(color="DCE7F1", size=10, name="Aptos")
+    ws["A3"].alignment = Alignment(horizontal="left", vertical="center")
+
+    visible_ref = _excel_table_column_ref(table_name, "__Visible")
+    total_formula = f"=SUM({visible_ref})"
+    countries_formula = f'=COUNTIF(\'_DashboardData\'!{sections["countries"]["raw_count_range"]},">0")'
+    distributors_formula = f'=COUNTIF(\'_DashboardData\'!{sections["distributors"]["raw_count_range"]},">0")'
+    models_formula = f'=COUNTIF(\'_DashboardData\'!{sections["models"]["raw_count_range"]},">0")'
+
+    cards = [
+        ("A5:D5", "A6:D7", "EQUIPOS VISIBLES", total_formula, EXCEL_THEME["royal"]),
+        ("E5:H5", "E6:H7", "PAÍSES VISIBLES", countries_formula, EXCEL_THEME["teal"]),
+        ("I5:L5", "I6:L7", "DISTRIBUIDORES VISIBLES", distributors_formula, EXCEL_THEME["purple"]),
+        ("M5:P5", "M6:P7", "MODELOS VISIBLES", models_formula, EXCEL_THEME["amber"]),
+    ]
+    for label_range, value_range, label, formula, accent in cards:
+        ws.merge_cells(label_range)
+        ws.merge_cells(value_range)
+        label_cell = ws[label_range.split(":")[0]]
+        value_cell = ws[value_range.split(":")[0]]
+        label_cell.value = label
+        label_cell.fill = PatternFill("solid", fgColor=accent)
+        label_cell.font = Font(color=EXCEL_THEME["white"], bold=True, size=10, name="Aptos")
+        label_cell.alignment = Alignment(horizontal="center", vertical="center")
+        label_cell.border = panel_border
+        value_cell.value = formula
+        value_cell.fill = panel_fill
+        value_cell.font = Font(color=accent, bold=True, size=24, name="Aptos Display")
+        value_cell.alignment = Alignment(horizontal="center", vertical="center")
+        value_cell.number_format = "#,##0"
+        value_cell.border = panel_border
+
+    ws.merge_cells("A9:H9")
+    ws["A9"] = "FILTROS APLICADOS EN LA APP AL EXPORTAR"
+    ws["A9"].fill = PatternFill("solid", fgColor=EXCEL_THEME["royal"])
+    ws["A9"].font = Font(color=EXCEL_THEME["white"], bold=True, size=11, name="Aptos Display")
+    ws["A9"].alignment = Alignment(horizontal="left", vertical="center")
+    ws["A9"].border = panel_border
+    ws.merge_cells("A10:H13")
+    filter_lines = [f"• {key}: {value}" for key, value in (filter_summary or {}).items()]
+    filter_lines.append(f"• Registros iniciales: {len(export_df):,}")
+    ws["A10"] = "\n".join(filter_lines)
+    ws["A10"].fill = panel_fill
+    ws["A10"].border = panel_border
+    ws["A10"].font = Font(color=EXCEL_THEME["text"], size=10, name="Aptos")
+    ws["A10"].alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+
+    ws.merge_cells("I9:P9")
+    ws["I9"] = "CÓMO USAR LOS FILTROS INTERACTIVOS"
+    ws["I9"].fill = PatternFill("solid", fgColor=EXCEL_THEME["teal"])
+    ws["I9"].font = Font(color=EXCEL_THEME["white"], bold=True, size=11, name="Aptos Display")
+    ws["I9"].alignment = Alignment(horizontal="left", vertical="center")
+    ws["I9"].border = panel_border
+    ws.merge_cells("I10:P13")
+    ws["I10"] = (
+        "1. Abre 01_Datos_filtrados y usa las flechas de los encabezados.\n"
+        "2. Filtra país, distribuidor, modelo, estado, cliente o cualquier otra columna.\n"
+        "3. Regresa a 00_Dashboard: tarjetas y seis gráficos se recalculan automáticamente.\n"
+        "4. No elimines las columnas auxiliares ocultas; son el motor del dashboard.\n"
+        "5. Si Excel está en cálculo manual, presiona Ctrl + Alt + F9 para recalcular."
+    )
+    ws["I10"].fill = panel_alt_fill
+    ws["I10"].border = panel_border
+    ws["I10"].font = Font(color=EXCEL_THEME["text"], size=10, name="Aptos")
+    ws["I10"].alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+
+    ws.merge_cells("A14:D14")
+    ws["A14"] = "ABRIR DATOS Y MODIFICAR FILTROS"
+    ws["A14"].hyperlink = "#'01_Datos_filtrados'!A1"
+    ws["A14"].fill = PatternFill("solid", fgColor="DDE8FF")
+    ws["A14"].font = Font(color=EXCEL_THEME["royal"], bold=True, underline="single", name="Aptos")
+    ws["A14"].alignment = Alignment(horizontal="center", vertical="center")
+    ws["A14"].border = panel_border
+
+    ws.merge_cells("E14:H14")
+    ws["E14"] = "ABRIR RESUMEN DE EXPORTACIÓN"
+    ws["E14"].hyperlink = "#'00_Resumen'!A1"
+    ws["E14"].fill = PatternFill("solid", fgColor="DDF4F2")
+    ws["E14"].font = Font(color=EXCEL_THEME["teal"], bold=True, underline="single", name="Aptos")
+    ws["E14"].alignment = Alignment(horizontal="center", vertical="center")
+    ws["E14"].border = panel_border
+
+    ws.merge_cells("I14:P14")
+    ws["I14"] = "DASHBOARD DINÁMICO · LOS GRÁFICOS RESPONDEN A LOS FILTROS DE 01_Datos_filtrados"
+    ws["I14"].fill = PatternFill("solid", fgColor="E7F7EF")
+    ws["I14"].font = Font(color=EXCEL_THEME["green"], bold=True, name="Aptos")
+    ws["I14"].alignment = Alignment(horizontal="center", vertical="center")
+    ws["I14"].border = panel_border
+
+    def add_bar(section_key: str, title: str, anchor: str, point_colors: list[str]) -> None:
+        section = sections[section_key]
+        if not section.get("available"):
+            return
+        start_row = section["top_start_row"]
+        top_n = section["top_n"]
+        label_col = section["top_label_col"]
+        value_col = section["top_value_col"]
+        chart = BarChart()
+        chart.type = "bar"
+        chart.style = 10
+        chart.title = title
+        chart.height = 8.5
+        chart.width = 15.5
+        chart.legend = None
+        chart.y_axis.title = "Categoría"
+        chart.x_axis.title = "Cantidad visible"
+        chart.gapWidth = 55
+        chart.display_blanks = "gap"
+        data = Reference(helper_ws, min_col=value_col, min_row=start_row - 1, max_row=start_row + top_n - 1)
+        chart.add_data(data, titles_from_data=True)
+        if chart.series:
+            category_formula = (
+                f"'{helper_ws.title}'!${get_column_letter(label_col)}${start_row}:"
+                f"${get_column_letter(label_col)}${start_row + top_n - 1}"
+            )
+            chart.series[0].cat = AxDataSource(strRef=StrRef(f=category_formula))
+            points = []
+            for idx in range(top_n):
+                point = DataPoint(idx=idx)
+                point.graphicalProperties.solidFill = point_colors[idx % len(point_colors)]
+                points.append(point)
+            chart.series[0].data_points = points
+        chart.dataLabels = DataLabelList()
+        chart.dataLabels.showVal = True
+        ws.add_chart(chart, anchor)
+
+    def add_doughnut(section_key: str, title: str, anchor: str, colors_for_points: list[str]) -> None:
+        section = sections[section_key]
+        if not section.get("available"):
+            return
+        start_row = section["top_start_row"]
+        top_n = section["top_n"]
+        label_col = section["top_label_col"]
+        value_col = section["top_value_col"]
+        chart = DoughnutChart()
+        chart.title = title
+        chart.style = 10
+        chart.height = 8.5
+        chart.width = 12.5
+        chart.holeSize = 62
+        chart.firstSliceAng = 270
+        chart.legend.position = "b"
+        chart.display_blanks = "gap"
+        data = Reference(helper_ws, min_col=value_col, min_row=start_row - 1, max_row=start_row + top_n - 1)
+        chart.add_data(data, titles_from_data=True)
+        if chart.series:
+            category_formula = (
+                f"'{helper_ws.title}'!${get_column_letter(label_col)}${start_row}:"
+                f"${get_column_letter(label_col)}${start_row + top_n - 1}"
+            )
+            chart.series[0].cat = AxDataSource(strRef=StrRef(f=category_formula))
+            points = []
+            for idx in range(top_n):
+                point = DataPoint(idx=idx)
+                point.graphicalProperties.solidFill = colors_for_points[idx % len(colors_for_points)]
+                points.append(point)
+            chart.series[0].data_points = points
+        chart.dataLabels = DataLabelList()
+        chart.dataLabels.showPercent = True
+        chart.dataLabels.showLeaderLines = True
+        ws.add_chart(chart, anchor)
+
+    model_colors = [EXCEL_CHART_PALETTE[i % len(EXCEL_CHART_PALETTE)] for i in range(12)]
+    status_colors = [EXCEL_THEME["green"], EXCEL_THEME["amber"], EXCEL_THEME["royal"], EXCEL_THEME["coral"], EXCEL_THEME["purple"], EXCEL_THEME["slate"]]
+    country_colors = [EXCEL_CHART_PALETTE[i % len(EXCEL_CHART_PALETTE)] for i in range(10)]
+    os_colors = [EXCEL_THEME["green"], EXCEL_THEME["amber"], EXCEL_THEME["coral"], EXCEL_THEME["teal"], EXCEL_THEME["slate"]]
+
+    add_bar("models", "Base instalada visible por modelo", "A16", model_colors)
+    add_bar("status", "Estado operativo visible", "I16", status_colors)
+    add_bar("countries", "Top países visibles", "A31", country_colors)
+    add_bar("os", "Sistema operativo visible", "I31", os_colors)
+    add_doughnut("processing", "Procesamiento diario visible", "A46", [EXCEL_THEME["coral"], EXCEL_THEME["green"]])
+    add_doughnut("blood", "Banco de sangre visible", "I46", [EXCEL_THEME["royal"], EXCEL_THEME["slate"]])
+
+    stock_context = stock_context or {}
+    if stock_context.get("available"):
+        ws["M15"] = f"Carstock: {stock_context.get('detected_distributor', 'N/A')}"
+        ws["M15"].font = Font(color=EXCEL_THEME["coral"], bold=True)
+
+    ws.sheet_view.selection[0].activeCell = "A1"
+    ws.sheet_view.selection[0].sqref = "A1"
+
+
 def build_dashboard_excel_export(
     filtered_df: pd.DataFrame,
     filter_summary: dict[str, str] | None,
@@ -1100,8 +1822,9 @@ def build_dashboard_excel_export(
     source_label_value: str = "",
     stock_context: dict | None = None,
     active_dashboard_tab: str | None = None,
+    include_visual_dashboard: bool = True,
 ) -> bytes:
-    """Genera un Excel ejecutivo con datos filtrados, tablas resumen y gráficas.
+    """Genera un Excel ejecutivo, filtrable y con dashboard dinámico.
 
     El contenido respeta todos los filtros laterales y filtros aplicados desde gráficas.
     Acepta `active_tab` y `active_dashboard_tab` para mantener compatibilidad con
@@ -1119,8 +1842,30 @@ def build_dashboard_excel_export(
 
     export_df = filtered_df.drop(columns=[c for c in filtered_df.columns if str(c).startswith("FLAG::")], errors="ignore").copy()
     export_df = export_df[_preferred_export_columns(export_df)]
+    export_df = _excel_add_interactive_helper_columns(export_df)
     data_ws = wb.create_sheet("01_Datos_filtrados")
-    _excel_write_df(data_ws, export_df, title="Datos filtrados y ordenados")
+    export_df = _excel_unique_columns(export_df)
+    data_header_row, data_start_col, data_n_rows, data_n_cols = _excel_write_df(
+        data_ws,
+        export_df,
+        title="Datos filtrados y ordenados · usa los filtros de los encabezados para actualizar 00_Dashboard",
+    )
+    data_table_name = _excel_add_native_table(
+        data_ws,
+        start_row=data_header_row,
+        start_col=data_start_col,
+        n_rows=data_n_rows,
+        n_cols=data_n_cols,
+        table_name="RecordsListFilteredData",
+    )
+    _excel_apply_visibility_formulas(
+        data_ws,
+        header_row=data_header_row,
+        start_col=data_start_col,
+        n_rows=data_n_rows,
+        columns=list(export_df.columns),
+    )
+    data_ws.sheet_properties.tabColor = EXCEL_THEME["teal"]
 
     # Base instalada
     base_ws = wb.create_sheet("02_Base_instalada")
@@ -1274,7 +2019,24 @@ def build_dashboard_excel_export(
         if isinstance(full_comparison_df, pd.DataFrame) and not full_comparison_df.empty:
             _excel_write_df(stock_ws, full_comparison_df, 10, 1, "Comparación completa carstock")
 
+    if include_visual_dashboard:
+        _excel_build_visual_dashboard(
+            wb,
+            export_df=export_df,
+            filter_summary=filter_summary or {},
+            active_tab=active_tab_value,
+            source_label_value=source_label_value,
+            stock_context=stock_context,
+            table_name=data_table_name or "RecordsListFilteredData",
+        )
     _excel_style_workbook(wb)
+    try:
+        wb.calculation.fullCalcOnLoad = True
+        wb.calculation.forceFullCalc = True
+        wb.calculation.calcMode = "auto"
+    except Exception:
+        pass
+    wb.active = 0
     wb.save(output)
     output.seek(0)
     return output.getvalue()
@@ -4227,8 +4989,8 @@ def payload_from_manufacturing_year(point: dict) -> dict | None:
         f"Año de fabricación: {year_text}",
     )
 
-CODE_CREATED_AT = "2026-06-10 15:35:00 COT"
-CODE_VERSION_LABEL = "v45"
+CODE_CREATED_AT = "2026-07-15 10:12:00 COT"
+CODE_VERSION_LABEL = "v48"
 PARSER_VERSION = "records-list-stable-v45-20260625-1715COT-pdf-manufacturing-age-section"
 
 
@@ -7687,6 +8449,7 @@ if active_dashboard_tab == "Antigüedad / fabricación":
                         active_dashboard_tab="Antigüedad / fabricación",
                         source_label_value=source_label,
                         stock_context=st.session_state.get("pdf_stock_context", {"available": False}),
+                        include_visual_dashboard=False,
                     ),
                     file_name=f"installed_base_manufacturing_age_filtered_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
                     mime=EXCEL_MIME,
@@ -7970,6 +8733,71 @@ with st.sidebar:
                 key="download_prepared_pdf",
             )
 
+    st.markdown("---")
+    st.subheader("📊 Informe Excel")
+    st.caption(
+        "Genera un libro ejecutivo con tablas generales, filtros nativos y un dashboard dinámico. "
+        "Al filtrar 01_Datos_filtrados, las tarjetas y los seis gráficos se actualizan sin macros."
+    )
+
+    excel_sidebar_df, excel_sidebar_source, excel_using_manufacturing = resolve_excel_report_dataframe(
+        filtered,
+        active_dashboard_tab,
+        source_label_value=source_label,
+    )
+    excel_sidebar_filter_summary = dict(filter_summary_for_panel or {})
+    excel_sidebar_filter_summary["Total records"] = f"{len(excel_sidebar_df):,}"
+    excel_sidebar_filter_summary["Fuente activa Excel"] = excel_sidebar_source
+    if excel_using_manufacturing:
+        excel_sidebar_filter_summary["Cruce de fabricación"] = "Incluido"
+        st.caption("Excel preparado para usar antigüedad real por fecha de fabricación.")
+
+    current_excel_signature = _excel_export_signature(
+        excel_sidebar_df,
+        excel_sidebar_filter_summary,
+        active_dashboard_tab,
+        excel_sidebar_source,
+    )
+
+    if st.button("📗 Preparar informe Excel", use_container_width=True, key="prepare_dashboard_excel_v48"):
+        try:
+            prepared_excel_bytes = build_dashboard_excel_export(
+                excel_sidebar_df,
+                excel_sidebar_filter_summary,
+                active_dashboard_tab=active_dashboard_tab,
+                source_label_value=excel_sidebar_source,
+                stock_context=st.session_state.get("pdf_stock_context", {"available": False}),
+            )
+            st.session_state["prepared_dashboard_excel_bytes"] = prepared_excel_bytes
+            st.session_state["prepared_dashboard_excel_signature"] = current_excel_signature
+            st.session_state["prepared_dashboard_excel_name"] = (
+                f"records_list_dashboard_interactive_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+            )
+            st.success("Informe Excel interactivo preparado correctamente.")
+        except Exception as e:
+            st.session_state.pop("prepared_dashboard_excel_bytes", None)
+            st.session_state.pop("prepared_dashboard_excel_signature", None)
+            st.error(f"No fue posible generar el Excel: {e}")
+
+    prepared_excel_is_current = (
+        st.session_state.get("prepared_dashboard_excel_bytes") is not None
+        and st.session_state.get("prepared_dashboard_excel_signature") == current_excel_signature
+    )
+    if prepared_excel_is_current:
+        st.download_button(
+            "⬇️ Descargar informe Excel",
+            data=st.session_state["prepared_dashboard_excel_bytes"],
+            file_name=st.session_state.get(
+                "prepared_dashboard_excel_name",
+                f"records_list_dashboard_interactive_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+            ),
+            mime=EXCEL_MIME,
+            use_container_width=True,
+            key="download_prepared_dashboard_excel_v48",
+        )
+    elif st.session_state.get("prepared_dashboard_excel_bytes") is not None:
+        st.info("Los filtros cambiaron. Prepara nuevamente el Excel para descargar la vista actual.")
+
 st.markdown("---")
 foot_l, foot_r = st.columns((0.75, 0.25))
 with foot_l:
@@ -7996,6 +8824,7 @@ with foot_r:
             active_dashboard_tab=active_dashboard_tab,
             source_label_value=excel_export_source_label,
             stock_context=st.session_state.get("pdf_stock_context", {"available": False}),
+            include_visual_dashboard=False,
         ),
         file_name=f"records_list_filtered_dashboard_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
         mime=EXCEL_MIME,
