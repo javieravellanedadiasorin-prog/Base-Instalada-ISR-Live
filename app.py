@@ -9,6 +9,9 @@ import textwrap
 import hashlib
 import csv
 import math
+import unicodedata
+from dataclasses import dataclass
+from difflib import SequenceMatcher
 
 import numpy as np
 import pandas as pd
@@ -5908,7 +5911,7 @@ def payload_from_manufacturing_year(point: dict) -> dict | None:
     )
 
 CODE_CREATED_AT = "2026-07-15 10:54:00 COT"
-CODE_VERSION_LABEL = "v53-final-map-excel"
+CODE_VERSION_LABEL = "Spare Parts Planning Engine · v46"
 PARSER_VERSION = "records-list-stable-v45-20260625-1715COT-pdf-manufacturing-age-section"
 
 
@@ -8501,6 +8504,854 @@ if active_dashboard_tab == "Procesamiento / PM":
     ]
     st.dataframe(proc_df[process_table_cols].copy(), use_container_width=True, hide_index=True)
 
+
+
+# ===== SPARE PARTS INVENTORY PLANNING ENGINE v1 =====
+
+
+
+
+
+
+
+
+
+# =============================================================================
+# SPARE PARTS INVENTORY PLANNING ENGINE
+# Designed as an additive module for Records List Intelligence Dashboard
+# =============================================================================
+
+PART_ALIASES = {
+    "part number", "part no", "part", "pn", "p n", "material", "material number",
+    "codigo", "codigo producto", "product code", "item", "item code",
+    "referencia", "reference", "articulo", "sku", "partnumber", "latest part number",
+}
+DESC_ALIASES = {
+    "description", "descripcion", "product description", "spare part description",
+    "material description", "nombre", "item description", "part description",
+}
+QTY_ALIASES = {
+    "qty", "quantity", "cantidad", "stock", "stock qty", "stock quantity",
+    "on hand", "inventory", "available", "existencia", "existencias", "saldo",
+    "total", "current stock", "available qty", "available quantity",
+}
+
+
+@dataclass
+class StockDetection:
+    sheet_name: str
+    header_row: int
+    part_col: str | None
+    desc_col: str | None
+    qty_col: str | None
+    score: int
+    rows: int
+
+
+def _strip_accents(value) -> str:
+    text = "" if value is None else str(value)
+    return "".join(
+        char for char in unicodedata.normalize("NFKD", text)
+        if not unicodedata.combining(char)
+    )
+
+
+def normalize_header(value) -> str:
+    text = _strip_accents(value).lower().strip()
+    text = text.replace("\n", " ").replace("\r", " ").replace("\t", " ")
+    text = re.sub(r"[_\-\/\\]+", " ", text)
+    text = re.sub(r"[^a-z0-9 ]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def normalize_part_number_strict(value) -> str:
+    """Canonical representation for reliable exact comparisons.
+
+    Important: letters such as XL/XS/S are preserved. Distributor prefixes are
+    NOT removed here; they are resolved later by contained/token matching.
+    """
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except Exception:
+        pass
+
+    text = str(value).strip()
+    if not text:
+        return ""
+
+    if text.startswith('="') and text.endswith('"'):
+        text = text[2:-1]
+
+    # Remove Excel's numeric .0 only when it is a trailing artifact.
+    text = re.sub(r"(?<=\d)\.0+$", "", text)
+    text = _strip_accents(text).upper()
+    return re.sub(r"[^A-Z0-9]+", "", text)
+
+
+def tokenize_part_cell(value) -> list[str]:
+    if value is None:
+        return []
+    try:
+        if pd.isna(value):
+            return []
+    except Exception:
+        pass
+    text = _strip_accents(str(value)).upper()
+    tokens = re.findall(r"[A-Z0-9]+", text)
+    cleaned = []
+    for token in tokens:
+        token = re.sub(r"(?<=\d)\.0+$", "", token)
+        if token:
+            cleaned.append(token)
+    return cleaned
+
+
+def _alias_score(header_norm: str, aliases: set[str]) -> int:
+    if not header_norm:
+        return 0
+    if header_norm in aliases:
+        return 5
+    for alias in aliases:
+        if alias in header_norm or header_norm in alias:
+            return 3
+    return 0
+
+
+def detect_stock_columns_from_headers(columns) -> tuple[str | None, str | None, str | None, int]:
+    best_part = (None, 0)
+    best_desc = (None, 0)
+    best_qty = (None, 0)
+
+    for col in columns:
+        norm = normalize_header(col)
+        p = _alias_score(norm, PART_ALIASES)
+        d = _alias_score(norm, DESC_ALIASES)
+        q = _alias_score(norm, QTY_ALIASES)
+        if p > best_part[1]:
+            best_part = (col, p)
+        if d > best_desc[1]:
+            best_desc = (col, d)
+        if q > best_qty[1]:
+            best_qty = (col, q)
+
+    score = best_part[1] * 3 + best_desc[1] * 2 + best_qty[1] * 3
+    return best_part[0], best_qty[0], best_desc[0], score
+
+
+def _dedupe_headers(values) -> list[str]:
+    seen = {}
+    output = []
+    for idx, value in enumerate(values):
+        name = str(value).strip() if value is not None and not pd.isna(value) else ""
+        name = name or f"Unnamed_{idx}"
+        seen[name] = seen.get(name, 0) + 1
+        output.append(name if seen[name] == 1 else f"{name}_{seen[name]}")
+    return output
+
+
+def detect_header_row(raw_df: pd.DataFrame, scan_rows: int = 30) -> tuple[int, int]:
+    best_row, best_score = 0, -1
+    max_rows = min(scan_rows, len(raw_df))
+    for row_idx in range(max_rows):
+        headers = _dedupe_headers(raw_df.iloc[row_idx].tolist())
+        part_col, qty_col, desc_col, score = detect_stock_columns_from_headers(headers)
+
+        # Strongly prefer rows where both Part Number and Quantity are found.
+        if part_col is not None:
+            score += 4
+        if qty_col is not None:
+            score += 4
+        if desc_col is not None:
+            score += 1
+
+        # Penalize extremely sparse rows.
+        non_empty = sum(
+            0 if (v is None or (isinstance(v, float) and math.isnan(v)) or str(v).strip() == "")
+            else 1
+            for v in raw_df.iloc[row_idx].tolist()
+        )
+        if non_empty < 2:
+            score -= 5
+
+        if score > best_score:
+            best_row, best_score = row_idx, score
+    return best_row, best_score
+
+
+def _read_csv_raw(file_bytes: bytes) -> pd.DataFrame:
+    attempts = [
+        ("utf-8-sig", ","),
+        ("utf-8-sig", ";"),
+        ("latin-1", ";"),
+        ("latin-1", ","),
+        ("utf-8-sig", "\t"),
+    ]
+    best_df = None
+    best_score = -1
+    for encoding, sep in attempts:
+        try:
+            text = file_bytes.decode(encoding, errors="replace")
+            df = pd.read_csv(
+                StringIO(text),
+                sep=sep,
+                engine="python",
+                header=None,
+                dtype=object,
+                on_bad_lines="skip",
+            )
+            df = df.dropna(axis=0, how="all").dropna(axis=1, how="all")
+            score = df.shape[1] * 100000 + df.shape[0]
+            if not df.empty and score > best_score:
+                best_df, best_score = df, score
+        except Exception:
+            continue
+    if best_df is None:
+        raise ValueError("No fue posible interpretar el CSV.")
+    return best_df
+
+
+def read_stock_workbook_candidates(file_bytes: bytes, filename: str) -> dict[str, pd.DataFrame]:
+    name = str(filename).lower()
+    if name.endswith(".csv"):
+        return {"CSV": _read_csv_raw(file_bytes)}
+
+    if not name.endswith((".xlsx", ".xls", ".xlsm")):
+        raise ValueError("Formato no soportado. Usa XLSX, XLS, XLSM o CSV.")
+
+    try:
+        book = pd.ExcelFile(BytesIO(file_bytes))
+    except ImportError as exc:
+        if name.endswith(".xls"):
+            raise RuntimeError(
+                "Para leer .XLS instala xlrd>=2.0.1 en requirements.txt."
+            ) from exc
+        raise
+
+    frames = {}
+    for sheet in book.sheet_names:
+        try:
+            raw = pd.read_excel(book, sheet_name=sheet, header=None, dtype=object)
+            raw = raw.dropna(axis=0, how="all").dropna(axis=1, how="all")
+            if not raw.empty:
+                frames[str(sheet)] = raw
+        except Exception:
+            continue
+    return frames
+
+
+def smart_load_stock_file(
+    file_bytes: bytes,
+    filename: str,
+    preferred_sheet: str | None = None,
+    scan_rows: int = 30,
+) -> tuple[pd.DataFrame, StockDetection, list[StockDetection]]:
+    """Finds the most likely stock table across sheets and internal header rows."""
+    candidates = read_stock_workbook_candidates(file_bytes, filename)
+    if not candidates:
+        raise ValueError("El archivo no contiene hojas o datos legibles.")
+
+    detections: list[StockDetection] = []
+    parsed_frames: dict[str, pd.DataFrame] = {}
+
+    for sheet_name, raw in candidates.items():
+        if preferred_sheet and sheet_name != preferred_sheet:
+            continue
+
+        header_row, header_score = detect_header_row(raw, scan_rows=scan_rows)
+        headers = _dedupe_headers(raw.iloc[header_row].tolist())
+        body = raw.iloc[header_row + 1:].copy()
+        body.columns = headers
+        body = body.dropna(axis=0, how="all").dropna(axis=1, how="all")
+
+        part_col, qty_col, desc_col, column_score = detect_stock_columns_from_headers(body.columns)
+        final_score = header_score + column_score
+
+        detection = StockDetection(
+            sheet_name=sheet_name,
+            header_row=header_row,
+            part_col=str(part_col) if part_col is not None else None,
+            desc_col=str(desc_col) if desc_col is not None else None,
+            qty_col=str(qty_col) if qty_col is not None else None,
+            score=int(final_score),
+            rows=int(len(body)),
+        )
+        detections.append(detection)
+        parsed_frames[sheet_name] = body
+
+    if not detections:
+        raise ValueError("No se pudo analizar ninguna hoja.")
+
+    usable = [
+        d for d in detections
+        if d.part_col is not None and d.qty_col is not None
+    ]
+    ranked = sorted(usable or detections, key=lambda d: (d.score, d.rows), reverse=True)
+    best = ranked[0]
+
+    if best.part_col is None or best.qty_col is None:
+        raise ValueError(
+            "No pude detectar automáticamente Part Number y Quantity. "
+            "Usa el fallback manual de columnas."
+        )
+
+    return parsed_frames[best.sheet_name].copy(), best, sorted(
+        detections, key=lambda d: (d.score, d.rows), reverse=True
+    )
+
+
+def build_official_part_catalog(master_df: pd.DataFrame) -> pd.DataFrame:
+    required = {"Required Part Number"}
+    missing = required.difference(master_df.columns)
+    if missing:
+        raise ValueError(f"Faltan columnas requeridas en el maestro: {sorted(missing)}")
+
+    work = master_df.copy()
+    work["Official Part Number"] = work["Required Part Number"].fillna("").astype(str).str.strip()
+    work["Official Key"] = work["Official Part Number"].map(normalize_part_number_strict)
+    work = work[work["Official Key"] != ""].copy()
+
+    if "Required Description" not in work.columns:
+        work["Required Description"] = ""
+    work["Official Description"] = work["Required Description"].fillna("").astype(str).str.strip()
+
+    # One row per official key. The requirement table itself may contain duplicates
+    # by family, so matching only needs a unique catalog.
+    return (
+        work.sort_values(["Official Key", "Official Part Number"])
+        .drop_duplicates("Official Key", keep="first")
+        [["Official Key", "Official Part Number", "Official Description"]]
+        .reset_index(drop=True)
+    )
+
+
+def _description_similarity(a, b) -> float:
+    a_norm = normalize_header(a)
+    b_norm = normalize_header(b)
+    if not a_norm or not b_norm:
+        return 0.0
+    return SequenceMatcher(None, a_norm, b_norm).ratio()
+
+
+def _safe_fuzzy_candidate(uploaded_key: str, official_keys: list[str]) -> tuple[str | None, float]:
+    if not uploaded_key:
+        return None, 0.0
+
+    # Restrict candidates by similar length and alpha/numeric structure.
+    alpha = re.sub(r"\d", "", uploaded_key)
+    candidates = []
+    for key in official_keys:
+        if abs(len(key) - len(uploaded_key)) > 1:
+            continue
+        key_alpha = re.sub(r"\d", "", key)
+        if alpha and key_alpha and alpha != key_alpha:
+            continue
+        ratio = SequenceMatcher(None, uploaded_key, key).ratio()
+        if ratio >= 0.94:
+            candidates.append((key, ratio))
+
+    if not candidates:
+        return None, 0.0
+
+    candidates.sort(key=lambda x: x[1], reverse=True)
+    # Avoid ambiguous corrections.
+    if len(candidates) > 1 and abs(candidates[0][1] - candidates[1][1]) < 0.015:
+        return None, 0.0
+    return candidates[0]
+
+
+def match_uploaded_stock_to_catalog(
+    stock_df: pd.DataFrame,
+    part_col: str,
+    qty_col: str,
+    desc_col: str | None,
+    official_catalog: pd.DataFrame,
+    source_sheet: str = "",
+    source_header_row: int = 0,
+    enable_fuzzy: bool = True,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Matches uploaded inventory to official part numbers with auditable rules."""
+    work = stock_df.copy().reset_index(drop=False).rename(columns={"index": "_source_index"})
+    work["Source Row"] = work["_source_index"] + source_header_row + 2
+    work["Source Sheet"] = source_sheet
+
+    work["Uploaded Part Number Raw"] = work[part_col]
+    work["Uploaded Description"] = (
+        work[desc_col] if desc_col is not None and desc_col in work.columns else ""
+    )
+    work["Uploaded Description"] = work["Uploaded Description"].fillna("").astype(str).str.strip()
+    work["Uploaded Qty"] = pd.to_numeric(work[qty_col], errors="coerce").fillna(0.0)
+    work.loc[work["Uploaded Qty"] < 0, "Uploaded Qty"] = 0.0
+    work["Normalized Uploaded Key"] = work["Uploaded Part Number Raw"].map(normalize_part_number_strict)
+
+    # Remove obvious subtotal/garbage rows, but keep them in unmatched audit if they have text.
+    raw_norm = work["Uploaded Part Number Raw"].fillna("").astype(str).map(normalize_header)
+    garbage_mask = raw_norm.isin({"", "total", "subtotal", "grand total", "totales", "saldo total"})
+    work = work[~garbage_mask].copy()
+
+    catalog = official_catalog.copy()
+    exact_map = dict(zip(catalog["Official Key"], catalog["Official Part Number"]))
+    desc_map = dict(zip(catalog["Official Key"], catalog["Official Description"]))
+    official_keys = list(exact_map.keys())
+    official_set = set(official_keys)
+
+    results = []
+    for _, row in work.iterrows():
+        raw = row["Uploaded Part Number Raw"]
+        raw_text = "" if pd.isna(raw) else str(raw)
+        key = row["Normalized Uploaded Key"]
+        desc = row["Uploaded Description"]
+
+        matched_key = None
+        method = "Unmatched"
+        confidence = 0.0
+        internal_code = ""
+        possible_match = ""
+
+        # 1. Normalized exact.
+        if key in official_set:
+            matched_key = key
+            method = "Normalized exact"
+            confidence = 1.0
+
+        # 2. Official code contained inside a larger cell.
+        if matched_key is None and key:
+            contained = [okey for okey in official_keys if len(okey) >= 4 and okey in key]
+            if len(contained) == 1:
+                matched_key = contained[0]
+                method = "Official code contained"
+                confidence = 0.99
+            elif len(contained) > 1:
+                # Prefer the longest exact contained code, but only if unique by length.
+                contained = sorted(contained, key=len, reverse=True)
+                if len(contained) == 1 or len(contained[0]) > len(contained[1]):
+                    matched_key = contained[0]
+                    method = "Official code contained"
+                    confidence = 0.985
+
+        # 3. Token match.
+        tokens = tokenize_part_cell(raw_text)
+        if matched_key is None and tokens:
+            token_matches = [token for token in tokens if token in official_set]
+            if len(token_matches) == 1:
+                matched_key = token_matches[0]
+                method = "Token match"
+                confidence = 0.98
+
+        # 4. Very restricted fuzzy.
+        if matched_key is None and enable_fuzzy and key:
+            fuzzy_key, fuzzy_score = _safe_fuzzy_candidate(key, official_keys)
+            if fuzzy_key is not None:
+                # Description can only strengthen confidence, never create the match.
+                desc_score = _description_similarity(desc, desc_map.get(fuzzy_key, ""))
+                if fuzzy_score >= 0.94:
+                    matched_key = fuzzy_key
+                    method = "High-confidence fuzzy"
+                    confidence = min(0.97, fuzzy_score + 0.02 * desc_score)
+                else:
+                    possible_match = exact_map.get(fuzzy_key, "")
+
+        official_part = exact_map.get(matched_key, "") if matched_key else ""
+        official_desc = desc_map.get(matched_key, "") if matched_key else ""
+
+        # Determine likely distributor internal code when official PN is embedded.
+        if matched_key and raw_text.strip():
+            candidate_tokens = [t for t in tokens if normalize_part_number_strict(t) != matched_key]
+            internal_code = candidate_tokens[0] if candidate_tokens else ""
+
+        results.append({
+            "Uploaded Part Number Raw": raw_text,
+            "Normalized Uploaded Key": key,
+            "Distributor Internal Code": internal_code,
+            "Uploaded Description": desc,
+            "Uploaded Qty": float(row["Uploaded Qty"]),
+            "Matched Official Part Number": official_part,
+            "Matched Official Key": matched_key or "",
+            "Official Description": official_desc,
+            "Match Method": method,
+            "Match Confidence": round(float(confidence), 4),
+            "Possible Match": possible_match,
+            "Source Sheet": row["Source Sheet"],
+            "Source Row": int(row["Source Row"]),
+        })
+
+    audit = pd.DataFrame(results)
+    if audit.empty:
+        audit = pd.DataFrame(columns=[
+            "Uploaded Part Number Raw", "Normalized Uploaded Key", "Distributor Internal Code",
+            "Uploaded Description", "Uploaded Qty", "Matched Official Part Number",
+            "Matched Official Key", "Official Description", "Match Method", "Match Confidence",
+            "Possible Match", "Source Sheet", "Source Row",
+        ])
+
+    matched = audit[audit["Matched Official Key"].astype(str).str.len() > 0].copy()
+    unmatched = audit[audit["Matched Official Key"].astype(str).str.len() == 0].copy()
+
+    if matched.empty:
+        stock_slim = pd.DataFrame(columns=[
+            "Part Key", "Uploaded Part Number", "Uploaded Description", "Uploaded Qty",
+            "Match Method", "Match Confidence",
+        ])
+    else:
+        # Aggregate duplicates across warehouses/lots/rows.
+        matched["Part Key"] = matched["Matched Official Key"]
+        stock_slim = (
+            matched.groupby("Part Key", as_index=False)
+            .agg({
+                "Matched Official Part Number": "first",
+                "Uploaded Description": "first",
+                "Uploaded Qty": "sum",
+                "Match Confidence": "min",
+                "Match Method": lambda s: ", ".join(sorted(set(s.astype(str)))),
+            })
+            .rename(columns={"Matched Official Part Number": "Uploaded Part Number"})
+        )
+        stock_slim["Uploaded Qty"] = pd.to_numeric(
+            stock_slim["Uploaded Qty"], errors="coerce"
+        ).fillna(0.0)
+
+    return stock_slim, unmatched.reset_index(drop=True), audit.reset_index(drop=True)
+
+
+def apply_inventory_planning_targets(
+    master_df: pd.DataFrame,
+    installed_base_by_family: dict[str, int],
+    po_frequency_weeks: float,
+    safety_factor: float = 1.20,
+) -> pd.DataFrame:
+    """Extends current dynamic requirement calculation without reducing carstock."""
+    if master_df is None or master_df.empty:
+        return master_df.copy() if isinstance(master_df, pd.DataFrame) else pd.DataFrame()
+
+    work = master_df.copy()
+    weeks = max(float(po_frequency_weeks or 0), 0.0)
+    safety = max(float(safety_factor or 1.0), 1.0)
+
+    if "Required Family" not in work.columns:
+        work["Required Family"] = ""
+
+    work["Installed Base Family"] = work["Required Family"].map(
+        lambda fam: int(installed_base_by_family.get(str(fam), 0))
+    )
+
+    carstock_base = pd.to_numeric(
+        work.get("Carstock Base Qty", work.get("Required Qty", 0)),
+        errors="coerce",
+    ).fillna(0.0)
+
+    minimum_stock = pd.to_numeric(
+        work.get("Minimum Stock Level Required", work.get("Required Qty", 0)),
+        errors="coerce",
+    ).fillna(0.0)
+
+    parts_per_system = pd.to_numeric(
+        work.get("Parts per system (12 months)", 0),
+        errors="coerce",
+    ).fillna(0.0)
+
+    work["Carstock Base Qty"] = carstock_base
+    work["Minimum Stock Level Required"] = minimum_stock
+    work["Minimum Carstock"] = pd.concat(
+        [carstock_base, minimum_stock], axis=1
+    ).max(axis=1)
+
+    work["Parts per system (12 months)"] = parts_per_system
+    work["Annual Installed Base Demand"] = (
+        parts_per_system
+        * pd.to_numeric(work["Installed Base Family"], errors="coerce").fillna(0.0)
+    )
+    work["Purchase Window Demand"] = (
+        work["Annual Installed Base Demand"] * weeks / 52.0
+    )
+    work["Safety Factor"] = safety
+    work["Adjusted Demand"] = work["Purchase Window Demand"] * safety
+
+    raw_target = pd.concat(
+        [work["Minimum Carstock"], work["Adjusted Demand"]], axis=1
+    ).max(axis=1)
+
+    work["Recommended Stock Raw"] = raw_target
+    work["Recommended Stock"] = np.ceil(raw_target.clip(lower=0)).astype(int)
+
+    # Backward compatibility with the existing dashboard.
+    work["Required Qty Raw"] = work["Recommended Stock Raw"]
+    work["Required Qty"] = work["Recommended Stock"]
+    work["Dynamic Demand Window"] = work["Purchase Window Demand"]
+
+    return work
+
+
+def compare_stock_planning(
+    master_df: pd.DataFrame,
+    stock_slim: pd.DataFrame,
+    price_reference: pd.DataFrame | None = None,
+    excess_threshold: float = 1.25,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Creates purchase/excess recommendations while preserving old columns."""
+    threshold = max(float(excess_threshold or 1.25), 1.0)
+
+    required = master_df.copy()
+    required["Part Key"] = required.get(
+        "Part Key",
+        required["Required Part Number"].map(normalize_part_number_strict),
+    )
+    required["Recommended Stock"] = pd.to_numeric(
+        required.get("Recommended Stock", required.get("Required Qty", 0)),
+        errors="coerce",
+    ).fillna(0.0)
+    required["Required Qty"] = required["Recommended Stock"]
+
+    merged = required.merge(stock_slim, on="Part Key", how="left")
+    merged["Uploaded Qty"] = pd.to_numeric(
+        merged.get("Uploaded Qty", 0), errors="coerce"
+    ).fillna(0.0)
+    merged["Current Stock"] = merged["Uploaded Qty"]
+
+    merged["Purchase Suggestion"] = (
+        merged["Recommended Stock"] - merged["Current Stock"]
+    ).clip(lower=0.0)
+    merged["Excess Qty"] = (
+        merged["Current Stock"] - merged["Recommended Stock"]
+    ).clip(lower=0.0)
+    merged["Stock Difference"] = (
+        merged["Current Stock"] - merged["Recommended Stock"]
+    )
+
+    denominator = merged["Recommended Stock"].replace(0, np.nan)
+    merged["Coverage %"] = (
+        merged["Current Stock"] / denominator * 100.0
+    ).replace([np.inf, -np.inf], np.nan).fillna(0.0).round(1)
+
+    missing_mask = (merged["Current Stock"] <= 0) & (merged["Recommended Stock"] > 0)
+    low_mask = (merged["Current Stock"] > 0) & (
+        merged["Current Stock"] < merged["Recommended Stock"]
+    )
+    exact_mask = np.isclose(
+        merged["Current Stock"], merged["Recommended Stock"], atol=1e-9
+    )
+    adequate_mask = (
+        merged["Current Stock"] > merged["Recommended Stock"]
+    ) & (
+        merged["Current Stock"] <= merged["Recommended Stock"] * threshold
+    )
+    excess_mask = (
+        merged["Current Stock"] > merged["Recommended Stock"] * threshold
+    )
+
+    merged["Planning Status"] = np.select(
+        [missing_mask, low_mask, exact_mask, adequate_mask, excess_mask],
+        ["MISSING", "LOW", "OK", "ADEQUATE", "EXCESS"],
+        default="OK",
+    )
+
+    # Existing PDF / Excel logic expects "Missing", "LOW", "OK".
+    # New statuses are left intact because current downstream code can display them.
+    merged["Status"] = merged["Planning Status"].replace({"MISSING": "Missing"})
+    merged["Qty Gap"] = merged["Purchase Suggestion"]
+
+    if price_reference is not None and not price_reference.empty:
+        price_ref = price_reference.copy()
+        if "Part Key" not in price_ref.columns and "Required Part Number" in price_ref.columns:
+            price_ref["Part Key"] = price_ref["Required Part Number"].map(
+                normalize_part_number_strict
+            )
+        price_cols = [
+            c for c in ["Part Key", "Option 2 Unit Price", "Currency", "Price Description"]
+            if c in price_ref.columns
+        ]
+        if "Part Key" in price_cols:
+            merged = merged.merge(
+                price_ref[price_cols].drop_duplicates("Part Key"),
+                on="Part Key",
+                how="left",
+                suffixes=("", "_ref"),
+            )
+
+    if "Option 2 Unit Price" not in merged.columns:
+        merged["Option 2 Unit Price"] = 0.0
+    merged["Option 2 Unit Price"] = pd.to_numeric(
+        merged["Option 2 Unit Price"], errors="coerce"
+    ).fillna(0.0)
+
+    if "Currency" not in merged.columns:
+        merged["Currency"] = "EUR"
+    merged["Currency"] = merged["Currency"].fillna("EUR").astype(str)
+
+    merged["Option 2 Estimated Cost"] = (
+        merged["Purchase Suggestion"] * merged["Option 2 Unit Price"]
+    ).round(2)
+
+    # Extras: matched official stock that is not required by the current scope.
+    required_keys = set(required["Part Key"].dropna().astype(str))
+    extra_df = stock_slim[
+        ~stock_slim["Part Key"].astype(str).isin(required_keys)
+    ].copy()
+    if not extra_df.empty:
+        extra_df["Status"] = "EXTRA / NOT REQUIRED BY CURRENT CARSTOCK"
+
+    preferred = [
+        "Required Family", "Required Part Number", "Required Description",
+        "Minimum Carstock", "Installed Base Family", "Parts per system (12 months)",
+        "Annual Installed Base Demand", "Purchase Window Demand", "Safety Factor",
+        "Adjusted Demand", "Recommended Stock", "Current Stock",
+        "Stock Difference", "Purchase Suggestion", "Excess Qty", "Coverage %",
+        "Planning Status", "Status", "Uploaded Part Number", "Uploaded Description",
+        "Match Method", "Match Confidence", "Option 2 Unit Price",
+        "Option 2 Estimated Cost", "Currency", "Part Key",
+    ]
+    cols = [c for c in preferred if c in merged.columns]
+    cols += [c for c in merged.columns if c not in cols]
+    merged = merged[cols]
+
+    status_rank = {
+        "MISSING": 0, "LOW": 1, "OK": 2, "ADEQUATE": 3, "EXCESS": 4
+    }
+    merged["_status_rank"] = merged["Planning Status"].map(status_rank).fillna(9)
+    merged = merged.sort_values(
+        ["_status_rank", "Purchase Suggestion", "Option 2 Estimated Cost"],
+        ascending=[True, False, False],
+    ).drop(columns="_status_rank").reset_index(drop=True)
+
+    return merged, extra_df.reset_index(drop=True)
+
+
+def build_planning_stock_context(
+    comparison: pd.DataFrame,
+    extra_df: pd.DataFrame,
+    unmatched_df: pd.DataFrame,
+    matching_audit_df: pd.DataFrame,
+    detected_distributor: str,
+    families: list[str],
+    installed_base_by_family: dict[str, int],
+    po_frequency_weeks: float,
+    safety_factor: float,
+    excess_threshold: float,
+) -> dict:
+    status = comparison.get("Planning Status", pd.Series(dtype=str)).astype(str)
+    purchase_df = comparison[
+        pd.to_numeric(comparison.get("Purchase Suggestion", 0), errors="coerce").fillna(0) > 0
+    ].copy()
+    excess_df = comparison[
+        pd.to_numeric(comparison.get("Excess Qty", 0), errors="coerce").fillna(0) > 0
+    ].copy()
+
+    option2_cost = float(
+        pd.to_numeric(
+            comparison.get("Option 2 Estimated Cost", 0), errors="coerce"
+        ).fillna(0).sum()
+    )
+    currency = next(
+        (
+            c for c in comparison.get("Currency", pd.Series(["EUR"]))
+            .dropna().astype(str).tolist()
+            if c.strip()
+        ),
+        "EUR",
+    )
+
+    recommended_units = float(
+        pd.to_numeric(comparison.get("Recommended Stock", 0), errors="coerce")
+        .fillna(0).sum()
+    )
+    current_units = float(
+        pd.to_numeric(comparison.get("Current Stock", 0), errors="coerce")
+        .fillna(0).sum()
+    )
+    purchase_units = float(
+        pd.to_numeric(comparison.get("Purchase Suggestion", 0), errors="coerce")
+        .fillna(0).sum()
+    )
+    excess_units = float(
+        pd.to_numeric(comparison.get("Excess Qty", 0), errors="coerce")
+        .fillna(0).sum()
+    )
+
+    return {
+        "available": True,
+        "detected_distributor": detected_distributor,
+        "families": list(families),
+        "required_skus": int(len(comparison)),
+        "ok_skus": int(status.eq("OK").sum()),
+        "low_skus": int(status.eq("LOW").sum()),
+        "missing_skus": int(status.eq("MISSING").sum()),
+        "adequate_skus": int(status.eq("ADEQUATE").sum()),
+        "excess_skus": int(status.eq("EXCESS").sum()),
+        "extra_skus": int(len(extra_df)),
+        "unmatched_skus": int(len(unmatched_df)),
+        "gap_total": purchase_units,
+        "purchase_units": purchase_units,
+        "excess_units": excess_units,
+        "recommended_stock_units": recommended_units,
+        "current_stock_units": current_units,
+        "option2_cost": option2_cost,
+        "currency": currency,
+        "po_frequency_weeks": int(po_frequency_weeks),
+        "safety_factor": float(safety_factor),
+        "excess_threshold": float(excess_threshold),
+        "installed_base_by_family": dict(installed_base_by_family),
+        "top_gap_df": purchase_df.sort_values(
+            ["Purchase Suggestion", "Option 2 Estimated Cost"],
+            ascending=[False, False],
+        ).head(15),
+        "full_comparison_df": comparison.copy(),
+        "purchase_df": purchase_df.copy(),
+        "extra_df": extra_df.copy(),
+        "excess_df": excess_df.copy(),
+        "unmatched_df": unmatched_df.copy(),
+        "matching_audit_df": matching_audit_df.copy(),
+    }
+
+
+def run_inventory_planning_engine(
+    master_df: pd.DataFrame,
+    stock_df: pd.DataFrame,
+    part_col: str,
+    qty_col: str,
+    desc_col: str | None,
+    installed_base_by_family: dict[str, int],
+    po_frequency_weeks: float,
+    safety_factor: float = 1.20,
+    excess_threshold: float = 1.25,
+    price_reference: pd.DataFrame | None = None,
+    source_sheet: str = "",
+    source_header_row: int = 0,
+    enable_fuzzy: bool = True,
+) -> dict:
+    planned_master = apply_inventory_planning_targets(
+        master_df,
+        installed_base_by_family=installed_base_by_family,
+        po_frequency_weeks=po_frequency_weeks,
+        safety_factor=safety_factor,
+    )
+    catalog = build_official_part_catalog(planned_master)
+    stock_slim, unmatched_df, audit_df = match_uploaded_stock_to_catalog(
+        stock_df,
+        part_col=part_col,
+        qty_col=qty_col,
+        desc_col=desc_col,
+        official_catalog=catalog,
+        source_sheet=source_sheet,
+        source_header_row=source_header_row,
+        enable_fuzzy=enable_fuzzy,
+    )
+    comparison, extra_df = compare_stock_planning(
+        planned_master,
+        stock_slim=stock_slim,
+        price_reference=price_reference,
+        excess_threshold=excess_threshold,
+    )
+    return {
+        "planned_master": planned_master,
+        "stock_slim": stock_slim,
+        "comparison": comparison,
+        "extra_df": extra_df,
+        "unmatched_df": unmatched_df,
+        "matching_audit_df": audit_df,
+    }
+
+
 if active_dashboard_tab == "Stock / Carstock gap":
     st.subheader("Gap analysis de stock vs carstock requerido")
     st.session_state.setdefault("pdf_stock_context", {"available": False})
@@ -8554,13 +9405,32 @@ if active_dashboard_tab == "Stock / Carstock gap":
                 st.session_state["pdf_stock_context"] = {"available": False}
                 st.info("Sube ahora el archivo trimestral del distribuidor. Ejemplo recomendado: `ANNAR_stock_Q1_2026.xlsx`.")
             else:
-                stock_df_raw = load_table_file(stock_upload.getvalue(), stock_upload.name)
                 candidate_distributors = []
-                if stock_df_raw is None or stock_df_raw.empty:
+                try:
+                    stock_df_raw, stock_detection, stock_detection_candidates = smart_load_stock_file(
+                        stock_upload.getvalue(), stock_upload.name, scan_rows=30
+                    )
+                except Exception as exc:
+                    stock_df_raw = pd.DataFrame()
+                    stock_detection = None
+                    stock_detection_candidates = []
                     st.session_state["pdf_stock_context"] = {"available": False}
-                    st.warning("El archivo subido no contiene datos legibles.")
+                    st.warning(f"No fue posible interpretar automáticamente el archivo de stock: {exc}")
+
+                if stock_df_raw is None or stock_df_raw.empty or stock_detection is None:
+                    st.session_state["pdf_stock_context"] = {"available": False}
+                    st.warning("El archivo subido no contiene una tabla de stock reconocible.")
                 else:
-                    part_col_guess, qty_col_guess, desc_col_guess = detect_stock_columns(stock_df_raw)
+                    part_col_guess = stock_detection.part_col
+                    qty_col_guess = stock_detection.qty_col
+                    desc_col_guess = stock_detection.desc_col
+                    st.caption(
+                        f"Detección automática → Hoja: {stock_detection.sheet_name} · "
+                        f"Encabezado: fila {stock_detection.header_row + 1} · "
+                        f"Part Number: {part_col_guess} · "
+                        f"Descripción: {desc_col_guess or 'No detectada'} · "
+                        f"Cantidad: {qty_col_guess}"
+                    )
                     master_distributors = sorted(set(raw_df["Distributor name"].dropna().tolist()) | set(master_bundle["master_distributors"]))
                     detected_distributor, candidate_distributors = infer_distributor_from_filename_strict(stock_upload.name, master_distributors)
 
@@ -8688,15 +9558,25 @@ if active_dashboard_tab == "Stock / Carstock gap":
                             desc_col = desc_col_guess
                             selected_families_stock = auto_families
 
-                        po_frequency_weeks = st.number_input(
-                            "PO Frequency (weeks)",
-                            min_value=1,
-                            max_value=52,
-                            value=12,
-                            step=1,
-                            key="po_frequency_weeks_input",
-                            help="Cantidad de semanas que el distribuidor normalmente espera entre pedidos de repuestos.",
-                        )
+                        planner_c1, planner_c2, planner_c3 = st.columns(3)
+                        with planner_c1:
+                            po_frequency_weeks = st.number_input(
+                                "PO Frequency (weeks)", min_value=1, max_value=52, value=12, step=1,
+                                key="po_frequency_weeks_input",
+                                help="Cantidad de semanas que el distribuidor normalmente espera entre pedidos de repuestos.",
+                            )
+                        with planner_c2:
+                            safety_factor = st.number_input(
+                                "Safety Factor", min_value=1.00, max_value=2.00, value=1.20,
+                                step=0.05, format="%.2f", key="spare_safety_factor",
+                                help="1.20 agrega 20% de seguridad sobre la demanda calculada.",
+                            )
+                        with planner_c3:
+                            excess_threshold = st.number_input(
+                                "Excess Threshold", min_value=1.00, max_value=3.00, value=1.25,
+                                step=0.05, format="%.2f", key="spare_excess_threshold",
+                                help="1.25 marca EXCESS cuando el stock supera 125% del objetivo.",
+                            )
 
 
                         if not selected_families_stock:
@@ -8721,21 +9601,51 @@ if active_dashboard_tab == "Stock / Carstock gap":
                                 st.warning("No encontré carstock requerido para este distribuidor con las familias inferidas. Revisa el maestro o el nombre del archivo.")
                             else:
                                 installed_base_by_family = compute_installed_base_by_family(raw_df, detected_distributor)
-                                if master_mode == "advanced":
-                                    master_df = apply_dynamic_required_qty(
-                                        master_df,
-                                        installed_base_by_family=installed_base_by_family,
-                                        po_frequency_weeks=po_frequency_weeks,
-                                    )
 
-                                comparison, extra_df, stock_slim = compare_stock(
-                                    master_df,
-                                    stock_df_raw,
-                                    part_col,
-                                    qty_col,
-                                    desc_col,
+                                engine_result = run_inventory_planning_engine(
+                                    master_df=master_df,
+                                    stock_df=stock_df_raw,
+                                    part_col=part_col,
+                                    qty_col=qty_col,
+                                    desc_col=desc_col,
+                                    installed_base_by_family=installed_base_by_family,
+                                    po_frequency_weeks=po_frequency_weeks,
+                                    safety_factor=safety_factor,
+                                    excess_threshold=excess_threshold,
                                     price_reference=master_bundle.get("price_reference", pd.DataFrame()),
+                                    source_sheet=stock_detection.sheet_name,
+                                    source_header_row=stock_detection.header_row,
+                                    enable_fuzzy=True,
+                                    exclude_zero_installed_base_families=True,
                                 )
+
+                                master_df = engine_result["planned_master"]
+                                comparison = engine_result["comparison"]
+                                extra_df = engine_result["extra_df"]
+                                stock_slim = engine_result["stock_slim"]
+                                unmatched_df = engine_result["unmatched_df"]
+                                matching_audit_df = engine_result["matching_audit_df"]
+                                fractional_qty_df = engine_result["fractional_qty_df"]
+                                excluded_families_df = engine_result["excluded_families_df"]
+
+                                if not excluded_families_df.empty:
+                                    excluded_names = sorted(set(
+                                        excluded_families_df["Required Family"].fillna("").astype(str).str.strip()
+                                    ) - {""})
+                                    if excluded_names:
+                                        st.info("Familias excluidas automáticamente por base instalada = 0: " + ", ".join(excluded_names))
+
+                                if not fractional_qty_df.empty:
+                                    st.warning(
+                                        f"⚠️ Data Quality: {len(fractional_qty_df)} filas tienen cantidades fraccionarias. "
+                                        "Se conservaron exactamente como fueron reportadas."
+                                    )
+                                    with st.expander("Revisar cantidades fraccionarias", expanded=False):
+                                        st.dataframe(fractional_qty_df, use_container_width=True, hide_index=True)
+
+                                if not unmatched_df.empty:
+                                    with st.expander(f"Revisar {len(unmatched_df)} items sin coincidencia confiable", expanded=False):
+                                        st.dataframe(unmatched_df, use_container_width=True, hide_index=True)
                                 missing_skus = int((comparison["Status"] == "Missing").sum())
                                 low_skus = int((comparison["Status"] == "LOW").sum())
                                 covered_skus = int((comparison["Status"] == "OK").sum())
@@ -8767,6 +9677,19 @@ if active_dashboard_tab == "Stock / Carstock gap":
                                     "option2_cost": option2_cost,
                                     "currency": option2_currency,
                                     "po_frequency_weeks": int(po_frequency_weeks),
+                                    "safety_factor": float(safety_factor),
+                                    "excess_threshold": float(excess_threshold),
+                                    "excess_skus": int((comparison["Planning Status"] == "EXCESS").sum()) if "Planning Status" in comparison.columns else 0,
+                                    "adequate_skus": int((comparison["Planning Status"] == "ADEQUATE").sum()) if "Planning Status" in comparison.columns else 0,
+                                    "excess_units": float(pd.to_numeric(comparison.get("Excess Qty", 0), errors="coerce").fillna(0).sum()),
+                                    "recommended_stock_units": float(pd.to_numeric(comparison.get("Recommended Stock", comparison.get("Required Qty", 0)), errors="coerce").fillna(0).sum()),
+                                    "current_stock_units": float(pd.to_numeric(comparison.get("Current Stock", comparison.get("Uploaded Qty", 0)), errors="coerce").fillna(0).sum()),
+                                    "unmatched_skus": int(len(unmatched_df)),
+                                    "fractional_qty_count": int(len(fractional_qty_df)),
+                                    "unmatched_df": unmatched_df.copy(),
+                                    "matching_audit_df": matching_audit_df.copy(),
+                                    "fractional_qty_df": fractional_qty_df.copy(),
+                                    "excluded_families_df": excluded_families_df.copy(),
                                     "installed_base_by_family": installed_base_by_family,
                                     "top_gap_df": comparison[comparison["Qty Gap"] > 0].sort_values(["Qty Gap", "Required Part Number"], ascending=[False, True]).head(15).copy(),
                                     "full_comparison_df": comparison.copy(),
